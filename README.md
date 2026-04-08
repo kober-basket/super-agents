@@ -10,10 +10,8 @@ Electron desktop agent client built on OpenCode, Vite, React, and TypeScript.
 npm install
 ```
 
-2. Make sure `opencode` is available on your machine:
-
-- install it globally so `opencode` is on `PATH`, or
-- set `OPENCODE_PATH` to the executable location
+2. On Windows, the app uses the vendored OpenCode runtime at `vendor/opencode/windows-x64/opencode.exe`.
+   On other platforms, keep using a local `opencode` install or set `OPENCODE_PATH`.
 
 3. Start the app:
 
@@ -29,5 +27,6 @@ npm run build
 
 ## Notes
 
-- The repository intentionally does not commit local build output, caches, logs, or bundled runtime binaries.
+- The repository intentionally does not commit local build output, caches, or logs.
+- The Windows OpenCode runtime is checked in via Git LFS so fresh clones can run without a machine-wide install.
 - If you already have older local app data under `kober`, the app migrates it to `super-agents` on startup.

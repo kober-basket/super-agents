@@ -149,8 +149,6 @@ const BUNDLED_OPENCODE_WINDOWS_RELATIVE_PATH = path.join(
   "windows-x64",
   "opencode.exe",
 );
-const SYSTEM_OPENCODE_COMMAND_CANDIDATES =
-  process.platform === "win32" ? ["opencode.exe", "opencode"] : ["opencode"];
 
 function sanitizeId(value: string) {
   return value
@@ -346,7 +344,27 @@ async function commandExists(command: string) {
   }
 }
 
+async function resolveBundledWindowsOpencodeCommand() {
+  for (const candidate of getBundledOpencodeCandidates()) {
+    if (await fileExists(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    [
+      "Bundled OpenCode executable not found.",
+      `Checked bundled paths: ${getBundledOpencodeCandidates().join(", ") || "(none)"}`,
+      `Expected vendored runtime under ${BUNDLED_OPENCODE_WINDOWS_RELATIVE_PATH}.`,
+    ].join("\n"),
+  );
+}
+
 async function resolveOpencodeCommand() {
+  if (process.platform === "win32") {
+    return await resolveBundledWindowsOpencodeCommand();
+  }
+
   const configuredPath = process.env.OPENCODE_PATH?.trim();
   if (configuredPath) {
     if (await fileExists(configuredPath)) {
@@ -361,10 +379,8 @@ async function resolveOpencodeCommand() {
     }
   }
 
-  for (const candidate of SYSTEM_OPENCODE_COMMAND_CANDIDATES) {
-    if (await commandExists(candidate)) {
-      return candidate;
-    }
+  if (await commandExists("opencode")) {
+    return "opencode";
   }
 
   throw new Error(
