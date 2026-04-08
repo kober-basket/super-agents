@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -6,15 +6,16 @@ import { readJsonFile, writeJsonFile } from "./store";
 import type {
   AppConfig,
   FileDropEntry,
+  KnowledgeAddDirectoryInput,
   KnowledgeAddFilesInput,
   KnowledgeAddNoteInput,
+  KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
   KnowledgeBaseSummary,
   KnowledgeCatalogPayload,
   KnowledgeItemSummary,
   KnowledgeSearchPayload,
   KnowledgeSearchResultItem,
-  ModelProviderConfig,
 } from "../src/types";
 
 type StoredKnowledgeIndex = {
@@ -32,7 +33,7 @@ type StoredKnowledgeBase = {
 
 type StoredKnowledgeItem = {
   id: string;
-  type: "file" | "note" | "url";
+  type: "file" | "note" | "directory" | "url" | "website";
   title: string;
   source: string;
   createdAt: number;
@@ -49,6 +50,30 @@ type StoredKnowledgeChunk = {
   vector: number[];
   createdAt: number;
 };
+
+const TEXT_EXTENSIONS = new Set([
+  ".txt",
+  ".md",
+  ".markdown",
+  ".html",
+  ".htm",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".xml",
+  ".csv",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".py",
+  ".java",
+  ".go",
+  ".rs",
+  ".css",
+  ".scss",
+  ".less",
+]);
 
 function cosineSimilarity(left: number[], right: number[]) {
   if (left.length === 0 || right.length === 0 || left.length !== right.length) return 0;
@@ -73,7 +98,7 @@ function normalizeBaseUrl(value: string) {
 function createEmbeddingsUrl(baseUrl: string) {
   const normalized = normalizeBaseUrl(baseUrl);
   if (!normalized) {
-    throw new Error("请先配置嵌入模型对应的 Provider 地址。");
+    throw new Error("Configure an embedding provider URL first.");
   }
   return normalized.endsWith("/embeddings") ? normalized : `${normalized}/embeddings`;
 }
@@ -111,6 +136,61 @@ function chunkText(text: string, chunkSize: number, chunkOverlap: number) {
     cursor = Math.max(end - chunkOverlap, cursor + 1);
   }
   return result;
+}
+
+function isHtmlPath(filePath: string) {
+  return /\.html?$/i.test(filePath);
+}
+
+function isSupportedTextFile(filePath: string) {
+  return TEXT_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+function resolveTitleFromUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname + (parsed.pathname === "/" ? "" : parsed.pathname);
+  } catch {
+    return url;
+  }
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function extractWebsiteLinks(html: string, sourceUrl: string, limit = 8) {
+  const matches = Array.from(html.matchAll(/href=["']([^"'#]+)["']/gi));
+  const links: string[] = [];
+  let origin = "";
+
+  try {
+    origin = new URL(sourceUrl).origin;
+  } catch {
+    return [];
+  }
+
+  for (const match of matches) {
+    const href = match[1]?.trim();
+    if (!href) continue;
+
+    try {
+      const resolved = new URL(href, sourceUrl);
+      if (resolved.origin !== origin) continue;
+      if (!/^https?:$/i.test(resolved.protocol)) continue;
+      links.push(resolved.toString());
+      if (links.length >= limit) break;
+    } catch {
+      continue;
+    }
+  }
+
+  return uniqueStrings(links);
+}
+
+function extractSitemapLinks(xml: string, limit = 20) {
+  const matches = Array.from(xml.matchAll(/<loc>(.*?)<\/loc>/gi));
+  return uniqueStrings(matches.map((match) => match[1]?.trim() ?? "")).slice(0, limit);
 }
 
 function mapItemSummary(item: StoredKnowledgeItem, chunkCount: number): KnowledgeItemSummary {
@@ -181,7 +261,7 @@ export class KnowledgeService {
   private requireBase(index: StoredKnowledgeIndex, baseId: string) {
     const base = index.bases.find((item) => item.id === baseId);
     if (!base) {
-      throw new Error("知识库不存在。");
+      throw new Error("Knowledge base not found.");
     }
     return base;
   }
@@ -190,11 +270,11 @@ export class KnowledgeService {
     const providerId = config.knowledgeBase.embeddingProviderId.trim();
     const provider = config.modelProviders.find((item) => item.id === providerId && item.enabled !== false);
     if (!provider) {
-      throw new Error("请先在知识库页面选择一个可用的嵌入 Provider。");
+      throw new Error("Select an enabled embedding provider first.");
     }
     const model = config.knowledgeBase.embeddingModel.trim();
     if (!model) {
-      throw new Error("请先填写嵌入模型名称。");
+      throw new Error("Enter an embedding model first.");
     }
     return { provider, model };
   }
@@ -209,15 +289,20 @@ export class KnowledgeService {
     const vectors: number[][] = [];
 
     for (const batch of batches) {
+      const apiKey = provider.apiKey.trim();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      };
+      if (apiKey) {
+        headers.Authorization = `Bearer ${apiKey}`;
+        headers["api-key"] = apiKey;
+        headers["x-api-key"] = apiKey;
+      }
+
       const response = await fetch(createEmbeddingsUrl(provider.baseUrl), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          Authorization: provider.apiKey.trim() ? `Bearer ${provider.apiKey.trim()}` : "",
-          "api-key": provider.apiKey.trim(),
-          "x-api-key": provider.apiKey.trim(),
-        },
+        headers,
         body: JSON.stringify({
           model,
           input: batch,
@@ -226,7 +311,7 @@ export class KnowledgeService {
 
       const rawText = await response.text();
       if (!response.ok) {
-        throw new Error(rawText || `嵌入请求失败: ${response.status}`);
+        throw new Error(rawText || `Embedding request failed: ${response.status}`);
       }
 
       const payload = rawText ? (JSON.parse(rawText) as { data?: Array<{ embedding?: number[] }> }) : {};
@@ -235,7 +320,7 @@ export class KnowledgeService {
         : [];
 
       if (batchVectors.length !== batch.length) {
-        throw new Error("嵌入接口返回结果数量不匹配。");
+        throw new Error("Embedding provider returned an unexpected result.");
       }
 
       vectors.push(...batchVectors);
@@ -246,20 +331,128 @@ export class KnowledgeService {
 
   private async readKnowledgeFile(file: FileDropEntry) {
     if (!file.path) {
-      throw new Error(`无法读取文件 ${file.name}`);
+      throw new Error(`Missing file path for ${file.name}`);
     }
 
     const text = file.content ?? (await readFile(file.path, "utf8"));
-    const normalized = /\.html?$/i.test(file.path) ? stripHtmlTags(text) : compactWhitespace(text);
+    const normalized = isHtmlPath(file.path) ? stripHtmlTags(text) : compactWhitespace(text);
     if (!normalized) {
-      throw new Error(`文件 ${file.name} 没有可检索的文本内容。`);
+      throw new Error(`File ${file.name} does not contain readable text.`);
     }
 
     return {
       title: file.name,
       source: file.path,
       text: normalized,
+      type: "file" as const,
     };
+  }
+
+  private async readDirectoryFiles(directoryPath: string) {
+    const results: Array<{ title: string; source: string; text: string; type: "directory" }> = [];
+    const queue = [directoryPath];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const entries = await readdir(current, { withFileTypes: true }).catch(() => []);
+
+      for (const entry of entries) {
+        const fullPath = path.join(current, entry.name);
+        if (entry.isDirectory()) {
+          queue.push(fullPath);
+          continue;
+        }
+        if (!entry.isFile() || !isSupportedTextFile(fullPath)) {
+          continue;
+        }
+
+        try {
+          const raw = await readFile(fullPath, "utf8");
+          const text = isHtmlPath(fullPath) ? stripHtmlTags(raw) : compactWhitespace(raw);
+          if (!text) continue;
+          results.push({
+            title: path.relative(directoryPath, fullPath) || entry.name,
+            source: fullPath,
+            text,
+            type: "directory",
+          });
+        } catch {
+          continue;
+        }
+      }
+    }
+
+    return results;
+  }
+
+  private async fetchUrlDocument(url: string, type: "url" | "website") {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "text/html,application/xhtml+xml,application/xml,text/plain;q=0.9,*/*;q=0.8",
+      },
+    });
+    const raw = await response.text();
+    if (!response.ok) {
+      throw new Error(raw || `Request failed: ${response.status}`);
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    const isHtml = contentType.includes("html");
+    const text = isHtml ? stripHtmlTags(raw) : compactWhitespace(raw);
+    if (!text) {
+      throw new Error(`No readable content found at ${url}`);
+    }
+
+    return {
+      title: resolveTitleFromUrl(url),
+      source: url,
+      text,
+      raw,
+      type,
+      contentType,
+    };
+  }
+
+  private async appendDocuments(
+    config: AppConfig,
+    base: StoredKnowledgeBase,
+    chunks: StoredKnowledgeChunk[],
+    documents: Array<{ title: string; source: string; text: string; type: StoredKnowledgeItem["type"] }>,
+  ) {
+    const now = Date.now();
+
+    for (const document of documents) {
+      const chunkTexts = chunkText(document.text, config.knowledgeBase.chunkSize, config.knowledgeBase.chunkOverlap);
+      if (chunkTexts.length === 0) continue;
+
+      const vectors = await this.embedTexts(config, chunkTexts);
+      const itemId = randomUUID();
+
+      base.items.unshift({
+        id: itemId,
+        type: document.type,
+        title: document.title,
+        source: document.source,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      chunks.push(
+        ...chunkTexts.map((text, index) => ({
+          id: randomUUID(),
+          baseId: base.id,
+          itemId,
+          text,
+          source: document.source,
+          title: document.title,
+          vector: vectors[index],
+          createdAt: now,
+        })),
+      );
+    }
+
+    base.updatedAt = now;
   }
 
   async listBases(): Promise<KnowledgeCatalogPayload> {
@@ -277,7 +470,7 @@ export class KnowledgeService {
   async createBase(input: KnowledgeBaseCreateInput) {
     const name = input.name.trim();
     if (!name) {
-      throw new Error("知识库名称不能为空。");
+      throw new Error("Enter a knowledge base name first.");
     }
 
     const index = await this.loadIndex();
@@ -306,39 +499,21 @@ export class KnowledgeService {
     const title = input.title.trim();
     const content = compactWhitespace(input.content);
     if (!title || !content) {
-      throw new Error("笔记标题和内容都不能为空。");
+      throw new Error("Enter both a note title and note content.");
     }
 
     const index = await this.loadIndex();
     const base = this.requireBase(index, input.baseId);
     const chunks = await this.loadChunks(base.id);
-    const chunkTexts = chunkText(content, config.knowledgeBase.chunkSize, config.knowledgeBase.chunkOverlap);
-    const vectors = await this.embedTexts(config, chunkTexts);
-    const now = Date.now();
-    const itemId = randomUUID();
 
-    base.items.unshift({
-      id: itemId,
-      type: "note",
-      title,
-      source: "note",
-      createdAt: now,
-      updatedAt: now,
-    });
-    base.updatedAt = now;
-
-    chunks.push(
-      ...chunkTexts.map((text, index) => ({
-        id: randomUUID(),
-        baseId: base.id,
-        itemId,
-        text,
-        source: "note",
+    await this.appendDocuments(config, base, chunks, [
+      {
         title,
-        vector: vectors[index],
-        createdAt: now,
-      })),
-    );
+        source: "note",
+        text: content,
+        type: "note",
+      },
+    ]);
 
     await this.saveIndex(index);
     await this.saveChunks(base.id, chunks);
@@ -353,38 +528,80 @@ export class KnowledgeService {
     const index = await this.loadIndex();
     const base = this.requireBase(index, input.baseId);
     const chunks = await this.loadChunks(base.id);
-    const now = Date.now();
+    const documents = await Promise.all(input.files.map((file) => this.readKnowledgeFile(file)));
 
-    for (const file of input.files) {
-      const source = await this.readKnowledgeFile(file);
-      const chunkTexts = chunkText(source.text, config.knowledgeBase.chunkSize, config.knowledgeBase.chunkOverlap);
-      const vectors = await this.embedTexts(config, chunkTexts);
-      const itemId = randomUUID();
+    await this.appendDocuments(config, base, chunks, documents);
+    await this.saveIndex(index);
+    await this.saveChunks(base.id, chunks);
+    return await this.listBases();
+  }
 
-      base.items.unshift({
-        id: itemId,
-        type: "file",
-        title: source.title,
-        source: source.source,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      chunks.push(
-        ...chunkTexts.map((text, index) => ({
-          id: randomUUID(),
-          baseId: base.id,
-          itemId,
-          text,
-          source: source.source,
-          title: source.title,
-          vector: vectors[index],
-          createdAt: now,
-        })),
-      );
+  async addDirectory(config: AppConfig, input: KnowledgeAddDirectoryInput) {
+    const directoryPath = input.directoryPath.trim();
+    if (!directoryPath) {
+      throw new Error("Select a folder first.");
     }
 
-    base.updatedAt = now;
+    const index = await this.loadIndex();
+    const base = this.requireBase(index, input.baseId);
+    const chunks = await this.loadChunks(base.id);
+    const documents = await this.readDirectoryFiles(directoryPath);
+
+    if (documents.length === 0) {
+      throw new Error("No supported text files were found in this folder.");
+    }
+
+    await this.appendDocuments(config, base, chunks, documents);
+    await this.saveIndex(index);
+    await this.saveChunks(base.id, chunks);
+    return await this.listBases();
+  }
+
+  async addUrl(config: AppConfig, input: KnowledgeAddUrlInput) {
+    const url = input.url.trim();
+    if (!url) {
+      throw new Error("Enter a URL first.");
+    }
+
+    const index = await this.loadIndex();
+    const base = this.requireBase(index, input.baseId);
+    const chunks = await this.loadChunks(base.id);
+    const document = await this.fetchUrlDocument(url, "url");
+
+    await this.appendDocuments(config, base, chunks, [document]);
+    await this.saveIndex(index);
+    await this.saveChunks(base.id, chunks);
+    return await this.listBases();
+  }
+
+  async addWebsite(config: AppConfig, input: KnowledgeAddUrlInput) {
+    const url = input.url.trim();
+    if (!url) {
+      throw new Error("Enter a website URL first.");
+    }
+
+    const index = await this.loadIndex();
+    const base = this.requireBase(index, input.baseId);
+    const chunks = await this.loadChunks(base.id);
+    const rootDocument = await this.fetchUrlDocument(url, "website");
+    const documents: Array<{ title: string; source: string; text: string; type: "website" }> = [
+      { ...rootDocument, type: "website" },
+    ];
+
+    const links = rootDocument.contentType.includes("xml")
+      ? extractSitemapLinks(rootDocument.raw)
+      : extractWebsiteLinks(rootDocument.raw, url);
+
+    for (const link of links.slice(0, 8)) {
+      try {
+        const document = await this.fetchUrlDocument(link, "website");
+        documents.push({ ...document, type: "website" });
+      } catch {
+        continue;
+      }
+    }
+
+    await this.appendDocuments(config, base, chunks, documents);
     await this.saveIndex(index);
     await this.saveChunks(base.id, chunks);
     return await this.listBases();
@@ -411,7 +628,7 @@ export class KnowledgeService {
         total: 0,
         results: [],
         searchedBases: [],
-        warnings: ["没有可检索的知识库。"],
+        warnings: ["No knowledge base is selected."],
       };
     }
 

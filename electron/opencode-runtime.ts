@@ -921,6 +921,9 @@ export class OpencodeRuntime {
 
   async prompt(config: AppConfig, sessionID: string, message: string, attachments: FileDropEntry[]) {
     const model = buildModelRef(config);
+    if (!model) {
+      throw new Error("No available model configured. Configure and enable a model before sending messages.");
+    }
     const parts = [
       {
         type: "text" as const,
@@ -944,6 +947,9 @@ export class OpencodeRuntime {
 
   async command(config: AppConfig, sessionID: string, command: string, argumentsText: string, attachments: FileDropEntry[]) {
     const active = buildModelRef(config);
+    if (!active) {
+      throw new Error("No available model configured. Configure and enable a model before running skills.");
+    }
     return await this.request<OpencodeSessionMessage>(config, `/session/${sessionID}/command`, {
       method: "POST",
       headers: {
@@ -952,7 +958,7 @@ export class OpencodeRuntime {
       body: JSON.stringify({
         command,
         arguments: argumentsText,
-        model: active ? `${active.providerID}/${active.modelID}` : undefined,
+        model: `${active.providerID}/${active.modelID}`,
         parts: attachments.map(makeFilePart).filter(Boolean),
       }),
     });

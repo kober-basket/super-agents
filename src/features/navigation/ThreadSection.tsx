@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, LoaderCircle, Trash2 } from "lucide-react";
 
 import { formatRelativeTime } from "../../lib/format";
 import type { ThreadSummary } from "../../types";
@@ -7,6 +7,7 @@ import { displayThreadTitle } from "../shared/utils";
 
 interface ThreadSectionProps {
   activeThreadId: string;
+  busyThreadId?: string | null;
   items: ThreadSummary[];
   label: string;
   onArchiveThread: (thread: ThreadSummary, archived: boolean) => void | Promise<void>;
@@ -16,6 +17,7 @@ interface ThreadSectionProps {
 
 export function ThreadSection({
   activeThreadId,
+  busyThreadId,
   items,
   label,
   onArchiveThread,
@@ -32,55 +34,58 @@ export function ThreadSection({
       </div>
 
       <div className="thread-list">
-        {items.map((thread) => (
-          <div
-            key={thread.id}
-            className={clsx(
-              "thread-row",
-              thread.id === activeThreadId && "active",
-              thread.archived && "archived",
-            )}
-          >
-            <button className="thread-row-main" onClick={() => void onOpenThread(thread.id)}>
-              <div className="thread-mark" />
-              <div className="thread-copy">
-                <strong>{displayThreadTitle(thread.title)}</strong>
-                <span>{thread.lastMessage || "还没有消息"}</span>
-              </div>
-              <div className="thread-meta">
-                <time>{formatRelativeTime(thread.updatedAt)}</time>
-              </div>
-            </button>
+        {items.map((thread) => {
+          const isBusy = busyThreadId === thread.id;
 
-            <div className="thread-row-actions">
-              {thread.archived ? (
-                <button
-                  className="ghost-icon small thread-action"
-                  onClick={() => void onArchiveThread(thread, false)}
-                  title="恢复"
-                >
-                  <ArchiveRestore size={14} />
-                </button>
-              ) : (
-                <button
-                  className="ghost-icon small thread-action"
-                  onClick={() => void onArchiveThread(thread, true)}
-                  title="归档"
-                >
-                  <Archive size={14} />
-                </button>
-              )}
-
-              <button
-                className="ghost-icon small thread-action danger"
-                onClick={() => void onDeleteThread(thread)}
-                title="删除"
-              >
-                <Trash2 size={14} />
+          return (
+            <div
+              key={thread.id}
+              className={clsx("thread-row", thread.id === activeThreadId && "active", thread.archived && "archived")}
+            >
+              <button className="thread-row-main" onClick={() => void onOpenThread(thread.id)} disabled={isBusy}>
+                <div className="thread-mark" />
+                <div className="thread-copy">
+                  <strong>{displayThreadTitle(thread.title)}</strong>
+                  <span>{thread.lastMessage || "还没有消息"}</span>
+                </div>
+                <div className="thread-meta">
+                  {isBusy ? <LoaderCircle size={14} className="spin" /> : <time>{formatRelativeTime(thread.updatedAt)}</time>}
+                </div>
               </button>
+
+              <div className="thread-row-actions">
+                {thread.archived ? (
+                  <button
+                    className="ghost-icon small thread-action"
+                    onClick={() => void onArchiveThread(thread, false)}
+                    disabled={isBusy}
+                    title="恢复"
+                  >
+                    <ArchiveRestore size={14} />
+                  </button>
+                ) : (
+                  <button
+                    className="ghost-icon small thread-action"
+                    onClick={() => void onArchiveThread(thread, true)}
+                    disabled={isBusy}
+                    title="归档"
+                  >
+                    <Archive size={14} />
+                  </button>
+                )}
+
+                <button
+                  className="ghost-icon small thread-action danger"
+                  onClick={() => void onDeleteThread(thread)}
+                  disabled={isBusy}
+                  title="删除"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

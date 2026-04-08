@@ -1,4 +1,5 @@
 import type { ModelProviderConfig, ProviderModelConfig, RuntimeModelOption } from "../types";
+import { enrichProviderModel } from "./model-metadata";
 
 export function sanitizeModelProviderId(value: string) {
   return value
@@ -20,14 +21,39 @@ export function normalizeProviderModels(models: ProviderModelConfig[]) {
     const modelId = item.id.trim();
     if (!modelId || seen.has(modelId)) continue;
     seen.add(modelId);
-    next.push({
-      id: modelId,
-      label: item.label.trim() || modelId,
-      enabled: item.enabled !== false,
-    });
+    next.push(
+      enrichProviderModel({
+        id: modelId,
+        label: item.label.trim() || modelId,
+        enabled: item.enabled !== false,
+        vendor: item.vendor?.trim() || undefined,
+        group: item.group?.trim() || undefined,
+        description: item.description?.trim() || undefined,
+        capabilities: item.capabilities
+          ? {
+              vision: item.capabilities.vision === true,
+              tools: item.capabilities.tools === true,
+              reasoning: item.capabilities.reasoning === true,
+              webSearch: item.capabilities.webSearch === true,
+              embedding: item.capabilities.embedding === true,
+              rerank: item.capabilities.rerank === true,
+              free: item.capabilities.free === true,
+            }
+          : undefined,
+      }),
+    );
   }
 
   return next.sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
+}
+
+export function isEmbeddingModel(model: ProviderModelConfig) {
+  if (model.capabilities?.embedding === true) {
+    return true;
+  }
+
+  const haystack = `${model.id} ${model.label} ${model.description ?? ""}`.toLowerCase();
+  return /embedding|embeddings|text-embedding|bge-|e5-|gte-|voyage/.test(haystack);
 }
 
 export function flattenModelProviders(modelProviders: ModelProviderConfig[]): RuntimeModelOption[] {
@@ -48,13 +74,12 @@ export function flattenModelProviders(modelProviders: ModelProviderConfig[]): Ru
 
 export function getSelectableModels(modelProviders: ModelProviderConfig[]) {
   const flattened = flattenModelProviders(modelProviders);
-  const enabled = flattened.filter((item) => item.enabled);
-  return enabled.length > 0 ? enabled : flattened;
+  return flattened.filter((item) => item.enabled);
 }
 
 export function getActiveModelOption(modelProviders: ModelProviderConfig[], activeModelId: string) {
   const flattened = flattenModelProviders(modelProviders);
-  return flattened.find((item) => item.id === activeModelId) ?? flattened[0] ?? null;
+  return flattened.find((item) => item.id === activeModelId) ?? flattened.find((item) => item.enabled) ?? null;
 }
 
 export function ensureActiveModelId(modelProviders: ModelProviderConfig[], activeModelId: string) {

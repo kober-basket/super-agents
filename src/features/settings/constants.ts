@@ -67,13 +67,4 @@ export const RECOMMENDED_MCP_SERVERS: RecommendedMcpServer[] = [
     tone: "green",
     transport: "remote",
   },
-  {
-    id: "browser-automation",
-    name: "Browser Automation",
-    operator: "Playwright",
-    description: "处理网页登录、表单填写和网页信息抓取",
-    badge: "PW",
-    tone: "ink",
-    transport: "local",
-  },
 ];

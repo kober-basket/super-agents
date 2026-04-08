@@ -1,11 +1,10 @@
 import clsx from "clsx";
 import {
-  ChevronRight,
   Database,
   Layers3,
+  LoaderCircle,
   MessageSquarePlus,
   Settings2,
-  WandSparkles,
   Wrench,
 } from "lucide-react";
 
@@ -16,13 +15,14 @@ interface PrimarySidebarProps {
   activeThreadId: string;
   activeThreads: ThreadSummary[];
   archivedThreads: ThreadSummary[];
+  busyThreadId?: string | null;
+  creatingThread?: boolean;
   view: AppSection;
   workspaceIssue?: string | null;
   onArchiveThread: (thread: ThreadSummary, archived: boolean) => void | Promise<void>;
   onCreateThread: () => void | Promise<void>;
   onDeleteThread: (thread: ThreadSummary) => void | Promise<void>;
   onOpenThread: (threadId: string) => void | Promise<void>;
-  onRefreshThreadList: () => void | Promise<void>;
   onSetView: (view: AppSection) => void;
 }
 
@@ -30,25 +30,26 @@ export function PrimarySidebar({
   activeThreadId,
   activeThreads,
   archivedThreads,
+  busyThreadId,
+  creatingThread,
   view,
   workspaceIssue,
   onArchiveThread,
   onCreateThread,
   onDeleteThread,
   onOpenThread,
-  onRefreshThreadList,
   onSetView,
 }: PrimarySidebarProps) {
   return (
     <aside className="sidebar">
       <div className="sidebar-primary">
-        <button className={clsx("sidebar-link", view === "chat" && "active")} onClick={() => void onCreateThread()}>
-          <MessageSquarePlus size={18} />
+        <button
+          className={clsx("sidebar-link", view === "chat" && "active")}
+          onClick={() => void onCreateThread()}
+          disabled={creatingThread}
+        >
+          {creatingThread ? <LoaderCircle size={18} className="spin" /> : <MessageSquarePlus size={18} />}
           <span>新聊天</span>
-        </button>
-        <button className={clsx("sidebar-link", view === "automation" && "active")} onClick={() => onSetView("automation")}>
-          <WandSparkles size={18} />
-          <span>自动化</span>
         </button>
         <button className={clsx("sidebar-link", view === "skills" && "active")} onClick={() => onSetView("skills")}>
           <Layers3 size={18} />
@@ -65,13 +66,6 @@ export function PrimarySidebar({
       </div>
 
       <div className="thread-pane">
-        <div className="thread-pane-head">
-          <span>聊天</span>
-          <button className="ghost-icon small" onClick={() => void onRefreshThreadList()}>
-            <ChevronRight size={14} />
-          </button>
-        </div>
-
         {workspaceIssue ? (
           <div className="thread-pane-status" role="alert">
             <strong>会话列表未完全刷新</strong>
@@ -81,23 +75,27 @@ export function PrimarySidebar({
 
         {activeThreads.length === 0 && archivedThreads.length === 0 ? (
           <div className="thread-pane-empty">
-            <strong>{workspaceIssue ? "暂时没法刷新会话列表" : "还没有会话"}</strong>
-            <span>{workspaceIssue ? "当前已保留现有界面状态，你可以点右上角继续重试。" : "点上面的“新聊天”就能开始。"} </span>
+            <strong>{workspaceIssue ? "暂时无法刷新会话列表" : "还没有会话"}</strong>
+            <span>
+              {workspaceIssue ? "当前已保留现有界面状态，你可以点击右上角继续重试。" : "点上面的“新聊天”就能开始。"}
+            </span>
           </div>
         ) : (
           <div className="thread-group">
             <ThreadSection
               activeThreadId={activeThreadId}
+              busyThreadId={busyThreadId}
               items={activeThreads}
-              label="最近"
+              label="历史会话"
               onArchiveThread={onArchiveThread}
               onDeleteThread={onDeleteThread}
               onOpenThread={onOpenThread}
             />
             <ThreadSection
               activeThreadId={activeThreadId}
+              busyThreadId={busyThreadId}
               items={archivedThreads}
-              label="归档"
+              label="已归档"
               onArchiveThread={onArchiveThread}
               onDeleteThread={onDeleteThread}
               onOpenThread={onOpenThread}

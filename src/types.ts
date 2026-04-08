@@ -1,4 +1,4 @@
-export type AppSection = "chat" | "automation" | "skills" | "tools" | "knowledge" | "settings";
+export type AppSection = "chat" | "skills" | "tools" | "knowledge" | "settings";
 export type ContextTier = "low" | "medium" | "high";
 export type EnvironmentMode = "local" | "cloud";
 export type MessageRole = "user" | "assistant" | "tool";
@@ -14,6 +14,18 @@ export interface ProviderModelConfig {
   id: string;
   label: string;
   enabled: boolean;
+  vendor?: string;
+  group?: string;
+  description?: string;
+  capabilities?: {
+    vision?: boolean;
+    tools?: boolean;
+    reasoning?: boolean;
+    webSearch?: boolean;
+    embedding?: boolean;
+    rerank?: boolean;
+    free?: boolean;
+  };
 }
 
 export interface ModelProviderConfig {
@@ -179,7 +191,7 @@ export interface KnowledgeBaseConnectionConfig {
   chunkOverlap: number;
 }
 
-export type KnowledgeItemType = "file" | "note" | "url";
+export type KnowledgeItemType = "file" | "note" | "directory" | "url" | "website";
 
 export interface KnowledgeItemSummary {
   id: string;
@@ -245,6 +257,16 @@ export interface KnowledgeAddNoteInput {
 export interface KnowledgeAddFilesInput {
   baseId: string;
   files: FileDropEntry[];
+}
+
+export interface KnowledgeAddDirectoryInput {
+  baseId: string;
+  directoryPath: string;
+}
+
+export interface KnowledgeAddUrlInput {
+  baseId: string;
+  url: string;
 }
 
 export interface ProxyConfig {

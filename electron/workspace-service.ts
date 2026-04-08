@@ -11,6 +11,11 @@ import {
   normalizeProviderModels,
   sanitizeModelProviderId,
 } from "../src/lib/model-config";
+import {
+  inferProviderModelCapabilities,
+  inferProviderModelGroup,
+  inferProviderModelVendor,
+} from "../src/lib/model-metadata";
 import { KnowledgeService } from "./knowledge-service";
 import { readJsonFile, writeJsonFile } from "./store";
 import {
@@ -27,8 +32,10 @@ import type {
   ChatMessage,
   FileDropEntry,
   FilePreviewPayload,
+  KnowledgeAddDirectoryInput,
   KnowledgeAddFilesInput,
   KnowledgeAddNoteInput,
+  KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
   KnowledgeCatalogPayload,
   KnowledgeSearchPayload,
@@ -355,6 +362,73 @@ function createModelListUrl(baseUrl: string) {
   return normalized.endsWith("/models") ? normalized : `${normalized}/models`;
 }
 
+function inferVendorName(record: Record<string, unknown>, id: string, label: string, description: string, group?: string) {
+  const candidates = [
+    record.vendor,
+    record.provider,
+    record.owned_by,
+    record.family,
+    (record.top_provider as { name?: unknown } | undefined)?.name,
+  ];
+
+  return inferProviderModelVendor({
+    id,
+    label,
+    description,
+    group,
+    vendor: candidates.find((value): value is string => typeof value === "string" && value.trim().length > 0),
+  });
+}
+
+function extractStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim().toLowerCase() : ""))
+    .filter(Boolean);
+}
+
+function inferCapabilities(record: Record<string, unknown>, id: string, label: string, description: string, vendor?: string, group?: string) {
+  const architecture =
+    record.architecture && typeof record.architecture === "object"
+      ? (record.architecture as Record<string, unknown>)
+      : {};
+  const modalities = [
+    ...extractStringList(record.input_modalities),
+    ...extractStringList(record.output_modalities),
+    ...extractStringList(architecture.input_modalities),
+    ...extractStringList(architecture.output_modalities),
+    ...extractStringList(record.modalities),
+    ...extractStringList(record.supported_modalities),
+    ...extractStringList(record.supported_endpoint_types),
+  ];
+  const supportedParameters = extractStringList(record.supported_parameters);
+  const pricing =
+    record.pricing && typeof record.pricing === "object"
+      ? (record.pricing as Record<string, unknown>)
+      : {};
+  const promptPrice = Number(pricing.prompt ?? pricing.input ?? NaN);
+  const completionPrice = Number(pricing.completion ?? pricing.output ?? NaN);
+
+  return inferProviderModelCapabilities({
+    id,
+    label,
+    description,
+    vendor,
+    group,
+    modalities,
+    supportedParameters,
+    endpointTypes: extractStringList(record.supported_endpoint_types),
+    capabilities:
+      record.reasoning === true
+        ? {
+            reasoning: true,
+          }
+        : undefined,
+    promptPrice,
+    completionPrice,
+  });
+}
+
 function extractModelList(payload: unknown) {
   const source = Array.isArray(payload)
     ? payload
@@ -367,18 +441,40 @@ function extractModelList(payload: unknown) {
   const models = source
     .map((item) => {
       if (typeof item === "string") {
-        return { id: item, label: item, enabled: true };
+        const vendor = inferProviderModelVendor({ id: item });
+        const group = inferProviderModelGroup({ id: item, vendor });
+        return {
+          id: item,
+          label: item,
+          enabled: true,
+          vendor: vendor || undefined,
+          group,
+        };
       }
       if (!item || typeof item !== "object") {
         return null;
       }
-      const record = item as { id?: string; name?: string };
+      const record = item as Record<string, unknown>;
       const id = String(record.id ?? record.name ?? "").trim();
       if (!id) return null;
+      const label = String(record.name ?? record.display_name ?? record.displayName ?? record.label ?? id).trim() || id;
+      const description = String(record.description ?? record.summary ?? "").trim();
+      const vendor = inferVendorName(record, id, label, description, String(record.group ?? "").trim());
+      const group = inferProviderModelGroup({
+        id,
+        label,
+        description,
+        vendor,
+        group: String(record.group ?? "").trim() || undefined,
+      });
       return {
         id,
-        label: id,
+        label,
         enabled: true,
+        vendor: vendor || undefined,
+        group,
+        description: description || undefined,
+        capabilities: inferCapabilities(record, id, label, description, vendor, group),
       };
     })
     .filter(Boolean);
@@ -411,6 +507,57 @@ async function fetchOpenAiCompatibleModels(input: ModelProviderFetchInput) {
   const models = extractModelList(payload);
   if (models.length === 0) {
     throw new Error("供应商已响应，但没有返回可用模型列表");
+  }
+
+  return models;
+}
+
+async function fetchOpenAiCompatibleModelsEnhanced(input: ModelProviderFetchInput) {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+  };
+
+  if (input.apiKey.trim()) {
+    headers.Authorization = `Bearer ${input.apiKey.trim()}`;
+    headers["api-key"] = input.apiKey.trim();
+    headers["x-api-key"] = input.apiKey.trim();
+  }
+
+  const normalizedBaseUrl = normalizeBaseUrl(input.baseUrl);
+  const urls = [createModelListUrl(input.baseUrl)];
+
+  if (/openrouter\.ai/i.test(normalizedBaseUrl)) {
+    urls.push("https://openrouter.ai/api/v1/embeddings/models");
+  }
+
+  if (/ppio/i.test(normalizedBaseUrl)) {
+    urls.push(`${normalizedBaseUrl}/models?model_type=embedding`);
+    urls.push(`${normalizedBaseUrl}/models?model_type=reranker`);
+  }
+
+  const responses = await Promise.all(
+    urls.map(async (url, index) => {
+      const response = await fetch(url, {
+        method: "GET",
+        headers,
+      });
+
+      const text = await response.text();
+      if (!response.ok) {
+        if (index > 0) {
+          return [];
+        }
+        throw new Error(text || `Fetch models failed: ${response.status}`);
+      }
+
+      const payload = text ? JSON.parse(text) : {};
+      return extractModelList(payload);
+    }),
+  );
+
+  const models = normalizeProviderModels(responses.flat());
+  if (models.length === 0) {
+    throw new Error("Provider responded, but no usable models were returned.");
   }
 
   return models;
@@ -1211,7 +1358,7 @@ export class WorkspaceService {
 
     return {
       providerId: input.providerId,
-      models: await fetchOpenAiCompatibleModels(input),
+      models: await fetchOpenAiCompatibleModelsEnhanced(input),
     };
   }
 
@@ -1232,9 +1379,24 @@ export class WorkspaceService {
     return await this.knowledge.addFiles(state.config, input);
   }
 
+  async addKnowledgeDirectory(input: KnowledgeAddDirectoryInput): Promise<KnowledgeCatalogPayload> {
+    const state = await this.loadState();
+    return await this.knowledge.addDirectory(state.config, input);
+  }
+
   async addKnowledgeNote(input: KnowledgeAddNoteInput): Promise<KnowledgeCatalogPayload> {
     const state = await this.loadState();
     return await this.knowledge.addNote(state.config, input);
+  }
+
+  async addKnowledgeUrl(input: KnowledgeAddUrlInput): Promise<KnowledgeCatalogPayload> {
+    const state = await this.loadState();
+    return await this.knowledge.addUrl(state.config, input);
+  }
+
+  async addKnowledgeWebsite(input: KnowledgeAddUrlInput): Promise<KnowledgeCatalogPayload> {
+    const state = await this.loadState();
+    return await this.knowledge.addWebsite(state.config, input);
   }
 
   async searchKnowledgeBases(input: {

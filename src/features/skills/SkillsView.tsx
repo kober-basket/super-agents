@@ -53,14 +53,14 @@ export function SkillsView({
       <div className="skills-inner">
         <header className="skills-toolbar">
           <div className="skills-toolbar-copy">
-            <h2>鎶€鑳?/h2>
-            <p>缁熶竴绠＄悊宸插畨瑁呮妧鑳姐€佸凡鍙戠幇鎶€鑳藉拰鎺ㄨ崘鎶€鑳姐€?/p>
+            <h2>技能</h2>
+            <p>统一管理已安装技能、已发现技能，以及推荐的技能模板。</p>
           </div>
 
           <div className="skills-toolbar-actions">
             <button className="secondary-button" onClick={() => void onRefresh()} disabled={skillsRefreshing}>
               {skillsRefreshing ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}
-              鍒锋柊
+              刷新
             </button>
 
             <label className="search-field">
@@ -68,19 +68,20 @@ export function SkillsView({
               <input
                 value={skillQuery}
                 onChange={(event) => onSkillQueryChange(event.target.value)}
-                placeholder="鎼滅储鎶€鑳?
+                placeholder="搜索技能"
               />
             </label>
 
             <button className="primary-button" onClick={() => onPrepareSkillDraft()}>
               <Plus size={16} />
-              鏂版妧鑳?            </button>
+              新建技能
+            </button>
           </div>
         </header>
 
         <div className="skills-section">
           <div className="skills-section-head">
-            <h3>宸插畨瑁呮妧鑳?/h3>
+            <h3>已安装技能</h3>
           </div>
 
           {filteredInstalledSkills.length > 0 ? (
@@ -97,18 +98,18 @@ export function SkillsView({
                     <div className={clsx("skill-mark", `tone-${tone}`)}>{makeBadgeText(skill.name)}</div>
                     <div className="skill-copy">
                       <strong>{skill.name}</strong>
-                      <span>{skill.description || "鏈湴宸插畨瑁呮妧鑳?}</span>
+                      <span>{skill.description || "暂无描述"}</span>
                       <small>
                         {skill.location}
-                        {isCodexSkill ? " 路 Codex" : " 路 鍛戒护"}
-                        {skill.enabled === false ? " 路 宸插仠鐢? : ""}
+                        {isCodexSkill ? " · Codex" : " · Workspace"}
+                        {skill.enabled === false ? " · 已禁用" : ""}
                       </small>
                     </div>
                     <div className="skill-card-actions">
                       <button
                         className={clsx("skill-state-button installed", skill.enabled === false && "disabled")}
                         onClick={() => void onRunSkill(skill)}
-                        title={isCodexSkill ? "甯﹀叆瀵硅瘽" : "杩愯鎶€鑳?}
+                        title={isCodexSkill ? "带入对话" : "立即运行"}
                         disabled={skill.enabled === false}
                       >
                         {isCodexSkill ? <Sparkles size={16} /> : <Check size={16} />}
@@ -117,11 +118,11 @@ export function SkillsView({
                         className={clsx("toggle-button", skill.enabled && "active")}
                         onClick={() => onUpdateInstalledSkill(skill.id, { enabled: !skill.enabled })}
                       >
-                        {skill.enabled ? "鍚敤涓? : "宸插仠鐢?}
+                        {skill.enabled ? "已启用" : "已禁用"}
                       </button>
                       <button className="ghost-text-button danger" onClick={() => void onUninstallSkill(skill)}>
                         <X size={14} />
-                        鍗歌浇
+                        卸载
                       </button>
                     </div>
                   </article>
@@ -130,11 +131,12 @@ export function SkillsView({
             </div>
           ) : (
             <div className="empty-panel">
-              <strong>杩樻病鏈夊凡瀹夎鎶€鑳?/strong>
-              <p>杩欓噷浼氭樉绀?super-agents 鍐呯疆鎶€鑳斤紝浠ュ强鏈満 Codex 宸插畨瑁呯殑榛樿鎶€鑳姐€?/p>
+              <strong>还没有已安装技能</strong>
+              <p>你可以先创建一个技能，或者把下方发现/推荐的技能带入当前会话继续完善。</p>
               <button className="secondary-button" onClick={() => onPrepareSkillDraft()}>
                 <Plus size={14} />
-                璧疯崏涓€涓妧鑳?              </button>
+                创建第一个技能
+              </button>
             </div>
           )}
         </div>
@@ -142,7 +144,7 @@ export function SkillsView({
         {filteredReferenceSkills.length > 0 ? (
           <div className="skills-section">
             <div className="skills-section-head">
-              <h3>宸插彂鐜扮殑 opencode 鎶€鑳?/h3>
+              <h3>已发现技能</h3>
             </div>
 
             <div className="skill-grid installed-grid">
@@ -154,10 +156,10 @@ export function SkillsView({
                     <div className={clsx("skill-mark", `tone-${tone}`)}>{makeBadgeText(skill.name)}</div>
                     <div className="skill-copy">
                       <strong>{skill.name}</strong>
-                      <span>{skill.description || "opencode 鎶€鑳?}</span>
+                      <span>{skill.description || "来自运行时发现的技能"}</span>
                       <small>{skill.location}</small>
                     </div>
-                    <button className="skill-state-button" onClick={() => onUseReferenceSkill(skill)} title="甯﹀叆瀵硅瘽">
+                    <button className="skill-state-button" onClick={() => onUseReferenceSkill(skill)} title="带入对话">
                       <Sparkles size={16} />
                     </button>
                   </article>
@@ -169,7 +171,7 @@ export function SkillsView({
 
         <div className="skills-section">
           <div className="skills-section-head">
-            <h3>鎺ㄨ崘</h3>
+            <h3>推荐模板</h3>
           </div>
 
           {filteredRecommendedSkills.length > 0 ? (
@@ -184,7 +186,7 @@ export function SkillsView({
                   <button
                     className="skill-state-button"
                     onClick={() => onPrepareSkillDraft(skill.name, skill.description)}
-                    title="浠ヨ繖涓柟鍚戝垱寤烘妧鑳?
+                    title="用这个模板创建技能"
                   >
                     <Plus size={16} />
                   </button>
@@ -193,8 +195,8 @@ export function SkillsView({
             </div>
           ) : hasResults ? null : (
             <div className="empty-panel compact">
-              <strong>娌℃湁鍖归厤鍒版妧鑳?/strong>
-              <p>鎹釜鍏抽敭璇嶈瘯璇曪紝鎴栬€呯洿鎺ュ垱寤轰竴涓柊鐨勬妧鑳借崏绋裤€?/p>
+              <strong>没有匹配的技能结果</strong>
+              <p>换个关键词试试，或者直接新建一个技能模板。</p>
             </div>
           )}
         </div>

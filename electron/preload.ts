@@ -6,8 +6,10 @@ import type {
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeCatalogPayload,
+  KnowledgeAddDirectoryInput,
   KnowledgeAddFilesInput,
   KnowledgeAddNoteInput,
+  KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
   KnowledgeSearchPayload,
   McpInspectInput,
@@ -49,8 +51,14 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:delete-knowledge-base", baseId) as Promise<KnowledgeCatalogPayload>,
   addKnowledgeFiles: (payload: KnowledgeAddFilesInput) =>
     ipcRenderer.invoke("desktop:add-knowledge-files", payload) as Promise<KnowledgeCatalogPayload>,
+  addKnowledgeDirectory: (payload: KnowledgeAddDirectoryInput) =>
+    ipcRenderer.invoke("desktop:add-knowledge-directory", payload) as Promise<KnowledgeCatalogPayload>,
   addKnowledgeNote: (payload: KnowledgeAddNoteInput) =>
     ipcRenderer.invoke("desktop:add-knowledge-note", payload) as Promise<KnowledgeCatalogPayload>,
+  addKnowledgeUrl: (payload: KnowledgeAddUrlInput) =>
+    ipcRenderer.invoke("desktop:add-knowledge-url", payload) as Promise<KnowledgeCatalogPayload>,
+  addKnowledgeWebsite: (payload: KnowledgeAddUrlInput) =>
+    ipcRenderer.invoke("desktop:add-knowledge-website", payload) as Promise<KnowledgeCatalogPayload>,
   searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) =>
     ipcRenderer.invoke("desktop:search-knowledge-bases", payload) as Promise<KnowledgeSearchPayload>,
   runSkill: (payload: SkillRunInput) =>

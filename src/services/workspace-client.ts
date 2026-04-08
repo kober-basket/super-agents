@@ -16,8 +16,14 @@ export const workspaceClient = {
   deleteKnowledgeBase: (baseId: string) => window.desktopAgent.deleteKnowledgeBase(baseId),
   addKnowledgeFiles: (payload: Parameters<typeof window.desktopAgent.addKnowledgeFiles>[0]) =>
     window.desktopAgent.addKnowledgeFiles(payload),
+  addKnowledgeDirectory: (payload: Parameters<typeof window.desktopAgent.addKnowledgeDirectory>[0]) =>
+    window.desktopAgent.addKnowledgeDirectory(payload),
   addKnowledgeNote: (payload: Parameters<typeof window.desktopAgent.addKnowledgeNote>[0]) =>
     window.desktopAgent.addKnowledgeNote(payload),
+  addKnowledgeUrl: (payload: Parameters<typeof window.desktopAgent.addKnowledgeUrl>[0]) =>
+    window.desktopAgent.addKnowledgeUrl(payload),
+  addKnowledgeWebsite: (payload: Parameters<typeof window.desktopAgent.addKnowledgeWebsite>[0]) =>
+    window.desktopAgent.addKnowledgeWebsite(payload),
   searchKnowledgeBases: (payload: Parameters<typeof window.desktopAgent.searchKnowledgeBases>[0]) =>
     window.desktopAgent.searchKnowledgeBases(payload),
   runSkill: (payload: Parameters<typeof window.desktopAgent.runSkill>[0]) =>

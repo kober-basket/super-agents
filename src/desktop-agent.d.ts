@@ -3,8 +3,10 @@ import type {
   BootstrapPayload,
   FileDropEntry,
   KnowledgeCatalogPayload,
+  KnowledgeAddDirectoryInput,
   KnowledgeAddFilesInput,
   KnowledgeAddNoteInput,
+  KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
   KnowledgeSearchPayload,
   FilePreviewPayload,
@@ -39,7 +41,10 @@ declare global {
       createKnowledgeBase: (payload: KnowledgeBaseCreateInput) => Promise<KnowledgeCatalogPayload>;
       deleteKnowledgeBase: (baseId: string) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeFiles: (payload: KnowledgeAddFilesInput) => Promise<KnowledgeCatalogPayload>;
+      addKnowledgeDirectory: (payload: KnowledgeAddDirectoryInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeNote: (payload: KnowledgeAddNoteInput) => Promise<KnowledgeCatalogPayload>;
+      addKnowledgeUrl: (payload: KnowledgeAddUrlInput) => Promise<KnowledgeCatalogPayload>;
+      addKnowledgeWebsite: (payload: KnowledgeAddUrlInput) => Promise<KnowledgeCatalogPayload>;
       searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) => Promise<KnowledgeSearchPayload>;
       runSkill: (payload: SkillRunInput) => Promise<SkillRunResult>;
       uninstallSkill: (skillId: string) => Promise<BootstrapPayload>;

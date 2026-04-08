@@ -156,8 +156,20 @@ app.whenReady().then(async () => {
     });
   });
 
+  ipcMain.handle("desktop:add-knowledge-directory", async (_event, payload: { baseId: string; directoryPath: string }) => {
+    return await service!.addKnowledgeDirectory(payload);
+  });
+
   ipcMain.handle("desktop:add-knowledge-note", async (_event, payload: { baseId: string; title: string; content: string }) => {
     return await service!.addKnowledgeNote(payload);
+  });
+
+  ipcMain.handle("desktop:add-knowledge-url", async (_event, payload: { baseId: string; url: string }) => {
+    return await service!.addKnowledgeUrl(payload);
+  });
+
+  ipcMain.handle("desktop:add-knowledge-website", async (_event, payload: { baseId: string; url: string }) => {
+    return await service!.addKnowledgeWebsite(payload);
   });
 
   ipcMain.handle(
