@@ -1,0 +1,87 @@
+import clsx from "clsx";
+import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
+
+import { formatRelativeTime } from "../../lib/format";
+import type { ThreadSummary } from "../../types";
+import { displayThreadTitle } from "../shared/utils";
+
+interface ThreadSectionProps {
+  activeThreadId: string;
+  items: ThreadSummary[];
+  label: string;
+  onArchiveThread: (thread: ThreadSummary, archived: boolean) => void | Promise<void>;
+  onDeleteThread: (thread: ThreadSummary) => void | Promise<void>;
+  onOpenThread: (threadId: string) => void | Promise<void>;
+}
+
+export function ThreadSection({
+  activeThreadId,
+  items,
+  label,
+  onArchiveThread,
+  onDeleteThread,
+  onOpenThread,
+}: ThreadSectionProps) {
+  if (items.length === 0) return null;
+
+  return (
+    <section className="thread-section">
+      <div className="thread-section-head">
+        <span>{label}</span>
+        <strong>{items.length}</strong>
+      </div>
+
+      <div className="thread-list">
+        {items.map((thread) => (
+          <div
+            key={thread.id}
+            className={clsx(
+              "thread-row",
+              thread.id === activeThreadId && "active",
+              thread.archived && "archived",
+            )}
+          >
+            <button className="thread-row-main" onClick={() => void onOpenThread(thread.id)}>
+              <div className="thread-mark" />
+              <div className="thread-copy">
+                <strong>{displayThreadTitle(thread.title)}</strong>
+                <span>{thread.lastMessage || "还没有消息"}</span>
+              </div>
+              <div className="thread-meta">
+                <time>{formatRelativeTime(thread.updatedAt)}</time>
+              </div>
+            </button>
+
+            <div className="thread-row-actions">
+              {thread.archived ? (
+                <button
+                  className="ghost-icon small thread-action"
+                  onClick={() => void onArchiveThread(thread, false)}
+                  title="恢复"
+                >
+                  <ArchiveRestore size={14} />
+                </button>
+              ) : (
+                <button
+                  className="ghost-icon small thread-action"
+                  onClick={() => void onArchiveThread(thread, true)}
+                  title="归档"
+                >
+                  <Archive size={14} />
+                </button>
+              )}
+
+              <button
+                className="ghost-icon small thread-action danger"
+                onClick={() => void onDeleteThread(thread)}
+                title="删除"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}

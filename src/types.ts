@@ -1,0 +1,367 @@
+export type AppSection = "chat" | "automation" | "skills" | "tools" | "knowledge" | "settings";
+export type ContextTier = "low" | "medium" | "high";
+export type EnvironmentMode = "local" | "cloud";
+export type MessageRole = "user" | "assistant" | "tool";
+export type PreviewKind = "text" | "code" | "markdown" | "image" | "html" | "web" | "binary";
+export type McpTransport = "local" | "remote";
+export type McpConnectionStatus = "connected" | "disabled" | "failed" | "needs_auth" | "needs_client_registration";
+export type McpInspectorTransport = "stdio" | "streamable-http" | "sse";
+export type McpToolTaskSupport = "optional" | "required" | "forbidden";
+export type ModelProviderKind = "openai-compatible";
+export type SkillKind = "command" | "codex";
+
+export interface ProviderModelConfig {
+  id: string;
+  label: string;
+  enabled: boolean;
+}
+
+export interface ModelProviderConfig {
+  id: string;
+  name: string;
+  kind: ModelProviderKind;
+  baseUrl: string;
+  apiKey: string;
+  temperature: number;
+  maxTokens: number;
+  enabled: boolean;
+  models: ProviderModelConfig[];
+}
+
+export interface RuntimeModelOption {
+  id: string;
+  label: string;
+  providerId: string;
+  providerName: string;
+  providerKind: ModelProviderKind;
+  providerEnabled: boolean;
+  modelId: string;
+  modelLabel: string;
+  enabled: boolean;
+}
+
+export interface ModelProviderFetchInput {
+  providerId: string;
+  name: string;
+  kind: ModelProviderKind;
+  baseUrl: string;
+  apiKey: string;
+}
+
+export interface ModelProviderFetchResult {
+  providerId: string;
+  models: ProviderModelConfig[];
+}
+
+export interface McpServerConfig {
+  id: string;
+  name: string;
+  transport: McpTransport;
+  command: string;
+  args: string[];
+  url: string;
+  headersJson: string;
+  envJson: string;
+  enabled: boolean;
+  timeoutMs: number;
+}
+
+export interface SkillConfig {
+  id: string;
+  name: string;
+  description: string;
+  kind: SkillKind;
+  command: string;
+  enabled: boolean;
+  sourcePath?: string;
+  system?: boolean;
+}
+
+export interface RuntimeSkill {
+  id: string;
+  name: string;
+  description: string;
+  location: string;
+  content: string;
+}
+
+export interface RuntimeAgent {
+  name: string;
+  description?: string;
+  mode: "subagent" | "primary" | "all";
+  modelLabel?: string;
+}
+
+export interface McpServerStatus {
+  name: string;
+  status: McpConnectionStatus;
+  error?: string;
+}
+
+export interface McpToolParameter {
+  name: string;
+  type: string;
+  required: boolean;
+  description?: string;
+  schema: Record<string, unknown>;
+}
+
+export interface McpToolInfo {
+  serverId: string;
+  serverName: string;
+  name: string;
+  title?: string;
+  description?: string;
+  taskSupport?: McpToolTaskSupport;
+  inputSchema: Record<string, unknown>;
+  parameters: McpToolParameter[];
+}
+
+export interface McpServerToolsResult {
+  serverId: string;
+  serverName: string;
+  fetchedAt: number;
+  transport: McpInspectorTransport;
+  tools: McpToolInfo[];
+  stderr?: string;
+}
+
+export interface McpInspectInput {
+  server: McpServerConfig;
+  workspaceRoot?: string;
+}
+
+export interface McpToolDebugInput extends McpInspectInput {
+  toolName: string;
+  argumentsJson: string;
+}
+
+export interface McpToolDebugResult {
+  serverId: string;
+  serverName: string;
+  toolName: string;
+  invokedAt: number;
+  transport: McpInspectorTransport;
+  isError: boolean;
+  content: string;
+  structuredContentJson: string;
+  rawJson: string;
+  stderr?: string;
+  taskLog?: string;
+}
+
+export interface WorkspaceTool {
+  id: string;
+  name: string;
+  title?: string;
+  description?: string;
+  source: "runtime" | "mcp";
+  origin: string;
+  serverId?: string;
+  serverName?: string;
+  parameters?: McpToolParameter[];
+  taskSupport?: McpToolTaskSupport;
+  observed: boolean;
+}
+
+export interface WorkspaceToolCatalog {
+  fetchedAt: number;
+  tools: WorkspaceTool[];
+}
+
+export interface KnowledgeBaseConnectionConfig {
+  enabled: boolean;
+  embeddingProviderId: string;
+  embeddingModel: string;
+  selectedBaseIds: string[];
+  documentCount: number;
+  chunkSize: number;
+  chunkOverlap: number;
+}
+
+export type KnowledgeItemType = "file" | "note" | "url";
+
+export interface KnowledgeItemSummary {
+  id: string;
+  type: KnowledgeItemType;
+  title: string;
+  source: string;
+  chunkCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface KnowledgeBaseSummary {
+  id: string;
+  name: string;
+  description?: string;
+  itemCount: number;
+  chunkCount: number;
+  createdAt: number;
+  updatedAt: number;
+  items: KnowledgeItemSummary[];
+}
+
+export interface KnowledgeSearchResultItem {
+  pageContent: string;
+  score: number;
+  metadata: Record<string, unknown>;
+  knowledgeBaseId: string;
+  knowledgeBaseName: string;
+}
+
+export interface KnowledgeCatalogPayload {
+  fetchedAt: number;
+  knowledgeBases: KnowledgeBaseSummary[];
+}
+
+export interface KnowledgeSearchPayload {
+  query: string;
+  total: number;
+  results: KnowledgeSearchResultItem[];
+  searchedBases: Array<{ id: string; name: string }>;
+  warnings: string[];
+}
+
+export interface KnowledgeInjectionMeta {
+  injected: boolean;
+  query: string;
+  resultCount: number;
+  searchedBaseIds: string[];
+  warnings: string[];
+}
+
+export interface KnowledgeBaseCreateInput {
+  name: string;
+  description?: string;
+}
+
+export interface KnowledgeAddNoteInput {
+  baseId: string;
+  title: string;
+  content: string;
+}
+
+export interface KnowledgeAddFilesInput {
+  baseId: string;
+  files: FileDropEntry[];
+}
+
+export interface ProxyConfig {
+  http: string;
+  https: string;
+  bypass: string;
+}
+
+export interface AppConfig {
+  opencodeRoot: string;
+  bridgeUrl: string;
+  environment: EnvironmentMode;
+  activeModelId: string;
+  contextTier: ContextTier;
+  proxy: ProxyConfig;
+  modelProviders: ModelProviderConfig[];
+  mcpServers: McpServerConfig[];
+  skills: SkillConfig[];
+  hiddenCodexSkillIds: string[];
+  knowledgeBase: KnowledgeBaseConnectionConfig;
+}
+
+export interface MessageAttachment {
+  id: string;
+  name: string;
+  path: string;
+  size: number;
+  mimeType: string;
+  kind: PreviewKind;
+  url?: string;
+  content?: string;
+  dataUrl?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: MessageRole;
+  text: string;
+  createdAt: number;
+  status?: "loading" | "done" | "error";
+  attachments?: MessageAttachment[];
+  toolName?: string;
+  skillName?: string;
+}
+
+export interface ThreadSummary {
+  id: string;
+  title: string;
+  updatedAt: number;
+  lastMessage: string;
+  messageCount: number;
+  archived: boolean;
+  workspaceRoot?: string;
+}
+
+export interface ThreadRecord extends ThreadSummary {
+  messages: ChatMessage[];
+}
+
+export interface FilePreviewPayload {
+  title: string;
+  path: string | null;
+  kind: PreviewKind;
+  mimeType: string;
+  content: string;
+  url?: string;
+}
+
+export interface FileDropEntry {
+  id: string;
+  name: string;
+  path: string;
+  size: number;
+  mimeType: string;
+  kind?: PreviewKind;
+  url?: string;
+  content?: string;
+  dataUrl?: string;
+}
+
+export interface BootstrapPayload {
+  config: AppConfig;
+  threads: ThreadSummary[];
+  activeThreadId: string;
+  currentThread: ThreadRecord;
+  availableSkills: RuntimeSkill[];
+  availableAgents: RuntimeAgent[];
+  mcpStatuses: McpServerStatus[];
+}
+
+export interface SendMessageInput {
+  threadId: string;
+  message: string;
+  attachments: FileDropEntry[];
+}
+
+export interface SendMessageResult {
+  thread: ThreadRecord;
+  knowledge?: KnowledgeInjectionMeta;
+}
+
+export interface SkillRunInput {
+  threadId: string;
+  skillId: string;
+  prompt: string;
+}
+
+export interface SkillRunResult {
+  thread: ThreadRecord;
+}
+
+export interface SkillDeleteResult {
+  config: AppConfig;
+  threads: ThreadSummary[];
+  activeThreadId: string;
+  currentThread: ThreadRecord;
+  availableSkills: RuntimeSkill[];
+  availableAgents: RuntimeAgent[];
+  mcpStatuses: McpServerStatus[];
+}

@@ -1,0 +1,53 @@
+{
+  "opencodeRoot": "F:/work/github/opencode",
+  "bridgeUrl": "",
+  "environment": "local",
+  "activeModelId": "iflyrpa::azure/gpt-5-mini",
+  "contextTier": "high",
+  "proxy": {
+    "http": "",
+    "https": "",
+    "bypass": "localhost,127.0.0.1"
+  },
+  "modelProviders": [
+    {
+      "id": "iflyrpa",
+      "name": "iFlyRpa",
+      "kind": "openai-compatible",
+      "baseUrl": "https://oneapi.iflyrpa.com/v1",
+      "apiKey": "sk-xxxx",
+      "temperature": 0.2,
+      "maxTokens": 8192,
+      "enabled": true,
+      "models": [
+        {
+          "id": "azure/gpt-5",
+          "label": "GPT-5",
+          "enabled": true
+        },
+        {
+          "id": "azure/gpt-5-mini",
+          "label": "GPT-5 Mini",
+          "enabled": true
+        },
+        {
+          "id": "azure/gpt-5-nano",
+          "label": "GPT-5 Nano",
+          "enabled": true
+        },
+        {
+          "id": "claude-4.5-sonnet",
+          "label": "Claude 4.5 Sonnet",
+          "enabled": true
+        },
+        {
+          "id": "gemini-2.5-pro",
+          "label": "Gemini 2.5 Pro",
+          "enabled": true
+        }
+      ]
+    }
+  ],
+  "mcpServers": [],
+  "skills": []
+}
