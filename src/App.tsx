@@ -264,12 +264,20 @@ function extractErrorText(raw: string) {
     };
 
     if (parsed.name === "ConfigInvalidError") {
+      /*
       const firstIssue = parsed.data?.issues?.[0];
       const issuePath = Array.isArray(firstIssue?.path) ? firstIssue.path.join(".") : "";
       if (issuePath.includes(".status")) {
         return "杩愯鏃舵ā鍨嬮厤缃棤鏁堬紝璇峰埛鏂版ā鍨嬪垪琛ㄦ垨鍒犻櫎寮傚父妯″瀷鍚庨噸璇曘€?;
       }
       return firstIssue?.message || "杩愯鏃堕厤缃棤鏁堬紝璇锋鏌ユā鍨嬨€丮CP 鎴栦唬鐞嗚缃悗閲嶈瘯銆?;
+      */
+      const firstIssue = parsed.data?.issues?.[0];
+      const issuePath = Array.isArray(firstIssue?.path) ? firstIssue.path.join(".") : "";
+      if (issuePath.includes(".status")) {
+        return "Runtime model status is invalid. Refresh the model list or remove the broken model and try again.";
+      }
+      return firstIssue?.message || "Runtime configuration is invalid. Check the model, MCP, or proxy settings and try again.";
     }
 
     return (
@@ -293,6 +301,8 @@ function formatErrorMessage(error: unknown, fallback: string) {
         : "";
   const text = extractErrorText(raw);
   const normalized = text.toLowerCase();
+
+  /*
 
   if (
     normalized.includes("unsupported_country_region_territory") ||
