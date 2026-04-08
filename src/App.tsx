@@ -69,6 +69,10 @@ export default function App() {
     archivedThreads,
     attachments,
     availableSkills,
+    pendingQuestions,
+    replyQuestion,
+    rejectQuestion,
+    abortThread,
     chooseThreadWorkspace,
     clearSelectedComposerSkill,
     commitConfig,
@@ -703,6 +707,7 @@ export default function App() {
   }
 
   const showPreviewPane = view === "chat" && preview && previewOpen;
+  const threadBusy = activeThread?.messages.some((message) => message.status === "loading") ?? false;
   const settingsStats = {
     threadCount: activeThreads.length + archivedThreads.length,
     providerCount: config.modelProviders.length,
@@ -865,7 +870,9 @@ export default function App() {
           previewOpen={previewOpen}
           selectedSkillName={selectedComposerSkill?.name ?? null}
           selectableModels={selectableModels}
+          pendingQuestions={pendingQuestions}
           sending={sending}
+          threadBusy={threadBusy}
           slashSkillSuggestions={slashSkillSuggestions.map((skill) => ({
             id: skill.id,
             name: skill.name,
@@ -885,10 +892,13 @@ export default function App() {
           onOpenLink={openPreviewLink}
           onPickFiles={pickFiles}
           onModelChange={(value) => updateConfigField("activeModelId", value)}
+          onReplyQuestion={replyQuestion}
+          onRejectQuestion={rejectQuestion}
           onRemoveAttachment={removeAttachment}
           onRemoveSelectedSkill={clearSelectedComposerSkill}
           onSelectSlashSkill={selectComposerSkill}
           onSend={sendMessageWithSkills}
+          onStop={() => abortThread()}
           onToggleKnowledgeBase={toggleKnowledgeBaseSelection}
           onTogglePreviewPane={() => setPreviewOpen((value) => !value)}
         />

@@ -22,8 +22,10 @@ import {
   OpencodeRuntime,
   type OpencodeFilePart,
   type OpencodePart,
+  type OpencodeQuestionRequest,
   type OpencodeSessionInfo,
   type OpencodeSessionMessage,
+  type OpencodeSessionStatus,
   type OpencodeToolPart,
 } from "./opencode-runtime";
 import type {
@@ -43,6 +45,7 @@ import type {
   ModelProviderConfig,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
+  PendingQuestion,
   PreviewKind,
   ProxyConfig,
   SendMessageInput,
@@ -863,6 +866,29 @@ function formatToolInput(input: Record<string, unknown>) {
   return JSON.stringify(input, null, 2);
 }
 
+function questionRequestFromRuntime(request: OpencodeQuestionRequest): PendingQuestion {
+  return {
+    id: request.id,
+    sessionID: request.sessionID,
+    questions: request.questions.map((question) => ({
+      header: question.header,
+      question: question.question,
+      options: question.options.map((option) => ({
+        label: option.label,
+        description: option.description,
+      })),
+      multiple: question.multiple,
+      custom: question.custom,
+    })),
+    tool: request.tool
+      ? {
+          messageID: request.tool.messageID,
+          callID: request.tool.callID,
+        }
+      : undefined,
+  };
+}
+
 function toolMessageFromPart(part: OpencodeToolPart): ChatMessage {
   const input = formatToolInput(part.state.input);
   const lines: string[] = [];
@@ -1107,12 +1133,13 @@ export class WorkspaceService {
       await this.saveState(state);
     }
 
-    const [threads, currentMessages, availableSkills, availableAgents, mcpStatuses] = await Promise.all([
+    const [threads, currentMessages, availableSkills, availableAgents, mcpStatuses, pendingQuestions] = await Promise.all([
       this.listThreadSummaries(state, sessions.length > 0 ? sessions : [current]),
       this.runtime.listMessages(state.config, current.id),
       this.runtime.listSkills(state.config).catch(() => []),
       this.runtime.listAgents(state.config).catch(() => []),
       this.runtime.listMcpStatuses(state.config).catch(() => []),
+      this.runtime.listQuestions(state.config).catch(() => []),
     ]);
 
     return {
@@ -1123,6 +1150,7 @@ export class WorkspaceService {
       availableSkills,
       availableAgents,
       mcpStatuses,
+      pendingQuestions: pendingQuestions.map(questionRequestFromRuntime),
     };
   }
 
@@ -1260,7 +1288,7 @@ export class WorkspaceService {
       }
     }
 
-    await this.runtime.prompt(this.getThreadConfig(state, input.threadId), input.threadId, transportMessage, input.attachments);
+    await this.runtime.promptAsync(this.getThreadConfig(state, input.threadId), input.threadId, transportMessage, input.attachments);
     state.activeThreadId = input.threadId;
     updateThreadMeta(state, input.threadId, (previous) => ({
       ...(previous.title?.trim() ? { title: previous.title.trim() } : {}),
@@ -1281,7 +1309,7 @@ export class WorkspaceService {
 
   async runSkill(input: SkillRunInput): Promise<SkillRunResult> {
     const state = await this.loadState();
-    await this.runtime.command(this.getThreadConfig(state, input.threadId), input.threadId, input.skillId, input.prompt || "", []);
+    await this.runtime.commandAsync(this.getThreadConfig(state, input.threadId), input.threadId, input.skillId, input.prompt || "", []);
     state.activeThreadId = input.threadId;
     updateThreadMeta(state, input.threadId, (previous) => ({
       ...(previous.title?.trim() ? { title: previous.title.trim() } : {}),
@@ -1296,6 +1324,40 @@ export class WorkspaceService {
     await this.saveState(state);
     return {
       thread,
+    };
+  }
+
+  async abortThread(threadId: string) {
+    const state = await this.loadState();
+    await this.runtime.abortSession(state.config, threadId);
+    return await this.bootstrap();
+  }
+
+  async replyQuestion(requestId: string, answers: string[][]) {
+    const state = await this.loadState();
+    await this.runtime.replyQuestion(state.config, requestId, answers);
+    return await this.bootstrap();
+  }
+
+  async rejectQuestion(requestId: string) {
+    const state = await this.loadState();
+    await this.runtime.rejectQuestion(state.config, requestId);
+    return await this.bootstrap();
+  }
+
+  async getThreadProgress(threadId: string) {
+    const state = await this.loadState();
+    const [statuses, questions] = await Promise.all([
+      this.runtime.listSessionStatuses(state.config).catch(() => ({} as Record<string, OpencodeSessionStatus>)),
+      this.runtime.listQuestions(state.config).catch(() => [] as OpencodeQuestionRequest[]),
+    ]);
+    const status = statuses[threadId];
+    const blockedOnQuestion = questions.some((question) => question.sessionID === threadId);
+    const busy = status?.type === "busy" || status?.type === "retry";
+
+    return {
+      busy,
+      blockedOnQuestion,
     };
   }
 

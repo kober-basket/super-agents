@@ -122,6 +122,36 @@ export interface OpencodeToolPart {
       };
 }
 
+export interface OpencodeQuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface OpencodeQuestionInfo {
+  question: string;
+  header: string;
+  options: OpencodeQuestionOption[];
+  multiple?: boolean;
+  custom?: boolean;
+}
+
+export interface OpencodeQuestionRequest {
+  id: string;
+  sessionID: string;
+  questions: OpencodeQuestionInfo[];
+  tool?: {
+    messageID: string;
+    callID: string;
+  };
+}
+
+export interface OpencodeSessionStatus {
+  type: "idle" | "busy" | "retry";
+  attempt?: number;
+  message?: string;
+  next?: number;
+}
+
 export type OpencodePart =
   | OpencodeTextPart
   | OpencodeReasoningPart
@@ -906,6 +936,14 @@ export class OpencodeRuntime {
     return this.request<OpencodeSessionMessage[]>(config, `/session/${sessionID}/message`, undefined, undefined, null);
   }
 
+  listSessionStatuses(config: AppConfig) {
+    return this.request<Record<string, OpencodeSessionStatus>>(config, "/session/status", undefined, undefined, null);
+  }
+
+  listQuestions(config: AppConfig) {
+    return this.request<OpencodeQuestionRequest[]>(config, "/question", undefined, undefined, null);
+  }
+
   createSession(config: AppConfig, title?: string) {
     return this.request<OpencodeSessionInfo>(
       config,
@@ -961,6 +999,32 @@ export class OpencodeRuntime {
     });
   }
 
+  async promptAsync(config: AppConfig, sessionID: string, message: string, attachments: FileDropEntry[]) {
+    const model = buildModelRef(config);
+    if (!model) {
+      throw new Error("No available model configured. Configure and enable a model before sending messages.");
+    }
+    const parts = [
+      {
+        type: "text" as const,
+        text: message,
+      },
+      ...attachments.map(makeFilePart).filter(Boolean),
+    ];
+
+    return await this.request<unknown>(config, `/session/${sessionID}/prompt_async`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agent: "build",
+        model,
+        parts,
+      }),
+    });
+  }
+
   async command(config: AppConfig, sessionID: string, command: string, argumentsText: string, attachments: FileDropEntry[]) {
     const active = buildModelRef(config);
     if (!active) {
@@ -978,6 +1042,49 @@ export class OpencodeRuntime {
         parts: attachments.map(makeFilePart).filter(Boolean),
       }),
     });
+  }
+
+  async commandAsync(config: AppConfig, sessionID: string, command: string, argumentsText: string, attachments: FileDropEntry[]) {
+    const active = buildModelRef(config);
+    if (!active) {
+      throw new Error("No available model configured. Configure and enable a model before running skills.");
+    }
+    return await this.request<unknown>(config, `/session/${sessionID}/command`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        command,
+        arguments: argumentsText,
+        model: `${active.providerID}/${active.modelID}`,
+        parts: attachments.map(makeFilePart).filter(Boolean),
+      }),
+    });
+  }
+
+  abortSession(config: AppConfig, sessionID: string) {
+    return this.request<boolean>(config, `/session/${sessionID}/abort`, {
+      method: "POST",
+    }, undefined, null);
+  }
+
+  replyQuestion(config: AppConfig, requestID: string, answers: string[][]) {
+    return this.request<boolean>(config, `/question/${requestID}/reply`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        answers,
+      }),
+    }, undefined, null);
+  }
+
+  rejectQuestion(config: AppConfig, requestID: string) {
+    return this.request<boolean>(config, `/question/${requestID}/reject`, {
+      method: "POST",
+    }, undefined, null);
   }
 
   async listSkills(config: AppConfig): Promise<RuntimeSkill[]> {
@@ -1011,4 +1118,4 @@ export class OpencodeRuntime {
   }
 }
 
-export type { OpencodeFilePart, OpencodeToolPart };
+export type { OpencodeFilePart, OpencodeQuestionRequest, OpencodeSessionStatus, OpencodeToolPart };

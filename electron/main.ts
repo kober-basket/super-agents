@@ -12,6 +12,7 @@ app.setPath("userData", path.join(app.getPath("appData"), APP_DATA_DIR));
 let mainWindow: BrowserWindow | null = null;
 let service: WorkspaceService | null = null;
 const mcpInspector = new McpInspector();
+const threadMonitors = new Map<string, { cancelled: boolean; promise: Promise<void> }>();
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -49,30 +50,45 @@ async function broadcastState() {
   mainWindow.webContents.send("desktop:workspace-changed", payload);
 }
 
-function startProgressBroadcast(intervalMs = 250) {
-  let stopped = false;
-  let inFlight: Promise<void> | null = null;
+async function stopThreadMonitor(threadId: string) {
+  const monitor = threadMonitors.get(threadId);
+  if (!monitor) return;
+  monitor.cancelled = true;
+  await monitor.promise.catch(() => undefined);
+}
 
-  const tick = () => {
-    if (stopped || inFlight) return;
-    inFlight = broadcastState()
-      .catch(() => undefined)
-      .finally(() => {
-        inFlight = null;
-      });
+function monitorThreadProgress(threadId: string, intervalMs = 350) {
+  void stopThreadMonitor(threadId);
+
+  const monitor = {
+    cancelled: false,
+    promise: Promise.resolve(),
   };
 
-  tick();
-  const timer = setInterval(tick, intervalMs);
+  monitor.promise = (async () => {
+    while (!monitor.cancelled) {
+      await broadcastState().catch(() => undefined);
+      if (monitor.cancelled || !service) break;
 
-  return async () => {
-    stopped = true;
-    clearInterval(timer);
-    if (inFlight) {
-      await inFlight;
+      const progress = await service.getThreadProgress(threadId).catch(() => ({
+        busy: false,
+        blockedOnQuestion: false,
+      }));
+
+      if (monitor.cancelled || !progress.busy || progress.blockedOnQuestion) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
+
     await broadcastState().catch(() => undefined);
-  };
+    if (threadMonitors.get(threadId) === monitor) {
+      threadMonitors.delete(threadId);
+    }
+  })();
+
+  threadMonitors.set(threadId, monitor);
 }
 
 app.whenReady().then(async () => {
@@ -125,16 +141,35 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("desktop:send-message", async (_event, payload: { threadId: string; message: string; attachments: unknown[] }) => {
-    const stopBroadcast = startProgressBroadcast();
-    try {
-      return await service!.sendMessage({
-        threadId: payload.threadId,
-        message: payload.message,
-        attachments: Array.isArray(payload.attachments) ? (payload.attachments as any[]) : [],
-      });
-    } finally {
-      await stopBroadcast();
-    }
+    const result = await service!.sendMessage({
+      threadId: payload.threadId,
+      message: payload.message,
+      attachments: Array.isArray(payload.attachments) ? (payload.attachments as any[]) : [],
+    });
+    monitorThreadProgress(payload.threadId);
+    return result;
+  });
+
+  ipcMain.handle("desktop:abort-thread", async (_event, threadId: string) => {
+    await stopThreadMonitor(threadId);
+    const payload = await service!.abortThread(threadId);
+    await broadcastState();
+    return payload;
+  });
+
+  ipcMain.handle("desktop:reply-question", async (_event, payload: { requestId: string; sessionId: string; answers: string[][] }) => {
+    const next = await service!.replyQuestion(
+      payload.requestId,
+      Array.isArray(payload.answers) ? payload.answers : [],
+    );
+    monitorThreadProgress(payload.sessionId);
+    return next;
+  });
+
+  ipcMain.handle("desktop:reject-question", async (_event, payload: { requestId: string; sessionId: string }) => {
+    const next = await service!.rejectQuestion(payload.requestId);
+    monitorThreadProgress(payload.sessionId);
+    return next;
   });
 
   ipcMain.handle("desktop:list-knowledge-bases", async () => {
@@ -183,12 +218,9 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle("desktop:run-skill", async (_event, payload: { threadId: string; skillId: string; prompt: string }) => {
-    const stopBroadcast = startProgressBroadcast();
-    try {
-      return await service!.runSkill(payload);
-    } finally {
-      await stopBroadcast();
-    }
+    const result = await service!.runSkill(payload);
+    monitorThreadProgress(payload.threadId);
+    return result;
   });
 
   ipcMain.handle("desktop:uninstall-skill", async (_event, skillId: string) => {
@@ -318,5 +350,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", async () => {
+  const threadIds = Array.from(threadMonitors.keys());
+  await Promise.all(threadIds.map((threadId) => stopThreadMonitor(threadId)));
   await service?.shutdown();
 });

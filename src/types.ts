@@ -312,6 +312,29 @@ export interface ChatMessage {
   skillName?: string;
 }
 
+export interface PendingQuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface PendingQuestionItem {
+  header: string;
+  question: string;
+  options: PendingQuestionOption[];
+  multiple?: boolean;
+  custom?: boolean;
+}
+
+export interface PendingQuestion {
+  id: string;
+  sessionID: string;
+  questions: PendingQuestionItem[];
+  tool?: {
+    messageID: string;
+    callID: string;
+  };
+}
+
 export interface ThreadSummary {
   id: string;
   title: string;
@@ -355,6 +378,7 @@ export interface BootstrapPayload {
   availableSkills: RuntimeSkill[];
   availableAgents: RuntimeAgent[];
   mcpStatuses: McpServerStatus[];
+  pendingQuestions: PendingQuestion[];
 }
 
 export interface SendMessageInput {
@@ -366,6 +390,17 @@ export interface SendMessageInput {
 export interface SendMessageResult {
   thread: ThreadRecord;
   knowledge?: KnowledgeInjectionMeta;
+}
+
+export interface QuestionReplyInput {
+  requestId: string;
+  sessionId: string;
+  answers: string[][];
+}
+
+export interface QuestionRejectInput {
+  requestId: string;
+  sessionId: string;
 }
 
 export interface SkillRunInput {

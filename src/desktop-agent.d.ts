@@ -16,6 +16,8 @@ import type {
   McpToolDebugResult,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
+  QuestionRejectInput,
+  QuestionReplyInput,
   SendMessageInput,
   SendMessageResult,
   SkillRunInput,
@@ -37,6 +39,9 @@ declare global {
       archiveThread: (threadId: string, archived: boolean) => Promise<BootstrapPayload>;
       deleteThread: (threadId: string) => Promise<BootstrapPayload>;
       sendMessage: (payload: SendMessageInput) => Promise<SendMessageResult>;
+      abortThread: (threadId: string) => Promise<BootstrapPayload>;
+      replyQuestion: (payload: QuestionReplyInput) => Promise<BootstrapPayload>;
+      rejectQuestion: (payload: QuestionRejectInput) => Promise<BootstrapPayload>;
       listKnowledgeBases: () => Promise<KnowledgeCatalogPayload>;
       createKnowledgeBase: (payload: KnowledgeBaseCreateInput) => Promise<KnowledgeCatalogPayload>;
       deleteKnowledgeBase: (baseId: string) => Promise<KnowledgeCatalogPayload>;

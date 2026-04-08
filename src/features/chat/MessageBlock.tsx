@@ -2,40 +2,58 @@ import clsx from "clsx";
 import { ChevronDown, LoaderCircle, Sparkles, Wrench } from "lucide-react";
 
 import { formatDateTime, markdownToHtml } from "../../lib/format";
-import type { ChatMessage, FileDropEntry } from "../../types";
+import type { ChatMessage, FileDropEntry, PendingQuestion } from "../../types";
 import { FileCard } from "./FileCard";
+import { QuestionCard } from "./QuestionCard";
 
 interface MessageBlockProps {
   message: ChatMessage;
+  questionRequest?: PendingQuestion;
   onOpenFile: (file: FileDropEntry) => void;
   onOpenLink: (url: string) => void;
+  onReplyQuestion: (requestId: string, sessionId: string, answers: string[][]) => Promise<void> | void;
+  onRejectQuestion: (requestId: string, sessionId: string) => Promise<void> | void;
+  onAbortThread: (threadId: string) => Promise<void> | void;
 }
 
-function summarizeToolMessage(message: ChatMessage) {
+function summarizeToolMessage(message: ChatMessage, questionRequest?: PendingQuestion) {
+  if (questionRequest?.questions.length) {
+    return questionRequest.questions[0]?.question || "需要你回答";
+  }
+
   const normalized = message.text
     .replace(/\s+/g, " ")
     .replace(/^Input:\s*/i, "")
     .trim();
 
   if (!normalized) {
-    if (message.status === "loading") return "正在执行";
+    if (message.status === "loading") return "正在执行...";
     if (message.status === "error") return "执行失败";
     return "查看详情";
   }
 
-  return normalized.length > 88 ? `${normalized.slice(0, 88)}…` : normalized;
+  return normalized.length > 88 ? `${normalized.slice(0, 88)}...` : normalized;
 }
 
-function toolStatusLabel(message: ChatMessage) {
+function toolStatusLabel(message: ChatMessage, questionRequest?: PendingQuestion) {
+  if (questionRequest) return "待回答";
   if (message.status === "loading") return "执行中";
   if (message.status === "error") return "失败";
   return "完成";
 }
 
-export function MessageBlock({ message, onOpenFile, onOpenLink }: MessageBlockProps) {
+export function MessageBlock({
+  message,
+  questionRequest,
+  onOpenFile,
+  onOpenLink,
+  onReplyQuestion,
+  onRejectQuestion,
+  onAbortThread,
+}: MessageBlockProps) {
   if (message.role === "tool") {
-    const summary = summarizeToolMessage(message);
-    const statusLabel = toolStatusLabel(message);
+    const summary = summarizeToolMessage(message, questionRequest);
+    const statusLabel = toolStatusLabel(message, questionRequest);
 
     return (
       <article className="activity-row">
@@ -58,7 +76,17 @@ export function MessageBlock({ message, onOpenFile, onOpenLink }: MessageBlockPr
           </summary>
 
           <div className="activity-detail">
-            {message.text ? <pre>{message.text}</pre> : null}
+            {questionRequest ? (
+              <QuestionCard
+                request={questionRequest}
+                onSubmit={(answers) => onReplyQuestion(questionRequest.id, questionRequest.sessionID, answers)}
+                onReject={() => onRejectQuestion(questionRequest.id, questionRequest.sessionID)}
+                onAbort={() => onAbortThread(questionRequest.sessionID)}
+              />
+            ) : null}
+
+            {message.text && !questionRequest ? <pre>{message.text}</pre> : null}
+
             {message.attachments?.length ? (
               <div className="file-stack">
                 {message.attachments.map((file) => (
@@ -93,7 +121,7 @@ export function MessageBlock({ message, onOpenFile, onOpenLink }: MessageBlockPr
         {message.role === "assistant" && message.status === "loading" && !message.text ? (
           <div className="message-loading">
             <LoaderCircle size={14} className="spin" />
-            <span>正在生成…</span>
+            <span>正在生成...</span>
           </div>
         ) : null}
 

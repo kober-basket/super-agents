@@ -10,6 +10,11 @@ export const workspaceClient = {
   deleteThread: (threadId: string) => window.desktopAgent.deleteThread(threadId),
   sendMessage: (payload: Parameters<typeof window.desktopAgent.sendMessage>[0]) =>
     window.desktopAgent.sendMessage(payload),
+  abortThread: (threadId: string) => window.desktopAgent.abortThread(threadId),
+  replyQuestion: (payload: Parameters<typeof window.desktopAgent.replyQuestion>[0]) =>
+    window.desktopAgent.replyQuestion(payload),
+  rejectQuestion: (payload: Parameters<typeof window.desktopAgent.rejectQuestion>[0]) =>
+    window.desktopAgent.rejectQuestion(payload),
   listKnowledgeBases: () => window.desktopAgent.listKnowledgeBases(),
   createKnowledgeBase: (payload: Parameters<typeof window.desktopAgent.createKnowledgeBase>[0]) =>
     window.desktopAgent.createKnowledgeBase(payload),

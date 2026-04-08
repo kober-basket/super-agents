@@ -10,6 +10,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Paperclip,
+  Square,
   Sparkles,
   X,
 } from "lucide-react";
@@ -18,12 +19,14 @@ import type {
   AppConfig,
   FileDropEntry,
   KnowledgeBaseSummary,
+  PendingQuestion,
   RuntimeModelOption,
   ThreadRecord,
 } from "../../types";
 import { normalizeDroppedFiles } from "../shared/utils";
 import { EMPTY_SUGGESTIONS } from "./constants";
 import { MessageBlock } from "./MessageBlock";
+import { QuestionCard } from "./QuestionCard";
 
 interface ChatViewProps {
   activeThread: ThreadRecord | null;
@@ -41,7 +44,9 @@ interface ChatViewProps {
   previewOpen: boolean;
   selectedSkillName: string | null;
   selectableModels: RuntimeModelOption[];
+  pendingQuestions: PendingQuestion[];
   sending: boolean;
+  threadBusy: boolean;
   slashSkillSuggestions: Array<{ id: string; name: string; description?: string; source: string }>;
   title: string;
   workspaceIssue?: string | null;
@@ -56,10 +61,13 @@ interface ChatViewProps {
   onOpenLink: (url: string) => void;
   onPickFiles: () => void | Promise<void>;
   onModelChange: (modelId: string) => void;
+  onReplyQuestion: (requestId: string, sessionId: string, answers: string[][]) => Promise<void> | void;
+  onRejectQuestion: (requestId: string, sessionId: string) => Promise<void> | void;
   onRemoveAttachment: (id: string) => void;
   onRemoveSelectedSkill: () => void;
   onSelectSlashSkill: (skillId: string) => void;
   onSend: () => void | Promise<void>;
+  onStop: () => void | Promise<void>;
   onToggleKnowledgeBase: (baseId: string) => void;
   onTogglePreviewPane: () => void;
 }
@@ -80,7 +88,9 @@ export function ChatView({
   previewOpen,
   selectedSkillName,
   selectableModels,
+  pendingQuestions,
   sending,
+  threadBusy,
   slashSkillSuggestions,
   title,
   workspaceIssue,
@@ -95,21 +105,45 @@ export function ChatView({
   onOpenLink,
   onPickFiles,
   onModelChange,
+  onReplyQuestion,
+  onRejectQuestion,
   onRemoveAttachment,
   onRemoveSelectedSkill,
   onSelectSlashSkill,
   onSend,
+  onStop,
   onToggleKnowledgeBase,
   onTogglePreviewPane,
 }: ChatViewProps) {
   const [knowledgePickerOpen, setKnowledgePickerOpen] = useState(false);
   const knowledgePickerRef = useRef<HTMLDivElement>(null);
   const hasAvailableModel = Boolean(composerModelId && selectableModels.length > 0);
-  const canSend = hasAvailableModel && !composing && !sending && (Boolean(composer.trim()) || attachments.length > 0);
+  const canSend =
+    hasAvailableModel && !threadBusy && !composing && !sending && (Boolean(composer.trim()) || attachments.length > 0);
   const selectedKnowledgeBases = useMemo(
     () => knowledgeBases.filter((base) => knowledgeConfig.selectedBaseIds.includes(base.id)),
     [knowledgeBases, knowledgeConfig.selectedBaseIds],
   );
+  const activePendingQuestions = useMemo(
+    () => pendingQuestions.filter((item) => item.sessionID === activeThread?.id),
+    [activeThread?.id, pendingQuestions],
+  );
+  const pendingQuestionByCallId = useMemo(
+    () =>
+      new Map(
+        activePendingQuestions
+          .filter((item) => item.tool?.callID)
+          .map((item) => [item.tool!.callID, item] as const),
+      ),
+    [activePendingQuestions],
+  );
+  const unmatchedQuestions = useMemo(() => {
+    const messageIds = new Set((activeThread?.messages ?? []).map((message) => message.id));
+    return activePendingQuestions.filter((item) => {
+      const callId = item.tool?.callID;
+      return !callId || !messageIds.has(callId);
+    });
+  }, [activePendingQuestions, activeThread?.messages]);
   const knowledgeSummary = selectedKnowledgeBases.length > 0 ? `已选 ${selectedKnowledgeBases.length} 个` : "未选知识库";
 
   useEffect(() => {
@@ -169,7 +203,29 @@ export function ChatView({
           {activeThread?.messages.length ? (
             <div className="message-list">
               {activeThread.messages.map((message) => (
-                <MessageBlock key={message.id} message={message} onOpenFile={onOpenFile} onOpenLink={onOpenLink} />
+                <MessageBlock
+                  key={message.id}
+                  message={message}
+                  questionRequest={pendingQuestionByCallId.get(message.id)}
+                  onOpenFile={onOpenFile}
+                  onOpenLink={onOpenLink}
+                  onReplyQuestion={onReplyQuestion}
+                  onRejectQuestion={onRejectQuestion}
+                  onAbortThread={() => onStop()}
+                />
+              ))}
+
+              {unmatchedQuestions.map((question) => (
+                <article key={question.id} className="activity-row">
+                  <div className="activity-card question-standalone-card">
+                    <QuestionCard
+                      request={question}
+                      onSubmit={(answers) => onReplyQuestion(question.id, question.sessionID, answers)}
+                      onReject={() => onRejectQuestion(question.id, question.sessionID)}
+                      onAbort={onStop}
+                    />
+                  </div>
+                </article>
               ))}
             </div>
           ) : (
@@ -231,7 +287,7 @@ export function ChatView({
                     return;
                   }
 
-                  if (event.key === "Enter" && !event.shiftKey && hasAvailableModel) {
+                  if (event.key === "Enter" && !event.shiftKey && hasAvailableModel && !threadBusy) {
                     event.preventDefault();
                     void onSend();
                   }
@@ -354,17 +410,19 @@ export function ChatView({
                 </button>
                 <button
                   className="send-button"
-                  onClick={() => void onSend()}
-                  disabled={!canSend}
+                  onClick={() => void (threadBusy ? onStop() : onSend())}
+                  disabled={threadBusy ? false : !canSend}
                   title={
-                    !hasAvailableModel
+                    threadBusy
+                      ? "停止当前运行"
+                      : !hasAvailableModel
                       ? "请先配置并启用可用模型"
                       : composing
                         ? "请先确认输入法候选词"
                         : "发送"
                   }
                 >
-                  {sending ? <LoaderCircle size={16} className="spin" /> : <ArrowUp size={16} />}
+                  {sending ? <LoaderCircle size={16} className="spin" /> : threadBusy ? <Square size={16} /> : <ArrowUp size={16} />}
                 </button>
               </div>
             </div>

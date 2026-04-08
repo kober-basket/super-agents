@@ -18,6 +18,8 @@ import type {
   McpToolDebugResult,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
+  QuestionRejectInput,
+  QuestionReplyInput,
   SendMessageInput,
   SendMessageResult,
   SkillRunInput,
@@ -43,6 +45,12 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:delete-thread", threadId) as Promise<BootstrapPayload>,
   sendMessage: (payload: SendMessageInput) =>
     ipcRenderer.invoke("desktop:send-message", payload) as Promise<SendMessageResult>,
+  abortThread: (threadId: string) =>
+    ipcRenderer.invoke("desktop:abort-thread", threadId) as Promise<BootstrapPayload>,
+  replyQuestion: (payload: QuestionReplyInput) =>
+    ipcRenderer.invoke("desktop:reply-question", payload) as Promise<BootstrapPayload>,
+  rejectQuestion: (payload: QuestionRejectInput) =>
+    ipcRenderer.invoke("desktop:reject-question", payload) as Promise<BootstrapPayload>,
   listKnowledgeBases: () =>
     ipcRenderer.invoke("desktop:list-knowledge-bases") as Promise<KnowledgeCatalogPayload>,
   createKnowledgeBase: (payload: KnowledgeBaseCreateInput) =>

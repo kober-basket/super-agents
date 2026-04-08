@@ -1,6 +1,7 @@
 import type {
   AppConfig,
   McpServerStatus,
+  PendingQuestion,
   RuntimeSkill,
   SkillConfig,
   ThreadRecord,
@@ -42,4 +43,5 @@ export type WorkspaceSnapshot = {
   currentThread: ThreadRecord | null
   availableSkills: RuntimeSkill[]
   mcpStatuses: McpServerStatus[]
+  pendingQuestions: PendingQuestion[]
 }

@@ -7,6 +7,7 @@ import type {
   BootstrapPayload,
   FileDropEntry,
   McpServerStatus,
+  PendingQuestion,
   RuntimeSkill,
   SkillConfig,
   ThreadRecord,
@@ -56,6 +57,7 @@ type SessionState = {
   mcpStatuses: McpServerStatus[];
   selectedComposerSkill: ComposerSkill | null;
   skillMessageMarkers: Record<string, SkillMessageMarker>;
+  pendingQuestions: PendingQuestion[];
   status: SessionStatus;
 };
 
@@ -96,6 +98,7 @@ function createInitialState(snapshot: WorkspaceSnapshot | null): SessionState {
         SKILL_MESSAGE_MARKERS_KEY,
         ...LEGACY_SKILL_MESSAGE_MARKER_KEYS,
       ]) ?? {},
+    pendingQuestions: snapshot?.pendingQuestions ?? [],
     status: {
       bootstrapping: true,
       creatingThread: false,
@@ -135,6 +138,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         },
         availableSkills: action.payload.availableSkills,
         mcpStatuses: action.payload.mcpStatuses,
+        pendingQuestions: action.payload.pendingQuestions,
         workspaceIssue: null,
         status: {
           ...state.status,
@@ -362,6 +366,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
       currentThread: payload.currentThread,
       availableSkills: payload.availableSkills,
       mcpStatuses: payload.mcpStatuses,
+      pendingQuestions: payload.pendingQuestions,
     } satisfies WorkspaceSnapshot);
   }
 
@@ -564,6 +569,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
           availableSkills: state.availableSkills,
           availableAgents: [],
           mcpStatuses: state.mcpStatuses,
+          pendingQuestions: state.pendingQuestions,
         },
       });
       await refreshThreadList();
@@ -631,12 +637,17 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
         message,
         attachments: nextAttachments,
       });
-      clearLocalThreadOverride(result.thread.id);
-      rememberThread(
-        skillMeta
-          ? registerSkillMessage(result.thread, message, skillMeta.displayText, skillMeta.skillName)
-          : result.thread,
-      );
+      const nextThread = skillMeta
+        ? registerSkillMessage(result.thread, message, skillMeta.displayText, skillMeta.skillName)
+        : decorateThread(result.thread);
+      const localOverride = localThreadOverridesRef.current[result.thread.id];
+
+      if (localOverride && shouldKeepLocalThreadOverride(localOverride, nextThread)) {
+        rememberLocalThreadOverride(localOverride);
+      } else {
+        clearLocalThreadOverride(result.thread.id);
+        rememberThread(nextThread);
+      }
       await refreshThreadList();
       if (result.knowledge?.warnings?.length) {
         onToast(result.knowledge.warnings[0]);
@@ -919,6 +930,46 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     dispatch({ type: "composerSkill/set", payload: null });
   }
 
+  async function replyQuestion(requestId: string, sessionId: string, answers: string[][]) {
+    try {
+      const payload = await workspaceClient.replyQuestion({ requestId, sessionId, answers });
+      applyWorkspacePayload(payload);
+      onToast("Answer submitted");
+    } catch (error) {
+      const message = formatErrorMessage(error, "Reply question failed");
+      onToast(message);
+      throw error;
+    }
+  }
+
+  async function rejectQuestion(requestId: string, sessionId: string) {
+    try {
+      const payload = await workspaceClient.rejectQuestion({ requestId, sessionId });
+      applyWorkspacePayload(payload);
+      onToast("Question rejected");
+    } catch (error) {
+      const message = formatErrorMessage(error, "Reject question failed");
+      onToast(message);
+      throw error;
+    }
+  }
+
+  async function abortThread(threadId = state.activeThreadId) {
+    if (!threadId) return;
+
+    clearLocalThreadOverride(threadId);
+
+    try {
+      const payload = await workspaceClient.abortThread(threadId);
+      applyWorkspacePayload(payload);
+      onToast("Current run stopped");
+    } catch (error) {
+      const message = formatErrorMessage(error, "Stop thread failed");
+      onToast(message);
+      throw error;
+    }
+  }
+
   return {
     activeModel,
     activeSummary,
@@ -928,6 +979,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     applySuggestion,
     appendAttachments,
     archiveThread,
+    abortThread,
     archivedThreads,
     attachments: state.attachments,
     availableSkills: state.availableSkills,
@@ -948,11 +1000,14 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     messageListRef,
     openThread,
     openWorkspaceFolder,
+    pendingQuestions: state.pendingQuestions,
     pickFiles,
     prepareSkillDraft,
     refreshThreadList,
     refreshWorkspaceSnapshot,
     removeAttachment,
+    rejectQuestion,
+    replyQuestion,
     runSkill,
     scheduleConfigPersist,
     selectableModels,
