@@ -1,4 +1,5 @@
 export type AppSection = "chat" | "skills" | "tools" | "knowledge" | "settings";
+export type AppearanceThemeId = "linen" | "ocean" | "forest" | "sunset" | "graphite";
 export type ContextTier = "low" | "medium" | "high";
 export type EnvironmentMode = "local" | "cloud";
 export type MessageRole = "user" | "assistant" | "tool";
@@ -269,10 +270,19 @@ export interface KnowledgeAddUrlInput {
   url: string;
 }
 
+export interface KnowledgeDeleteItemInput {
+  baseId: string;
+  itemId: string;
+}
+
 export interface ProxyConfig {
   http: string;
   https: string;
   bypass: string;
+}
+
+export interface AppearanceConfig {
+  theme: AppearanceThemeId;
 }
 
 export interface AppConfig {
@@ -281,12 +291,18 @@ export interface AppConfig {
   environment: EnvironmentMode;
   activeModelId: string;
   contextTier: ContextTier;
+  appearance: AppearanceConfig;
   proxy: ProxyConfig;
   modelProviders: ModelProviderConfig[];
   mcpServers: McpServerConfig[];
   skills: SkillConfig[];
   hiddenCodexSkillIds: string[];
   knowledgeBase: KnowledgeBaseConnectionConfig;
+}
+
+export interface DesktopWindowState {
+  platform: "darwin" | "win32" | "linux";
+  maximized: boolean;
 }
 
 export interface MessageAttachment {
@@ -374,7 +390,7 @@ export interface BootstrapPayload {
   config: AppConfig;
   threads: ThreadSummary[];
   activeThreadId: string;
-  currentThread: ThreadRecord;
+  currentThread: ThreadRecord | null;
   availableSkills: RuntimeSkill[];
   availableAgents: RuntimeAgent[];
   mcpStatuses: McpServerStatus[];
@@ -382,7 +398,8 @@ export interface BootstrapPayload {
 }
 
 export interface SendMessageInput {
-  threadId: string;
+  threadId?: string;
+  workspaceRoot?: string;
   message: string;
   attachments: FileDropEntry[];
 }
@@ -404,7 +421,8 @@ export interface QuestionRejectInput {
 }
 
 export interface SkillRunInput {
-  threadId: string;
+  threadId?: string;
+  workspaceRoot?: string;
   skillId: string;
   prompt: string;
 }

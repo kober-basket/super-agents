@@ -40,6 +40,7 @@ import type {
   KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
   KnowledgeCatalogPayload,
+  KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
   McpServerConfig,
   ModelProviderConfig,
@@ -136,6 +137,9 @@ const DEFAULT_CONFIG: AppConfig = {
   environment: "local",
   activeModelId: createRuntimeModelId("iflyrpa", "azure/gpt-5-mini"),
   contextTier: "high",
+  appearance: {
+    theme: "linen",
+  },
   proxy: {
     http: "",
     https: "",
@@ -279,6 +283,10 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
       ...DEFAULT_CONFIG,
       ...rawConfig,
       activeModelId,
+      appearance: {
+        ...DEFAULT_CONFIG.appearance,
+        ...(rawConfig.appearance ?? {}),
+      },
       proxy,
       modelProviders,
       hiddenCodexSkillIds: Array.isArray(rawConfig.hiddenCodexSkillIds)
@@ -1120,12 +1128,15 @@ export class WorkspaceService {
     const state = await this.loadState();
     const sessions = await this.runtime.listSessions(state.config);
     let changed = this.pruneThreadMeta(state, sessions);
-    let current = sessions.find((item) => item.id === state.activeThreadId) ?? sessions[0];
+    const current = sessions.find((item) => item.id === state.activeThreadId) ?? sessions[0] ?? null;
 
-    if (!current) {
-      current = await this.runtime.createSession(state.config, "新会话");
-      sessions.push(current);
-      state.activeThreadId = current.id;
+    if (current) {
+      if (state.activeThreadId !== current.id) {
+        state.activeThreadId = current.id;
+        changed = true;
+      }
+    } else if (state.activeThreadId) {
+      state.activeThreadId = "";
       changed = true;
     }
 
@@ -1134,8 +1145,8 @@ export class WorkspaceService {
     }
 
     const [threads, currentMessages, availableSkills, availableAgents, mcpStatuses, pendingQuestions] = await Promise.all([
-      this.listThreadSummaries(state, sessions.length > 0 ? sessions : [current]),
-      this.runtime.listMessages(state.config, current.id),
+      this.listThreadSummaries(state, sessions),
+      current ? this.runtime.listMessages(state.config, current.id) : Promise.resolve([] as OpencodeSessionMessage[]),
       this.runtime.listSkills(state.config).catch(() => []),
       this.runtime.listAgents(state.config).catch(() => []),
       this.runtime.listMcpStatuses(state.config).catch(() => []),
@@ -1145,8 +1156,8 @@ export class WorkspaceService {
     return {
       config: state.config,
       threads,
-      activeThreadId: current.id,
-      currentThread: createThreadRecord(current, currentMessages, getThreadMeta(state, current.id)),
+      activeThreadId: current?.id ?? "",
+      currentThread: current ? createThreadRecord(current, currentMessages, getThreadMeta(state, current.id)) : null,
       availableSkills,
       availableAgents,
       mcpStatuses,
@@ -1165,7 +1176,9 @@ export class WorkspaceService {
     } catch (error) {
       if (isMissingResourceError(error)) {
         const payload = await this.bootstrap();
-        return payload.currentThread;
+        if (payload.currentThread) {
+          return payload.currentThread;
+        }
       }
       throw error;
     }
@@ -1194,7 +1207,9 @@ export class WorkspaceService {
     } catch (error) {
       if (isMissingResourceError(error)) {
         const payload = await this.bootstrap();
-        return payload.currentThread;
+        if (payload.currentThread) {
+          return payload.currentThread;
+        }
       }
       throw error;
     }
@@ -1228,13 +1243,7 @@ export class WorkspaceService {
     if (archived && state.activeThreadId === threadId) {
       const sessions = await this.runtime.listSessions(state.config);
       const nextActiveThreadId = this.pickUnarchivedThreadId(state, sessions, threadId);
-
-      if (nextActiveThreadId) {
-        state.activeThreadId = nextActiveThreadId;
-      } else {
-        const session = await this.runtime.createSession(state.config, "新会话");
-        state.activeThreadId = session.id;
-      }
+      state.activeThreadId = nextActiveThreadId;
     }
 
     await this.saveState(state);
@@ -1249,13 +1258,7 @@ export class WorkspaceService {
     if (state.activeThreadId === threadId) {
       const sessions = await this.runtime.listSessions(state.config);
       const nextActiveThreadId = this.pickUnarchivedThreadId(state, sessions);
-
-      if (nextActiveThreadId) {
-        state.activeThreadId = nextActiveThreadId;
-      } else {
-        const session = await this.runtime.createSession(state.config, "新会话");
-        state.activeThreadId = session.id;
-      }
+      state.activeThreadId = nextActiveThreadId;
     }
 
     await this.saveState(state);
@@ -1264,6 +1267,10 @@ export class WorkspaceService {
 
   async sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
     const state = await this.loadState();
+    const target = await this.resolveThreadMutationTarget(state, {
+      threadId: input.threadId,
+      workspaceRoot: input.workspaceRoot,
+    });
     let transportMessage = input.message;
     let knowledgeMeta: SendMessageResult["knowledge"] | undefined;
 
@@ -1288,17 +1295,26 @@ export class WorkspaceService {
       }
     }
 
-    await this.runtime.promptAsync(this.getThreadConfig(state, input.threadId), input.threadId, transportMessage, input.attachments);
-    state.activeThreadId = input.threadId;
-    updateThreadMeta(state, input.threadId, (previous) => ({
+    try {
+      await this.runtime.promptAsync(target.threadConfig, target.threadId, transportMessage, input.attachments);
+    } catch (error) {
+      if (target.createdOnDemand) {
+        await this.runtime.deleteSession(state.config, target.threadId).catch(() => undefined);
+        delete state.threadMeta[target.threadId];
+      }
+      throw error;
+    }
+
+    state.activeThreadId = target.threadId;
+    updateThreadMeta(state, target.threadId, (previous) => ({
       ...(previous.title?.trim() ? { title: previous.title.trim() } : {}),
     }));
-    let thread = await this.readThreadRecord(state, input.threadId);
+    let thread = await this.readThreadRecord(state, target.threadId);
     this.maybeAssignGeneratedThreadTitle(state, thread);
     thread = {
       ...thread,
-      title: getThreadMeta(state, input.threadId).title?.trim() || thread.title,
-      archived: isThreadArchived(state, input.threadId),
+      title: getThreadMeta(state, target.threadId).title?.trim() || thread.title,
+      archived: isThreadArchived(state, target.threadId),
     };
     await this.saveState(state);
     return {
@@ -1309,17 +1325,31 @@ export class WorkspaceService {
 
   async runSkill(input: SkillRunInput): Promise<SkillRunResult> {
     const state = await this.loadState();
-    await this.runtime.commandAsync(this.getThreadConfig(state, input.threadId), input.threadId, input.skillId, input.prompt || "", []);
-    state.activeThreadId = input.threadId;
-    updateThreadMeta(state, input.threadId, (previous) => ({
+    const target = await this.resolveThreadMutationTarget(state, {
+      threadId: input.threadId,
+      workspaceRoot: input.workspaceRoot,
+    });
+
+    try {
+      await this.runtime.commandAsync(target.threadConfig, target.threadId, input.skillId, input.prompt || "", []);
+    } catch (error) {
+      if (target.createdOnDemand) {
+        await this.runtime.deleteSession(state.config, target.threadId).catch(() => undefined);
+        delete state.threadMeta[target.threadId];
+      }
+      throw error;
+    }
+
+    state.activeThreadId = target.threadId;
+    updateThreadMeta(state, target.threadId, (previous) => ({
       ...(previous.title?.trim() ? { title: previous.title.trim() } : {}),
     }));
-    let thread = await this.readThreadRecord(state, input.threadId);
+    let thread = await this.readThreadRecord(state, target.threadId);
     this.maybeAssignGeneratedThreadTitle(state, thread);
     thread = {
       ...thread,
-      title: getThreadMeta(state, input.threadId).title?.trim() || thread.title,
-      archived: isThreadArchived(state, input.threadId),
+      title: getThreadMeta(state, target.threadId).title?.trim() || thread.title,
+      archived: isThreadArchived(state, target.threadId),
     };
     await this.saveState(state);
     return {
@@ -1366,6 +1396,10 @@ export class WorkspaceService {
     state.config = {
       ...state.config,
       ...patch,
+      appearance: {
+        ...state.config.appearance,
+        ...(patch.appearance ?? {}),
+      },
       proxy: {
         ...state.config.proxy,
         ...(patch.proxy ?? {}),
@@ -1459,6 +1493,10 @@ export class WorkspaceService {
   async addKnowledgeWebsite(input: KnowledgeAddUrlInput): Promise<KnowledgeCatalogPayload> {
     const state = await this.loadState();
     return await this.knowledge.addWebsite(state.config, input);
+  }
+
+  async deleteKnowledgeItem(input: KnowledgeDeleteItemInput): Promise<KnowledgeCatalogPayload> {
+    return await this.knowledge.deleteItem(input);
   }
 
   async searchKnowledgeBases(input: {
@@ -1616,6 +1654,49 @@ export class WorkspaceService {
     return {
       ...state.config,
       opencodeRoot: workspaceRoot || state.config.opencodeRoot,
+    };
+  }
+
+  private createThreadConfig(state: PersistedWorkspaceState, workspaceRoot?: string) {
+    const nextWorkspaceRoot = workspaceRoot?.trim();
+    if (!nextWorkspaceRoot) {
+      return state.config;
+    }
+
+    return {
+      ...state.config,
+      opencodeRoot: nextWorkspaceRoot,
+    };
+  }
+
+  private async resolveThreadMutationTarget(
+    state: PersistedWorkspaceState,
+    input: { threadId?: string; workspaceRoot?: string },
+  ) {
+    const existingThreadId = input.threadId?.trim();
+    if (existingThreadId) {
+      return {
+        threadId: existingThreadId,
+        createdOnDemand: false,
+        threadConfig: this.getThreadConfig(state, existingThreadId),
+      };
+    }
+
+    const threadConfig = this.createThreadConfig(state, input.workspaceRoot);
+    const session = await this.runtime.createSession(threadConfig, "新会话");
+    const workspaceRoot = input.workspaceRoot?.trim();
+
+    if (workspaceRoot) {
+      updateThreadMeta(state, session.id, (previous) => ({
+        ...previous,
+        workspaceRoot,
+      }));
+    }
+
+    return {
+      threadId: session.id,
+      createdOnDemand: true,
+      threadConfig: this.getThreadConfig(state, session.id),
     };
   }
 

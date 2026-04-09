@@ -11,6 +11,7 @@ import {
 import type {
   AppConfig,
   AppSection,
+  DesktopWindowState,
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeBaseSummary,
@@ -27,7 +28,9 @@ import { SkillsView } from "./features/skills/SkillsView";
 import { RECOMMENDED_SKILLS } from "./features/skills/constants";
 import { ToolsView } from "./features/tools/ToolsView";
 import { KnowledgeView } from "./features/knowledge/KnowledgeView";
+import { AppTitleBar } from "./features/navigation/AppTitleBar";
 import { AssistantSettings } from "./features/settings/AssistantSettings";
+import { AppearanceSettings } from "./features/settings/AppearanceSettings";
 import { GeneralSettings } from "./features/settings/GeneralSettings";
 import { McpSettings } from "./features/settings/McpSettings";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
@@ -57,6 +60,7 @@ export default function App() {
   const [mcpAdvancedOpen, setMcpAdvancedOpen] = useState(false);
   const [providerRefreshingId, setProviderRefreshingId] = useState<string | null>(null);
   const [selectedModelProviderId, setSelectedModelProviderId] = useState("");
+  const [windowState, setWindowState] = useState<DesktopWindowState | null>(null);
   const {
     activeModel,
     activeSummary,
@@ -84,6 +88,7 @@ export default function App() {
     currentWorkspaceLabel,
     currentWorkspacePath,
     deleteThread: deleteThreadImmediately,
+    drafting,
     dragActive,
     mcpStatuses,
     mcpStatusMap,
@@ -158,6 +163,36 @@ export default function App() {
     const timer = window.setTimeout(() => setToast(null), 1800);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    let mounted = true;
+    const unsubscribe = workspaceClient.onWindowStateChanged((payload) => {
+      if (mounted) {
+        setWindowState(payload);
+      }
+    });
+
+    void workspaceClient
+      .getWindowState()
+      .then((payload) => {
+        if (mounted) {
+          setWindowState(payload);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = config.appearance.theme;
+    return () => {
+      delete document.documentElement.dataset.theme;
+    };
+  }, [config.appearance.theme]);
 
   useEffect(() => {
     if (view !== "tools" || toolsRefreshing || toolsLoadedRef.current) {
@@ -567,10 +602,10 @@ export default function App() {
       }
 
       if (!options?.silent) {
-        setToast("Knowledge bases refreshed");
+        setToast("知识库已刷新");
       }
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Refresh knowledge bases failed");
+      setToast(error instanceof Error ? error.message : "刷新知识库失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -580,7 +615,7 @@ export default function App() {
     const trimmedName = name.trim();
     const trimmedDescription = description.trim();
     if (!trimmedName) {
-      setToast("Enter a knowledge base name first");
+      setToast("请先输入知识库名称");
       return null;
     }
 
@@ -593,7 +628,7 @@ export default function App() {
         description: trimmedDescription,
       });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast(`Created knowledge base ${trimmedName}`);
+      setToast(`已创建知识库「${trimmedName}」`);
       const createdBase =
         payload.knowledgeBases.find((item) => !previousBaseIds.has(item.id)) ??
         payload.knowledgeBases.find(
@@ -604,7 +639,7 @@ export default function App() {
         null;
       return createdBase?.id ?? null;
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Create knowledge base failed");
+      setToast(error instanceof Error ? error.message : "创建知识库失败");
       return null;
     } finally {
       setKnowledgeRefreshing(false);
@@ -620,9 +655,9 @@ export default function App() {
         enabled: config.knowledgeBase.selectedBaseIds.some((item) => item !== baseId),
         selectedBaseIds: config.knowledgeBase.selectedBaseIds.filter((item) => item !== baseId),
       });
-      setToast("Knowledge base deleted");
+      setToast("知识库已删除");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Delete knowledge base failed");
+      setToast(error instanceof Error ? error.message : "删除知识库失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -635,9 +670,9 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeFiles({ baseId, files });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast(`Imported ${files.length} file(s)`);
+      setToast(`已导入 ${files.length} 个文件`);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "鐎电厧鍙嗛惌銉ㄧ槕閺傚洣娆㈡径杈Е");
+      setToast(error instanceof Error ? error.message : "导入文件失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -645,7 +680,7 @@ export default function App() {
 
   async function addKnowledgeNote(baseId: string, title: string, content: string) {
     if (!title.trim() || !content.trim()) {
-      setToast("Enter both a note title and content");
+      setToast("请填写笔记标题和内容");
       return;
     }
 
@@ -657,9 +692,9 @@ export default function App() {
         content: content.trim(),
       });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("Knowledge note added");
+      setToast("笔记已添加");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "濞ｈ濮為惌銉ㄧ槕缁楁棁顔囨径杈Е");
+      setToast(error instanceof Error ? error.message : "添加笔记失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -672,9 +707,9 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeDirectory({ baseId, directoryPath });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("Knowledge directory added");
+      setToast("目录资料已添加");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Add knowledge directory failed");
+      setToast(error instanceof Error ? error.message : "添加目录失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -685,9 +720,9 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeUrl({ baseId, url });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("Knowledge URL added");
+      setToast("网址资料已添加");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Add knowledge URL failed");
+      setToast(error instanceof Error ? error.message : "添加网址失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -698,16 +733,72 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeWebsite({ baseId, url });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("Knowledge website added");
+      setToast("网站资料已添加");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Add knowledge website failed");
+      setToast(error instanceof Error ? error.message : "添加网站失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
   }
 
+  async function deleteKnowledgeItem(baseId: string, itemId: string) {
+    setKnowledgeRefreshing(true);
+    try {
+      const payload = await workspaceClient.deleteKnowledgeItem({ baseId, itemId });
+      setKnowledgeBases(payload.knowledgeBases);
+      setToast("资料已删除");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "删除资料失败");
+    } finally {
+      setKnowledgeRefreshing(false);
+    }
+  }
+
+  function updateAppearanceTheme(theme: AppConfig["appearance"]["theme"]) {
+    if (config.appearance.theme === theme) {
+      return;
+    }
+
+    void commitConfig(
+      {
+        ...cloneConfig(config),
+        appearance: {
+          ...cloneConfig(config).appearance,
+          theme,
+        },
+      },
+      "Appearance updated",
+    );
+  }
+
+  async function minimizeWindow() {
+    try {
+      const payload = await workspaceClient.minimizeWindow();
+      setWindowState(payload);
+    } catch {
+      setToast("Minimize window failed");
+    }
+  }
+
+  async function toggleMaximizeWindow() {
+    try {
+      const payload = await workspaceClient.toggleMaximizeWindow();
+      setWindowState(payload);
+    } catch {
+      setToast("Resize window failed");
+    }
+  }
+
+  async function closeWindow() {
+    try {
+      await workspaceClient.closeWindow();
+    } catch {
+      setToast("Close window failed");
+    }
+  }
+
   const showPreviewPane = view === "chat" && preview && previewOpen;
-  const threadBusy = activeThread?.messages.some((message) => message.status === "loading") ?? false;
+  const threadBusy = !drafting && (activeThread?.messages.some((message) => message.status === "loading") ?? false);
   const settingsStats = {
     threadCount: activeThreads.length + archivedThreads.length,
     providerCount: config.modelProviders.length,
@@ -727,6 +818,15 @@ export default function App() {
           providerCount={settingsStats.providerCount}
           threadCount={settingsStats.threadCount}
           onOpenWorkspaceFolder={openWorkspaceFolder}
+        />
+      );
+    }
+
+    if (settingsSection === "appearance") {
+      return (
+        <AppearanceSettings
+          appearance={config.appearance}
+          onThemeChange={updateAppearanceTheme}
         />
       );
     }
@@ -845,6 +945,7 @@ export default function App() {
           onAddKnowledgeNote={addKnowledgeNote}
           onAddKnowledgeUrl={addKnowledgeUrl}
           onAddKnowledgeWebsite={addKnowledgeWebsite}
+          onDeleteKnowledgeItem={deleteKnowledgeItem}
         />
       );
     }
@@ -906,42 +1007,52 @@ export default function App() {
   }
 
   return (
-    <div className={clsx("app-shell", showPreviewPane && "with-preview", view === "settings" && "settings-mode")}>
-      {view === "settings" ? (
-        <SettingsSidebar
-          settingsSection={settingsSection}
-          onBack={() => setView("chat")}
-          onSelect={setSettingsSection}
-        />
-      ) : (
-        <PrimarySidebar
-          activeThreadId={activeThreadId}
-          activeThreads={activeThreads}
-          archivedThreads={archivedThreads}
-          busyThreadId={sessionStatus.openingThreadId ?? sessionStatus.mutatingThreadId}
-          creatingThread={sessionStatus.creatingThread}
-          view={view}
-          workspaceIssue={workspaceIssue}
-          onArchiveThread={archiveThread}
-          onCreateThread={createThread}
-          onDeleteThread={deleteThreadImmediately}
-          onOpenThread={openThread}
-          onSetView={setView}
-        />
-      )}
+    <div className={clsx("window-frame", windowState?.maximized && "maximized")}>
+      <AppTitleBar
+        view={view}
+        windowState={windowState}
+        onClose={closeWindow}
+        onMinimize={minimizeWindow}
+        onToggleMaximize={toggleMaximizeWindow}
+      />
 
-      <main className="workspace">
-        {renderMainView()}
-      </main>
+      <div className={clsx("app-shell", showPreviewPane && "with-preview", view === "settings" && "settings-mode")}>
+        {view === "settings" ? (
+          <SettingsSidebar
+            settingsSection={settingsSection}
+            onBack={() => setView("chat")}
+            onSelect={setSettingsSection}
+          />
+        ) : (
+          <PrimarySidebar
+            activeThreadId={activeThreadId}
+            activeThreads={activeThreads}
+            archivedThreads={archivedThreads}
+            busyThreadId={sessionStatus.openingThreadId ?? sessionStatus.mutatingThreadId}
+            creatingThread={sessionStatus.creatingThread}
+            view={view}
+            workspaceIssue={workspaceIssue}
+            onArchiveThread={archiveThread}
+            onCreateThread={createThread}
+            onDeleteThread={deleteThreadImmediately}
+            onOpenThread={openThread}
+            onSetView={setView}
+          />
+        )}
 
-      {showPreviewPane && preview ? (
-        <PreviewPane
-          preview={preview}
-          onClearPreview={() => setPreview(null)}
-          onClosePane={() => setPreviewOpen(false)}
-          onOpenLink={openPreviewLink}
-        />
-      ) : null}
+        <main className="workspace">
+          {renderMainView()}
+        </main>
+
+        {showPreviewPane && preview ? (
+          <PreviewPane
+            preview={preview}
+            onClearPreview={() => setPreview(null)}
+            onClosePane={() => setPreviewOpen(false)}
+            onOpenLink={openPreviewLink}
+          />
+        ) : null}
+      </div>
 
       {toast ? <div className="toast">{toast}</div> : null}
     </div>

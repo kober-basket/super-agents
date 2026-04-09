@@ -4,7 +4,7 @@ import path from "node:path";
 import { APP_DATA_DIR, APP_NAME, APP_WINDOW_TITLE, migrateLegacyAppData } from "./app-identity";
 import { McpInspector } from "./mcp-inspector";
 import { WorkspaceService } from "./workspace-service";
-import type { AppConfig, WorkspaceTool } from "../src/types";
+import type { AppConfig, DesktopWindowState, WorkspaceTool } from "../src/types";
 
 app.setName(APP_NAME);
 app.setPath("userData", path.join(app.getPath("appData"), APP_DATA_DIR));
@@ -15,13 +15,23 @@ const mcpInspector = new McpInspector();
 const threadMonitors = new Map<string, { cancelled: boolean; promise: Promise<void> }>();
 
 function createWindow() {
+  const isMac = process.platform === "darwin";
+
   mainWindow = new BrowserWindow({
     width: 1680,
     height: 1020,
     minWidth: 1280,
     minHeight: 820,
-    backgroundColor: "#f5f2ed",
+    backgroundColor: "#ece7dd",
     title: APP_WINDOW_TITLE,
+    autoHideMenuBar: true,
+    frame: isMac,
+    ...(isMac
+      ? {
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: { x: 18, y: 18 },
+        }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -29,6 +39,20 @@ function createWindow() {
       sandbox: false,
     },
   });
+
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.removeMenu();
+
+  const emitWindowState = () => {
+    if (!mainWindow) return;
+    mainWindow.webContents.send("desktop:window-state", getWindowState());
+  };
+
+  mainWindow.on("maximize", emitWindowState);
+  mainWindow.on("unmaximize", emitWindowState);
+  mainWindow.on("enter-full-screen", emitWindowState);
+  mainWindow.on("leave-full-screen", emitWindowState);
+  mainWindow.webContents.on("did-finish-load", emitWindowState);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
@@ -42,6 +66,16 @@ function createWindow() {
   }
 
   void mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+}
+
+function getWindowState(): DesktopWindowState {
+  const platform =
+    process.platform === "darwin" || process.platform === "win32" ? process.platform : "linux";
+
+  return {
+    platform,
+    maximized: Boolean(mainWindow?.isMaximized() || mainWindow?.isFullScreen()),
+  };
 }
 
 async function broadcastState() {
@@ -140,15 +174,22 @@ app.whenReady().then(async () => {
     return next;
   });
 
-  ipcMain.handle("desktop:send-message", async (_event, payload: { threadId: string; message: string; attachments: unknown[] }) => {
+  ipcMain.handle(
+    "desktop:send-message",
+    async (
+      _event,
+      payload: { threadId?: string; workspaceRoot?: string; message: string; attachments: unknown[] },
+    ) => {
     const result = await service!.sendMessage({
       threadId: payload.threadId,
+      workspaceRoot: payload.workspaceRoot,
       message: payload.message,
       attachments: Array.isArray(payload.attachments) ? (payload.attachments as any[]) : [],
     });
-    monitorThreadProgress(payload.threadId);
+    monitorThreadProgress(result.thread.id);
     return result;
-  });
+    },
+  );
 
   ipcMain.handle("desktop:abort-thread", async (_event, threadId: string) => {
     await stopThreadMonitor(threadId);
@@ -207,6 +248,10 @@ app.whenReady().then(async () => {
     return await service!.addKnowledgeWebsite(payload);
   });
 
+  ipcMain.handle("desktop:delete-knowledge-item", async (_event, payload: { baseId: string; itemId: string }) => {
+    return await service!.deleteKnowledgeItem(payload);
+  });
+
   ipcMain.handle(
     "desktop:search-knowledge-bases",
     async (
@@ -217,11 +262,14 @@ app.whenReady().then(async () => {
     },
   );
 
-  ipcMain.handle("desktop:run-skill", async (_event, payload: { threadId: string; skillId: string; prompt: string }) => {
+  ipcMain.handle(
+    "desktop:run-skill",
+    async (_event, payload: { threadId?: string; workspaceRoot?: string; skillId: string; prompt: string }) => {
     const result = await service!.runSkill(payload);
-    monitorThreadProgress(payload.threadId);
+    monitorThreadProgress(result.thread.id);
     return result;
-  });
+    },
+  );
 
   ipcMain.handle("desktop:uninstall-skill", async (_event, skillId: string) => {
     const payload = await service!.uninstallSkill(skillId);
@@ -334,6 +382,29 @@ app.whenReady().then(async () => {
     if (target) {
       await shell.openPath(target);
     }
+  });
+
+  ipcMain.handle("desktop:get-window-state", async () => getWindowState());
+
+  ipcMain.handle("desktop:minimize-window", async () => {
+    mainWindow?.minimize();
+    return getWindowState();
+  });
+
+  ipcMain.handle("desktop:toggle-maximize-window", async () => {
+    if (mainWindow) {
+      if (mainWindow.isMaximized()) {
+        mainWindow.unmaximize();
+      } else {
+        mainWindow.maximize();
+      }
+    }
+
+    return getWindowState();
+  });
+
+  ipcMain.handle("desktop:close-window", async () => {
+    mainWindow?.close();
   });
 
   app.on("activate", () => {

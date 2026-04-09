@@ -29,6 +29,8 @@ export const workspaceClient = {
     window.desktopAgent.addKnowledgeUrl(payload),
   addKnowledgeWebsite: (payload: Parameters<typeof window.desktopAgent.addKnowledgeWebsite>[0]) =>
     window.desktopAgent.addKnowledgeWebsite(payload),
+  deleteKnowledgeItem: (payload: Parameters<typeof window.desktopAgent.deleteKnowledgeItem>[0]) =>
+    window.desktopAgent.deleteKnowledgeItem(payload),
   searchKnowledgeBases: (payload: Parameters<typeof window.desktopAgent.searchKnowledgeBases>[0]) =>
     window.desktopAgent.searchKnowledgeBases(payload),
   runSkill: (payload: Parameters<typeof window.desktopAgent.runSkill>[0]) =>
@@ -50,6 +52,12 @@ export const workspaceClient = {
   readPreview: (payload: Parameters<typeof window.desktopAgent.readPreview>[0]) =>
     window.desktopAgent.readPreview(payload),
   openWorkspaceFolder: (threadId?: string) => window.desktopAgent.openWorkspaceFolder(threadId),
+  getWindowState: () => window.desktopAgent.getWindowState(),
+  minimizeWindow: () => window.desktopAgent.minimizeWindow(),
+  toggleMaximizeWindow: () => window.desktopAgent.toggleMaximizeWindow(),
+  closeWindow: () => window.desktopAgent.closeWindow(),
   onWorkspaceChanged: (listener: Parameters<typeof window.desktopAgent.onWorkspaceChanged>[0]) =>
     window.desktopAgent.onWorkspaceChanged(listener),
+  onWindowStateChanged: (listener: Parameters<typeof window.desktopAgent.onWindowStateChanged>[0]) =>
+    window.desktopAgent.onWindowStateChanged(listener),
 };

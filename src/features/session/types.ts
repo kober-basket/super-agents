@@ -27,6 +27,11 @@ export type SkillPromptMeta = {
   skillName: string
 }
 
+export type DraftThreadState = {
+  workspaceRoot: string
+  thread: ThreadRecord | null
+}
+
 export type SessionStatus = {
   bootstrapping: boolean
   creatingThread: boolean

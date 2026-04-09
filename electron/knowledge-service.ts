@@ -11,6 +11,7 @@ import type {
   KnowledgeAddNoteInput,
   KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
+  KnowledgeDeleteItemInput,
   KnowledgeBaseSummary,
   KnowledgeCatalogPayload,
   KnowledgeItemSummary,
@@ -492,6 +493,25 @@ export class KnowledgeService {
     index.bases = index.bases.filter((item) => item.id !== baseId);
     await this.saveIndex(index);
     await rm(path.join(this.basesDir, baseId), { recursive: true, force: true }).catch(() => undefined);
+    return await this.listBases();
+  }
+
+  async deleteItem(input: KnowledgeDeleteItemInput) {
+    const index = await this.loadIndex();
+    const base = this.requireBase(index, input.baseId);
+    const existing = base.items.find((item) => item.id === input.itemId);
+    if (!existing) {
+      throw new Error("Knowledge item not found.");
+    }
+
+    base.items = base.items.filter((item) => item.id !== input.itemId);
+    base.updatedAt = Date.now();
+
+    const chunks = await this.loadChunks(base.id);
+    const remainingChunks = chunks.filter((chunk) => chunk.itemId !== input.itemId);
+
+    await this.saveIndex(index);
+    await this.saveChunks(base.id, remainingChunks);
     return await this.listBases();
   }
 

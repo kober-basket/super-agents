@@ -1,6 +1,7 @@
 import type {
   AppConfig,
   BootstrapPayload,
+  DesktopWindowState,
   FileDropEntry,
   KnowledgeCatalogPayload,
   KnowledgeAddDirectoryInput,
@@ -8,6 +9,7 @@ import type {
   KnowledgeAddNoteInput,
   KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
+  KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
   FilePreviewPayload,
   McpInspectInput,
@@ -50,6 +52,7 @@ declare global {
       addKnowledgeNote: (payload: KnowledgeAddNoteInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeUrl: (payload: KnowledgeAddUrlInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeWebsite: (payload: KnowledgeAddUrlInput) => Promise<KnowledgeCatalogPayload>;
+      deleteKnowledgeItem: (payload: KnowledgeDeleteItemInput) => Promise<KnowledgeCatalogPayload>;
       searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) => Promise<KnowledgeSearchPayload>;
       runSkill: (payload: SkillRunInput) => Promise<SkillRunResult>;
       uninstallSkill: (skillId: string) => Promise<BootstrapPayload>;
@@ -63,7 +66,12 @@ declare global {
       setThreadWorkspace: (threadId: string, workspaceRoot: string) => Promise<BootstrapPayload>;
       readPreview: (payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) => Promise<FilePreviewPayload>;
       openWorkspaceFolder: (threadId?: string) => Promise<void>;
+      getWindowState: () => Promise<DesktopWindowState>;
+      minimizeWindow: () => Promise<DesktopWindowState>;
+      toggleMaximizeWindow: () => Promise<DesktopWindowState>;
+      closeWindow: () => Promise<void>;
       onWorkspaceChanged: (listener: (payload: BootstrapPayload) => void) => () => void;
+      onWindowStateChanged: (listener: (payload: DesktopWindowState) => void) => () => void;
       onGatewayEvent: (listener: (payload: BootstrapPayload) => void) => () => void;
     };
   }

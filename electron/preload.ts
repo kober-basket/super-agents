@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppConfig,
   BootstrapPayload,
+  DesktopWindowState,
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeCatalogPayload,
@@ -11,6 +12,7 @@ import type {
   KnowledgeAddNoteInput,
   KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
+  KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
   McpInspectInput,
   McpServerToolsResult,
@@ -67,6 +69,8 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:add-knowledge-url", payload) as Promise<KnowledgeCatalogPayload>,
   addKnowledgeWebsite: (payload: KnowledgeAddUrlInput) =>
     ipcRenderer.invoke("desktop:add-knowledge-website", payload) as Promise<KnowledgeCatalogPayload>,
+  deleteKnowledgeItem: (payload: KnowledgeDeleteItemInput) =>
+    ipcRenderer.invoke("desktop:delete-knowledge-item", payload) as Promise<KnowledgeCatalogPayload>,
   searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) =>
     ipcRenderer.invoke("desktop:search-knowledge-bases", payload) as Promise<KnowledgeSearchPayload>,
   runSkill: (payload: SkillRunInput) =>
@@ -90,10 +94,19 @@ const desktopAgent = {
   readPreview: (payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) =>
     ipcRenderer.invoke("desktop:read-preview", payload) as Promise<FilePreviewPayload>,
   openWorkspaceFolder: (threadId?: string) => ipcRenderer.invoke("desktop:open-workspace-folder", threadId) as Promise<void>,
+  getWindowState: () => ipcRenderer.invoke("desktop:get-window-state") as Promise<DesktopWindowState>,
+  minimizeWindow: () => ipcRenderer.invoke("desktop:minimize-window") as Promise<DesktopWindowState>,
+  toggleMaximizeWindow: () => ipcRenderer.invoke("desktop:toggle-maximize-window") as Promise<DesktopWindowState>,
+  closeWindow: () => ipcRenderer.invoke("desktop:close-window") as Promise<void>,
   onWorkspaceChanged: (listener: (payload: BootstrapPayload) => void) => {
     const wrapped = (_event: unknown, payload: BootstrapPayload) => listener(payload);
     ipcRenderer.on("desktop:workspace-changed", wrapped);
     return () => ipcRenderer.removeListener("desktop:workspace-changed", wrapped);
+  },
+  onWindowStateChanged: (listener: (payload: DesktopWindowState) => void) => {
+    const wrapped = (_event: unknown, payload: DesktopWindowState) => listener(payload);
+    ipcRenderer.on("desktop:window-state", wrapped);
+    return () => ipcRenderer.removeListener("desktop:window-state", wrapped);
   },
   onGatewayEvent: (listener: (payload: BootstrapPayload) => void) => {
     const wrapped = (_event: unknown, payload: BootstrapPayload) => listener(payload);

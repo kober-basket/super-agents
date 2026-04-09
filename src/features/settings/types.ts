@@ -1,1 +1,1 @@
-export type SettingsSection = "general" | "assistant" | "mcp" | "workspace";
+export type SettingsSection = "general" | "appearance" | "assistant" | "mcp" | "workspace";

@@ -20,6 +20,9 @@ export function emptyConfig(): AppConfig {
     environment: "local",
     activeModelId: "ifly-azure-gpt-5-mini",
     contextTier: "high",
+    appearance: {
+      theme: "linen",
+    },
     proxy: {
       http: "",
       https: "",
@@ -52,6 +55,10 @@ export function normalizeConfig(config?: Partial<AppConfig> | null): AppConfig {
   return {
     ...fallback,
     ...config,
+    appearance: {
+      ...fallback.appearance,
+      ...(config.appearance ?? {}),
+    },
     proxy: {
       ...fallback.proxy,
       ...(config.proxy ?? {}),

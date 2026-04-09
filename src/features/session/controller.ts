@@ -16,6 +16,7 @@ import type {
 import { displayThreadTitle } from "../shared/utils";
 import type {
   ComposerSkill,
+  DraftThreadState,
   SessionStatus,
   SkillMessageMarker,
   SkillPromptMeta,
@@ -28,6 +29,7 @@ import {
   WORKSPACE_SNAPSHOT_KEY,
   buildSkillPrompt,
   cloneConfig,
+  createSessionId,
   createOptimisticThread,
   formatErrorMessage,
   markThreadRequestFailed,
@@ -48,6 +50,7 @@ type SessionState = {
   threads: ThreadSummary[];
   activeThreadId: string;
   threadCache: Record<string, ThreadRecord>;
+  draft: DraftThreadState | null;
   composer: string;
   attachments: FileDropEntry[];
   composerComposing: boolean;
@@ -62,12 +65,14 @@ type SessionState = {
 };
 
 type SessionAction =
-  | { type: "workspace/hydrate"; payload: BootstrapPayload & { currentThread: ThreadRecord; threads: ThreadSummary[] } }
+  | { type: "workspace/hydrate"; payload: BootstrapPayload & { currentThread: ThreadRecord | null; threads: ThreadSummary[] } }
   | { type: "workspace/issue"; payload: string | null }
   | { type: "config/set"; payload: AppConfig }
   | { type: "thread/remember"; payload: ThreadRecord }
+  | { type: "thread/activate"; payload: string }
   | { type: "threads/set"; payload: ThreadSummary[] }
   | { type: "thread/remove"; payload: string }
+  | { type: "draft/set"; payload: DraftThreadState | null }
   | { type: "composer/set"; payload: string }
   | { type: "composer/clear" }
   | { type: "attachments/set"; payload: FileDropEntry[] }
@@ -85,6 +90,7 @@ function createInitialState(snapshot: WorkspaceSnapshot | null): SessionState {
     threads: snapshot?.threads ?? [],
     activeThreadId: snapshot?.activeThreadId ?? "",
     threadCache: snapshot?.currentThread ? { [snapshot.currentThread.id]: snapshot.currentThread } : {},
+    draft: null,
     composer: "",
     attachments: [],
     composerComposing: false,
@@ -132,10 +138,12 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         config: normalizeConfig(action.payload.config),
         threads: action.payload.threads,
         activeThreadId: action.payload.activeThreadId,
-        threadCache: {
-          ...state.threadCache,
-          [action.payload.currentThread.id]: action.payload.currentThread,
-        },
+        threadCache: action.payload.currentThread
+          ? {
+              ...state.threadCache,
+              [action.payload.currentThread.id]: action.payload.currentThread,
+            }
+          : state.threadCache,
         availableSkills: action.payload.availableSkills,
         mcpStatuses: action.payload.mcpStatuses,
         pendingQuestions: action.payload.pendingQuestions,
@@ -157,6 +165,8 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
       const next = upsertThread(state.threadCache, state.threads, action.payload);
       return { ...state, threadCache: next.threadCache, threads: next.threads };
     }
+    case "thread/activate":
+      return { ...state, activeThreadId: action.payload };
     case "threads/set":
       return { ...state, threads: sortThreadSummaries(action.payload) };
     case "thread/remove": {
@@ -168,6 +178,8 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         threads: state.threads.filter((thread) => thread.id !== action.payload),
       };
     }
+    case "draft/set":
+      return { ...state, draft: action.payload };
     case "composer/set":
       return { ...state, composer: action.payload };
     case "composer/clear":
@@ -209,10 +221,10 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   const skillMessageMarkersRef = useRef(state.skillMessageMarkers);
   const localThreadOverridesRef = useRef<Record<string, ThreadRecord>>({});
 
-  const activeThread = state.threadCache[state.activeThreadId] ?? null;
+  const activeThread = state.draft ? state.draft.thread : state.threadCache[state.activeThreadId] ?? null;
   const activeSummary = useMemo(
-    () => state.threads.find((thread) => thread.id === state.activeThreadId) ?? null,
-    [state.activeThreadId, state.threads],
+    () => (state.draft ? null : state.threads.find((thread) => thread.id === state.activeThreadId) ?? null),
+    [state.activeThreadId, state.draft, state.threads],
   );
   const activeThreads = useMemo(() => state.threads.filter((thread) => !thread.archived), [state.threads]);
   const archivedThreads = useMemo(() => state.threads.filter((thread) => thread.archived), [state.threads]);
@@ -230,9 +242,11 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     [state.mcpStatuses],
   );
   const currentWorkspacePath =
-    activeThread?.workspaceRoot || activeSummary?.workspaceRoot || state.config.opencodeRoot || "";
+    state.draft?.workspaceRoot || activeThread?.workspaceRoot || activeSummary?.workspaceRoot || state.config.opencodeRoot || "";
   const currentWorkspaceLabel = workspaceLabel(currentWorkspacePath);
-  const title = displayThreadTitle(activeSummary?.title || activeThread?.title || "New Thread");
+  const title = displayThreadTitle(
+    state.draft ? state.draft.thread?.title || "New Thread" : activeSummary?.title || activeThread?.title || "New Thread",
+  );
 
   const composerSkillOptions = useMemo(() => {
     const installed = state.config.skills
@@ -431,11 +445,12 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   }
 
   function applyWorkspacePayload(payload: BootstrapPayload) {
-    const currentThread = preferLocalThreadState(payload.currentThread);
-    const mergedThreads = mergeThreadSummariesWithLocalOverrides([
-      ...payload.threads.filter((thread) => thread.id !== currentThread.id),
-      summarizeThreadRecord(currentThread),
-    ]);
+    const currentThread = payload.currentThread ? preferLocalThreadState(payload.currentThread) : null;
+    const mergedThreads = mergeThreadSummariesWithLocalOverrides(
+      currentThread
+        ? [...payload.threads.filter((thread) => thread.id !== currentThread.id), summarizeThreadRecord(currentThread)]
+        : payload.threads,
+    );
     const nextPayload = { ...payload, currentThread, threads: mergedThreads } satisfies BootstrapPayload;
     saveWorkspaceSnapshot(nextPayload);
     dispatch({ type: "workspace/hydrate", payload: nextPayload });
@@ -538,20 +553,15 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   }
 
   async function createThread() {
-    dispatch({ type: "status/merge", payload: { creatingThread: true } });
-    try {
-      const payload = await workspaceClient.createThread();
-      applyWorkspacePayload(payload);
-      dispatch({ type: "composer/clear" });
-      onOpenChat();
-      onToast("Thread created");
-    } catch (error) {
-      const message = formatErrorMessage(error, "Create thread failed");
-      dispatch({ type: "workspace/issue", payload: message });
-      onToast(message);
-    } finally {
-      dispatch({ type: "status/merge", payload: { creatingThread: false } });
-    }
+    dispatch({
+      type: "draft/set",
+      payload: {
+        workspaceRoot: state.config.opencodeRoot || "",
+        thread: null,
+      },
+    });
+    dispatch({ type: "composer/clear" });
+    onOpenChat();
   }
 
   async function openThread(threadId: string) {
@@ -572,6 +582,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
           pendingQuestions: state.pendingQuestions,
         },
       });
+      dispatch({ type: "draft/set", payload: null });
       await refreshThreadList();
       dispatch({ type: "workspace/issue", payload: null });
       onOpenChat();
@@ -589,7 +600,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     try {
       const payload = await workspaceClient.archiveThread(thread.id, archived);
       applyWorkspacePayload(payload);
-      if (thread.id === state.activeThreadId && archived) {
+      if (thread.id === state.activeThreadId && archived && !state.draft) {
         dispatch({ type: "composer/clear" });
       }
       onToast(archived ? `Archived ${displayThreadTitle(thread.title)}` : `Restored ${displayThreadTitle(thread.title)}`);
@@ -606,7 +617,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
       const payload = await workspaceClient.deleteThread(thread.id);
       applyWorkspacePayload(payload);
       dispatch({ type: "thread/remove", payload: thread.id });
-      if (thread.id === state.activeThreadId) {
+      if (thread.id === state.activeThreadId && !state.draft) {
         dispatch({ type: "composer/clear" });
       }
       onToast(`Deleted ${displayThreadTitle(thread.title)}`);
@@ -618,6 +629,63 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   }
 
   async function sendPlainMessage(message: string, nextAttachments: FileDropEntry[], skillMeta?: SkillPromptMeta) {
+    if (state.draft || !state.activeThreadId) {
+      const draftWorkspaceRoot = state.draft?.workspaceRoot || state.config.opencodeRoot || "";
+      const optimisticThread = createOptimisticThread({
+        activeThread: state.draft?.thread ?? null,
+        activeThreadId: state.draft?.thread?.id ?? createSessionId(),
+        activeSummary: null,
+        message,
+        attachments: nextAttachments,
+        skillMeta,
+      });
+
+      dispatch({
+        type: "draft/set",
+        payload: {
+          workspaceRoot: draftWorkspaceRoot,
+          thread: optimisticThread,
+        },
+      });
+      dispatch({ type: "composer/clear" });
+      dispatch({ type: "status/merge", payload: { sending: true } });
+
+      try {
+        const result = await workspaceClient.sendMessage({
+          workspaceRoot: draftWorkspaceRoot || undefined,
+          message,
+          attachments: nextAttachments,
+        });
+        const nextThread = skillMeta
+          ? registerSkillMessage(result.thread, message, skillMeta.displayText, skillMeta.skillName)
+          : decorateThread(result.thread);
+
+        dispatch({ type: "draft/set", payload: null });
+        rememberThread(nextThread);
+        dispatch({ type: "thread/activate", payload: nextThread.id });
+        await refreshThreadList();
+        if (result.knowledge?.warnings?.length) {
+          onToast(result.knowledge.warnings[0]);
+        } else if (result.knowledge?.injected) {
+          onToast(`Injected ${result.knowledge.resultCount} knowledge snippets`);
+        }
+      } catch (error) {
+        const nextMessage = formatErrorMessage(error, "Send message failed");
+        dispatch({
+          type: "draft/set",
+          payload: {
+            workspaceRoot: draftWorkspaceRoot,
+            thread: markThreadRequestFailed(optimisticThread, nextMessage),
+          },
+        });
+        onToast(nextMessage);
+      } finally {
+        dispatch({ type: "status/merge", payload: { sending: false } });
+      }
+
+      return;
+    }
+
     const optimisticThread = createOptimisticThread({
       activeThread,
       activeThreadId: state.activeThreadId,
@@ -667,7 +735,6 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     skill: Pick<SkillConfig, "id" | "name" | "description" | "kind" | "enabled">,
     promptOverride?: string,
   ) {
-    if (!state.activeThreadId) return;
     if (!hasAvailableModel) {
       onToast("当前没有可用模型，请先在设置里配置并启用模型。");
       return;
@@ -678,12 +745,16 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     }
 
     try {
+      const draftWorkspaceRoot = state.draft?.workspaceRoot || state.config.opencodeRoot || "";
       const result = await workspaceClient.runSkill({
-        threadId: state.activeThreadId,
+        threadId: state.draft ? undefined : state.activeThreadId || undefined,
+        workspaceRoot: state.draft || !state.activeThreadId ? draftWorkspaceRoot || undefined : undefined,
         skillId: skill.id,
         prompt: promptOverride?.trim() || state.composer.trim() || skill.description,
       });
+      dispatch({ type: "draft/set", payload: null });
       rememberThread(result.thread);
+      dispatch({ type: "thread/activate", payload: result.thread.id });
       await refreshThreadList();
       onOpenChat();
       onToast(`Ran ${skill.name}`);
@@ -694,7 +765,6 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
 
   async function sendMessageWithSkills() {
     if (
-      !state.activeThreadId ||
       state.status.sending ||
       state.composerComposing ||
       (!state.composer.trim() && state.attachments.length === 0)
@@ -785,7 +855,6 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   }
 
   async function runSkill(skill: Pick<SkillConfig, "id" | "name" | "description" | "kind" | "enabled">) {
-    if (!state.activeThreadId) return;
     if (skill.enabled === false) {
       onToast("Enable this skill first");
       return;
@@ -849,11 +918,21 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   }
 
   async function chooseThreadWorkspace() {
-    if (!state.activeThreadId) return;
-
     try {
       const selected = await workspaceClient.selectWorkspaceFolder();
       if (!selected) return;
+
+      if (state.draft || !state.activeThreadId) {
+        dispatch({
+          type: "draft/set",
+          payload: {
+            workspaceRoot: selected,
+            thread: state.draft?.thread ? { ...state.draft.thread, workspaceRoot: selected } : null,
+          },
+        });
+        onToast(`Switched workspace to ${workspaceLabel(selected)}`);
+        return;
+      }
 
       const payload = await workspaceClient.setThreadWorkspace(state.activeThreadId, selected);
       applyWorkspacePayload(payload);
@@ -974,7 +1053,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     activeModel,
     activeSummary,
     activeThread,
-    activeThreadId: state.activeThreadId,
+    activeThreadId: state.draft ? "" : state.activeThreadId,
     activeThreads,
     applySuggestion,
     appendAttachments,
@@ -994,13 +1073,14 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     currentWorkspaceLabel,
     currentWorkspacePath,
     deleteThread,
+    drafting: Boolean(state.draft),
     dragActive: state.dragActive,
     mcpStatuses: state.mcpStatuses,
     mcpStatusMap,
     messageListRef,
     openThread,
     openWorkspaceFolder,
-    pendingQuestions: state.pendingQuestions,
+    pendingQuestions: state.draft ? [] : state.pendingQuestions,
     pickFiles,
     prepareSkillDraft,
     refreshThreadList,

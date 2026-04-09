@@ -1,6 +1,7 @@
 import {
   FolderOpen,
   Layers3,
+  Palette,
   Settings2,
   Sparkles,
   type LucideIcon,
@@ -24,6 +25,7 @@ export const SETTINGS_SECTIONS: Array<{
   icon: LucideIcon;
 }> = [
   { id: "general", label: "常规", icon: Settings2 },
+  { id: "appearance", label: "界面", icon: Palette },
   { id: "assistant", label: "模型配置", icon: Sparkles },
   { id: "mcp", label: "MCP 工具", icon: Layers3 },
   { id: "workspace", label: "资料与目录", icon: FolderOpen },
@@ -53,7 +55,7 @@ export const RECOMMENDED_MCP_SERVERS: RecommendedMcpServer[] = [
     id: "notion",
     name: "Notion",
     operator: "Notion",
-    description: "阅读知识库、更新页面、整理工作文档",
+    description: "访问知识库、同步页面并整理团队文档",
     badge: "N",
     tone: "slate",
     transport: "remote",
@@ -62,7 +64,7 @@ export const RECOMMENDED_MCP_SERVERS: RecommendedMcpServer[] = [
     id: "google-drive",
     name: "Google Drive",
     operator: "Google",
-    description: "访问云盘文件、表格和共享资料",
+    description: "浏览云盘文件、表格和共享资料",
     badge: "GD",
     tone: "green",
     transport: "remote",
