@@ -25,14 +25,12 @@ import { ChatView } from "./features/chat/ChatView";
 import { PreviewPane } from "./features/chat/PreviewPane";
 import { PrimarySidebar } from "./features/navigation/PrimarySidebar";
 import { SkillsView } from "./features/skills/SkillsView";
-import { RECOMMENDED_SKILLS } from "./features/skills/constants";
 import { ToolsView } from "./features/tools/ToolsView";
 import { KnowledgeView } from "./features/knowledge/KnowledgeView";
 import { AppTitleBar } from "./features/navigation/AppTitleBar";
 import { AssistantSettings } from "./features/settings/AssistantSettings";
 import { AppearanceSettings } from "./features/settings/AppearanceSettings";
 import { GeneralSettings } from "./features/settings/GeneralSettings";
-import { McpSettings } from "./features/settings/McpSettings";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
 import { WorkspaceSettings } from "./features/settings/WorkspaceSettings";
@@ -150,13 +148,6 @@ export default function App() {
         matchQuery(skillQuery, [skill.name, skill.description, skill.location]),
       ),
     [availableSkills, skillQuery],
-  );
-  const filteredRecommendedSkills = useMemo(
-    () =>
-      RECOMMENDED_SKILLS.filter((skill) =>
-        matchQuery(skillQuery, [skill.name, skill.description, skill.badge]),
-      ),
-    [skillQuery],
   );
   useEffect(() => {
     if (!toast) return undefined;
@@ -508,7 +499,7 @@ export default function App() {
     const normalized = sanitizeMcpName(server.name);
     if (config.mcpServers.some((item) => sanitizeMcpName(item.name) === normalized)) {
       setToast("This server draft already exists");
-      setSettingsSection("mcp");
+      setView("tools");
       return;
     }
 
@@ -529,7 +520,7 @@ export default function App() {
     ];
 
     void commitConfig({ ...cloneConfig(config), mcpServers }, "Added recommended MCP server");
-    setSettingsSection("mcp");
+    setView("tools");
   }
 
   async function refreshSkillsView() {
@@ -767,7 +758,7 @@ export default function App() {
           theme,
         },
       },
-      "Appearance updated",
+      "外观主题已更新",
     );
   }
 
@@ -805,9 +796,7 @@ export default function App() {
     mcpCount: config.mcpServers.length,
   };
   const hasSkillResults =
-    filteredInstalledSkills.length > 0 ||
-    filteredReferenceSkills.length > 0 ||
-    filteredRecommendedSkills.length > 0;
+    filteredInstalledSkills.length > 0 || filteredReferenceSkills.length > 0;
 
   function renderSettingsView() {
     if (settingsSection === "general") {
@@ -853,37 +842,6 @@ export default function App() {
       );
     }
 
-    if (settingsSection === "mcp") {
-      return (
-        <McpSettings
-          mcpAdvancedOpen={mcpAdvancedOpen}
-          mcpRefreshing={mcpRefreshing}
-          mcpServers={config.mcpServers}
-          mcpStatusMap={mcpStatusMap}
-          onAddMcpServer={addMcpServer}
-          onAddRecommendedMcpServer={addRecommendedMcpServer}
-          onRefresh={refreshMcpView}
-          onRemoveMcpServer={removeMcpServer}
-          onToggleAdvanced={() => setMcpAdvancedOpen((value) => !value)}
-          onUpdateMcp={updateMcp}
-          onInspectServer={(server) =>
-            workspaceClient.inspectMcpServer({
-              server,
-              workspaceRoot: config.opencodeRoot,
-            })
-          }
-          onDebugTool={(server, toolName, argumentsJson) =>
-            workspaceClient.debugMcpTool({
-              server,
-              workspaceRoot: config.opencodeRoot,
-              toolName,
-              argumentsJson,
-            })
-          }
-        />
-      );
-    }
-
     return (
       <WorkspaceSettings
         bridgeUrl={config.bridgeUrl}
@@ -901,14 +859,12 @@ export default function App() {
       return (
         <SkillsView
           filteredInstalledSkills={filteredInstalledSkills}
-          filteredRecommendedSkills={filteredRecommendedSkills}
           filteredReferenceSkills={filteredReferenceSkills}
           hasResults={hasSkillResults}
           skillQuery={skillQuery}
           skillsRefreshing={skillsRefreshing}
           onPrepareSkillDraft={prepareSkillDraft}
           onRefresh={refreshSkillsView}
-          onRunSkill={runSkill}
           onSkillQueryChange={setSkillQuery}
           onUninstallSkill={uninstallSkill}
           onUpdateInstalledSkill={updateInstalledSkill}
@@ -920,9 +876,32 @@ export default function App() {
     if (view === "tools") {
       return (
         <ToolsView
+          mcpAdvancedOpen={mcpAdvancedOpen}
+          mcpRefreshing={mcpRefreshing}
+          mcpServers={config.mcpServers}
+          mcpStatusMap={mcpStatusMap}
           tools={tools}
           toolsRefreshing={toolsRefreshing}
+          onAddMcpServer={addMcpServer}
+          onDebugTool={(server, toolName, argumentsJson) =>
+            workspaceClient.debugMcpTool({
+              server,
+              workspaceRoot: config.opencodeRoot,
+              toolName,
+              argumentsJson,
+            })
+          }
+          onInspectServer={(server) =>
+            workspaceClient.inspectMcpServer({
+              server,
+              workspaceRoot: config.opencodeRoot,
+            })
+          }
           onRefresh={refreshToolsView}
+          onRefreshMcp={refreshMcpView}
+          onRemoveMcpServer={removeMcpServer}
+          onToggleAdvanced={() => setMcpAdvancedOpen((value) => !value)}
+          onUpdateMcp={updateMcp}
         />
       );
     }

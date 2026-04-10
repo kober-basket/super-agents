@@ -1,5 +1,13 @@
 export type AppSection = "chat" | "skills" | "tools" | "knowledge" | "settings";
-export type AppearanceThemeId = "linen" | "ocean" | "forest" | "sunset" | "graphite";
+export type AppearanceThemeId =
+  | "linen"
+  | "ocean"
+  | "forest"
+  | "sunset"
+  | "graphite"
+  | "mist"
+  | "citrus"
+  | "aubergine";
 export type ContextTier = "low" | "medium" | "high";
 export type EnvironmentMode = "local" | "cloud";
 export type MessageRole = "user" | "assistant" | "tool";

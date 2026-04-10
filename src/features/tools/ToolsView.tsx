@@ -1,37 +1,103 @@
-import { LoaderCircle, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { LoaderCircle, Plus, RefreshCw } from "lucide-react";
 
-import type { WorkspaceTool } from "../../types";
+import type {
+  McpServerConfig,
+  McpServerStatus,
+  McpServerToolsResult,
+  McpToolDebugResult,
+  WorkspaceTool,
+} from "../../types";
+import { formatMcpStatusLabel, sanitizeMcpName } from "../shared/utils";
+import { McpSettings } from "../settings/McpSettings";
 
 interface ToolsViewProps {
+  mcpAdvancedOpen: boolean;
+  mcpRefreshing: boolean;
+  mcpServers: McpServerConfig[];
+  mcpStatusMap: Record<string, McpServerStatus>;
   tools: WorkspaceTool[];
   toolsRefreshing: boolean;
+  onAddMcpServer: () => void;
+  onDebugTool: (server: McpServerConfig, toolName: string, argumentsJson: string) => Promise<McpToolDebugResult>;
+  onInspectServer: (server: McpServerConfig) => Promise<McpServerToolsResult>;
   onRefresh: () => void | Promise<void>;
+  onRefreshMcp: () => void | Promise<void>;
+  onRemoveMcpServer: (serverId: string) => void;
+  onToggleAdvanced: () => void;
+  onUpdateMcp: (serverId: string, patch: Partial<McpServerConfig>) => void;
 }
 
-export function ToolsView({ tools, toolsRefreshing, onRefresh }: ToolsViewProps) {
+export function ToolsView({
+  mcpAdvancedOpen,
+  mcpRefreshing,
+  mcpServers,
+  mcpStatusMap,
+  tools,
+  toolsRefreshing,
+  onAddMcpServer,
+  onDebugTool,
+  onInspectServer,
+  onRefresh,
+  onRefreshMcp,
+  onRemoveMcpServer,
+  onToggleAdvanced,
+  onUpdateMcp,
+}: ToolsViewProps) {
+  const [mcpModalOpen, setMcpModalOpen] = useState(false);
+  const [mcpModalServerId, setMcpModalServerId] = useState<string | null>(null);
+  const [pendingNewServer, setPendingNewServer] = useState(false);
+
   const runtimeTools = tools.filter((tool) => tool.source === "runtime");
   const mcpTools = tools.filter((tool) => tool.source === "mcp");
+
+  const mcpToolsByServer = useMemo(() => {
+    const map = new Map<string, WorkspaceTool[]>();
+    for (const tool of mcpTools) {
+      const key = tool.serverId || "";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)?.push(tool);
+    }
+    return map;
+  }, [mcpTools]);
+
+  useEffect(() => {
+    if (!pendingNewServer || mcpServers.length === 0) return;
+    const latestServer = mcpServers[mcpServers.length - 1];
+    setMcpModalServerId(latestServer?.id ?? null);
+    setMcpModalOpen(true);
+    setPendingNewServer(false);
+  }, [mcpServers, pendingNewServer]);
+
+  function openMcpModal(serverId?: string) {
+    setMcpModalServerId(serverId ?? null);
+    setMcpModalOpen(true);
+  }
+
+  function createMcpServer() {
+    setPendingNewServer(true);
+    onAddMcpServer();
+  }
 
   return (
     <section className="skills-page">
       <div className="skills-inner">
         <header className="skills-toolbar">
           <div className="skills-toolbar-copy">
-            <h2>工具</h2>
-            <p>这里单独展示工作台当前可用的运行时工具和各个 MCP 工具，不再和技能混在一起。</p>
+            <h2>Tools</h2>
           </div>
 
           <div className="skills-toolbar-actions">
-            <button className="secondary-button" onClick={() => void onRefresh()} disabled={toolsRefreshing}>
+            <button className="secondary-button" onClick={() => void onRefresh()} disabled={toolsRefreshing} type="button">
               {toolsRefreshing ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}
-              刷新工具
+              Refresh Tools
             </button>
           </div>
         </header>
 
-        <div className="skills-section">
+        <section className="skills-section">
           <div className="skills-section-head">
-            <h3>运行时工具</h3>
+            <h3>Runtime Tools</h3>
           </div>
 
           {runtimeTools.length > 0 ? (
@@ -43,64 +109,97 @@ export function ToolsView({ tools, toolsRefreshing, onRefresh }: ToolsViewProps)
                       <strong>{tool.name}</strong>
                       <span>{tool.origin}</span>
                     </div>
-                    <span className="tool-chip">{tool.observed ? "已观测" : "内置"}</span>
+                    <span className="tool-chip">{tool.observed ? "Observed" : "Built-in"}</span>
                   </div>
-                  <p>{tool.description || "运行时工具"}</p>
+                  <p>{tool.description || "Runtime tool"}</p>
                 </article>
               ))}
             </div>
           ) : (
             <div className="empty-panel compact">
-              <strong>暂时还没有运行时工具</strong>
-              <p>等工作台跑过任务后，这里会展示已观测到的工具。</p>
+              <strong>No runtime tools yet</strong>
             </div>
           )}
-        </div>
+        </section>
 
-        <div className="skills-section">
-          <div className="skills-section-head">
-            <h3>MCP 工具</h3>
+        <section className="skills-section">
+          <div className="skills-section-head with-action">
+            <h3>MCP Tools</h3>
+            <button className="primary-button" onClick={createMcpServer} type="button">
+              <Plus size={14} />
+              添加 MCP
+            </button>
           </div>
 
-          {mcpTools.length > 0 ? (
+          {mcpServers.length > 0 ? (
             <div className="tool-grid">
-              {mcpTools.map((tool) => (
-                <article key={tool.id} className="tool-card">
-                  <div className="tool-card-head">
-                    <div>
-                      <strong>{tool.title || tool.name}</strong>
-                      <span>{tool.serverName || tool.origin}</span>
+              {mcpServers.map((server) => {
+                const normalized = sanitizeMcpName(server.name);
+                const status = mcpStatusMap[normalized]?.status ?? (server.enabled ? "connecting" : "disabled");
+                const serverTools = mcpToolsByServer.get(server.id) ?? [];
+
+                return (
+                  <button
+                    key={server.id}
+                    className="tool-card tool-card-button mcp-server-overview-card"
+                    onClick={() => openMcpModal(server.id)}
+                    type="button"
+                  >
+                    <div className="tool-card-head">
+                      <div>
+                        <strong>{server.name}</strong>
+                        <span>{server.transport === "remote" ? "Remote MCP" : "Local MCP"}</span>
+                      </div>
+                      <span className="tool-chip">{server.enabled ? "Enabled" : "Disabled"}</span>
                     </div>
-                    <span className="tool-chip">{tool.name}</span>
-                  </div>
-                  <p>{tool.description || "MCP 工具"}</p>
-                  {tool.parameters && tool.parameters.length > 0 ? (
-                    <div className="tool-parameter-list">
-                      {tool.parameters.map((parameter) => (
-                        <div key={`${tool.id}:${parameter.name}`} className="tool-parameter-item">
-                          <strong>{parameter.name}</strong>
-                          <span>
-                            {parameter.type}
-                            {parameter.required ? " · 必填" : " · 选填"}
+
+                    <p>{formatMcpStatusLabel(status)}</p>
+
+                    <div className="mcp-card-meta-row">
+                      <span>{serverTools.length} tools</span>
+                      <span>{server.transport === "remote" ? "Remote" : "Local"}</span>
+                    </div>
+
+                    {serverTools.length > 0 ? (
+                      <div className="mcp-card-tool-preview">
+                        {serverTools.slice(0, 3).map((tool) => (
+                          <span key={tool.id} className="mcp-card-tool-chip">
+                            {tool.title || tool.name}
                           </span>
-                          {parameter.description ? <p>{parameter.description}</p> : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="mcp-empty-inline">这个工具没有声明参数。</div>
-                  )}
-                </article>
-              ))}
+                        ))}
+                        {serverTools.length > 3 ? <span className="mcp-card-tool-chip muted">+{serverTools.length - 3}</span> : null}
+                      </div>
+                    ) : (
+                      <div className="mcp-empty-inline">还没有抓取到工具，点击后可配置并获取工具列表。</div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <div className="empty-panel compact">
-              <strong>还没有可见的 MCP 工具</strong>
-              <p>启用并连通 MCP 后，工具名、描述和参数会直接展示在这里。</p>
+              <strong>还没有 MCP</strong>
+              <p>添加一个 MCP 后，这里会像其他工具一样显示它的卡片入口。</p>
             </div>
           )}
-        </div>
+        </section>
       </div>
+
+      <McpSettings
+        mcpAdvancedOpen={mcpAdvancedOpen}
+        mcpRefreshing={mcpRefreshing}
+        mcpServers={mcpServers}
+        mcpStatusMap={mcpStatusMap}
+        initialServerId={mcpModalServerId}
+        open={mcpModalOpen}
+        onClose={() => setMcpModalOpen(false)}
+        onDebugTool={onDebugTool}
+        onInspectServer={onInspectServer}
+        onRefresh={onRefreshMcp}
+        onRemoveMcpServer={onRemoveMcpServer}
+        onToggleAdvanced={onToggleAdvanced}
+        onUpdateMcp={onUpdateMcp}
+      />
     </section>
   );
 }

@@ -22,7 +22,7 @@ export function GeneralSettings({
       <header className="settings-stage-header">
         <div>
           <h1>常规</h1>
-          <p>这里只保留当前真正有用的工作台信息。</p>
+          <p>这里集中展示当前工作台最常用的基础信息。</p>
         </div>
         <button className="secondary-button" onClick={() => void onOpenWorkspaceFolder()}>
           <FolderOpen size={14} />
@@ -38,7 +38,7 @@ export function GeneralSettings({
             providerCount={providerCount}
             threadCount={threadCount}
           />
-          <p className="field-note">当前默认助手：{activeModelLabel ?? "还没有可用模型"}</p>
+          <p className="field-note">当前默认模型：{activeModelLabel ?? "还没有可用模型"}</p>
         </article>
       </div>
     </section>

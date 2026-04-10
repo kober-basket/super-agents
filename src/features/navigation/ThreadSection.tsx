@@ -46,10 +46,16 @@ export function ThreadSection({
                 <div className="thread-mark" />
                 <div className="thread-copy">
                   <strong>{displayThreadTitle(thread.title)}</strong>
-                  <span>{thread.lastMessage || "还没有消息"}</span>
-                </div>
-                <div className="thread-meta">
-                  {isBusy ? <LoaderCircle size={14} className="spin" /> : <time>{formatRelativeTime(thread.updatedAt)}</time>}
+                  <div className="thread-subline">
+                    {isBusy ? (
+                      <span className="thread-meta">
+                        <LoaderCircle size={13} className="spin" />
+                        <span>处理中</span>
+                      </span>
+                    ) : (
+                      <time className="thread-meta">{formatRelativeTime(thread.updatedAt)}</time>
+                    )}
+                  </div>
                 </div>
               </button>
 

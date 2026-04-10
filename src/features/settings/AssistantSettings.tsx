@@ -68,6 +68,7 @@ export function AssistantSettings({
   onUpdateModelProvider,
 }: AssistantSettingsProps) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
 
   const totalModelCount = modelProviders.reduce((sum, provider) => sum + provider.models.length, 0);
   const enabledModelCount = modelProviders.reduce(
@@ -136,78 +137,14 @@ export function AssistantSettings({
   return (
     <section className="settings-stage">
       <header className="settings-stage-header">
-        <div>
-          <h1>模型配置</h1>
-          <p>先添加提供商，再拉取模型列表，最后从弹窗里搜索、加入并设置默认模型。</p>
-        </div>
+        <h1>模型配置</h1>
         <button className="secondary-button" onClick={onAddModelProvider}>
           <Plus size={14} />
           添加提供商
         </button>
       </header>
 
-      <div className="settings-stage-grid two">
-        <article className="panel-card form-card settings-surface">
-          <h3>默认模型</h3>
-          <label>
-            <span>用于日常对话的模型</span>
-            <div className="select-shell field-select full-width">
-              <select value={composerModelId} onChange={(event) => onModelChange(event.target.value)}>
-                {selectableModels.length > 0 ? (
-                  selectableModels.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">暂无可选模型</option>
-                )}
-              </select>
-              <ChevronDown size={13} />
-            </div>
-          </label>
-          <p className="field-note">
-            当前默认：
-            {activeModel ? `${activeModel.providerName} / ${activeModel.modelLabel}` : "请先添加并启用模型"}
-          </p>
-          <p className="field-note">如果你已经知道要用哪个模型，也可以在弹窗里直接点“设为默认”。</p>
-        </article>
-
-        <article className="panel-card form-card settings-surface">
-          <h3>当前状态</h3>
-          <div className="settings-stats-grid">
-            <div className="settings-stat-card">
-              <strong>{modelProviders.length}</strong>
-              <span>提供商</span>
-            </div>
-            <div className="settings-stat-card">
-              <strong>{totalModelCount}</strong>
-              <span>已发现模型</span>
-            </div>
-            <div className="settings-stat-card">
-              <strong>{enabledModelCount}</strong>
-              <span>可用模型</span>
-            </div>
-          </div>
-          <p className="field-note">这里尽量做成简单模式，你只需要填名称、接口地址和 API Key。</p>
-        </article>
-      </div>
-
       <div className="settings-block">
-        <div className="settings-block-head with-action">
-          <h3>提供商</h3>
-          {currentProvider ? (
-            <button
-              className="ghost-text-button"
-              onClick={() => void onRefreshProviderModels(currentProvider.id)}
-              disabled={currentProviderRefreshing}
-            >
-              {currentProviderRefreshing ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}
-              拉取当前提供商模型
-            </button>
-          ) : null}
-        </div>
-
         {modelProviders.length > 0 ? (
           <div className="provider-workbench">
             <aside className="provider-rail">
@@ -216,24 +153,37 @@ export function AssistantSettings({
                 const isSelected = currentProvider?.id === provider.id;
 
                 return (
-                  <button
-                    key={provider.id}
-                    className={clsx("provider-nav-card", isSelected && "active")}
-                    onClick={() => onSelectProvider(provider.id)}
-                  >
-                    <div className="split-row">
-                      <strong>{provider.name}</strong>
-                      <span className={clsx("stack-badge", provider.enabled && "active")}>
-                        {provider.enabled ? "启用" : "停用"}
-                      </span>
+                  <div key={provider.id} className={clsx("provider-nav-card", isSelected && "active")}>
+                    <div className="provider-nav-top">
+                      <button
+                        className="provider-nav-select"
+                        onClick={() => onSelectProvider(provider.id)}
+                        type="button"
+                      >
+                        <div className="split-row">
+                          <strong>{provider.name}</strong>
+                        </div>
+                        <span>{enabledCount}/{provider.models.length}</span>
+                        <small>
+                          {activeModel?.providerId === provider.id ? "默认来源" : provider.baseUrl || "未设置"}
+                        </small>
+                      </button>
+
+                      <label className="provider-switch" title={provider.enabled ? "停用提供商" : "启用提供商"}>
+                        <input
+                          checked={provider.enabled}
+                          onChange={(event) => {
+                            event.stopPropagation();
+                            onUpdateModelProvider(provider.id, { enabled: !provider.enabled });
+                          }}
+                          type="checkbox"
+                        />
+                        <span className="provider-switch-track">
+                          <span className="provider-switch-thumb" />
+                        </span>
+                      </label>
                     </div>
-                    <span>OpenAI 兼容 · {enabledCount}/{provider.models.length} 个模型</span>
-                    <small>
-                      {activeModel?.providerId === provider.id
-                        ? "当前默认来源"
-                        : provider.baseUrl || "待填写接口地址"}
-                    </small>
-                  </button>
+                  </div>
                 );
               })}
             </aside>
@@ -241,31 +191,30 @@ export function AssistantSettings({
             {currentProvider ? (
               <article className="panel-card form-card settings-surface provider-detail-card">
                 <div className="provider-detail-head">
-                  <div>
+                  <div className="provider-detail-copy">
                     <h3>{currentProvider.name}</h3>
-                    <p className="field-note">
-                      OpenAI 兼容 · {currentProviderEnabledCount}/{currentProvider.models.length} 个模型
-                    </p>
                   </div>
                   <div className="mcp-card-actions">
                     <button
-                      className={clsx("toggle-button", currentProvider.enabled && "active")}
-                      onClick={() =>
-                        onUpdateModelProvider(currentProvider.id, { enabled: !currentProvider.enabled })
-                      }
+                      className="ghost-text-button"
+                      onClick={() => void onRefreshProviderModels(currentProvider.id)}
+                      disabled={currentProviderRefreshing}
                     >
-                      {currentProvider.enabled ? "已启用" : "未启用"}
+                      {currentProviderRefreshing ? (
+                        <LoaderCircle size={14} className="spin" />
+                      ) : (
+                        <RefreshCw size={14} />
+                      )}
                     </button>
-                    <button className="ghost-text-button" onClick={() => setModelPickerOpen(true)}>
+                    <button className="ghost-text-button" onClick={() => setModelPickerOpen(true)} title="管理模型">
                       <Settings2 size={14} />
-                      管理模型
                     </button>
                     <button
                       className="ghost-text-button danger"
                       onClick={() => onRemoveModelProvider(currentProvider.id)}
+                      title="删除提供商"
                     >
                       <X size={14} />
-                      删除
                     </button>
                   </div>
                 </div>
@@ -305,94 +254,101 @@ export function AssistantSettings({
                   </label>
                 </div>
 
-                <p className="field-note">
-                  填好地址和密钥后，先拉取模型列表，再从“管理模型”里按需保留你真正想用的模型。
-                </p>
-
-                <div className="provider-models-head">
-                  <div>
-                    <strong>模型</strong>
-                    <span>
-                      {currentProviderModelGroups.length > 0
-                        ? `当前显示 ${currentProviderModels.length} 个模型，按系列自动分组。`
-                        : "还没有模型时，先从弹窗里选择你要显示的模型。"}
-                    </span>
-                  </div>
+                <div className="provider-models-head minimal">
+                  <strong>模型</strong>
                   <button className="secondary-button" onClick={() => setModelPickerOpen(true)}>
                     <Settings2 size={14} />
-                    打开模型弹窗
                   </button>
                 </div>
 
                 {currentProviderModelGroups.length > 0 ? (
                   <div className="provider-model-list">
-                    {currentProviderModelGroups.map(([groupName, models]) => (
-                      <section key={groupName} className="model-group">
-                        <div className="model-group-head">
-                          <div className="model-group-trigger">
-                            <div className="model-group-copy">
-                              <ChevronDown size={16} className="model-group-arrow" />
-                              <strong>{groupName}</strong>
-                              <span className="model-group-count">{models.length}</span>
-                            </div>
+                    {currentProviderModelGroups.map(([groupName, models]) => {
+                      const collapsed = collapsedGroups.includes(groupName);
+
+                      return (
+                        <section key={groupName} className="model-group">
+                          <div className={clsx("model-group-head", collapsed && "collapsed")}>
+                            <button
+                              className="model-group-trigger"
+                              onClick={() =>
+                                setCollapsedGroups((current) =>
+                                  current.includes(groupName)
+                                    ? current.filter((item) => item !== groupName)
+                                    : [...current, groupName],
+                                )
+                              }
+                              type="button"
+                            >
+                              <div className="model-group-copy">
+                                <ChevronDown
+                                  size={16}
+                                  className={clsx("model-group-arrow", collapsed && "collapsed")}
+                                />
+                                <strong>{groupName}</strong>
+                                <span className="model-group-count">{models.length}</span>
+                              </div>
+                            </button>
                           </div>
-                        </div>
 
-                        <div className="model-group-body">
-                          {models.map((model) => {
-                            const isDefault =
-                              activeModel?.providerId === currentProvider.id &&
-                              activeModel.modelId === model.id;
-                            const tags = tagItems(model);
+                          {!collapsed ? (
+                            <div className="model-group-body">
+                              {models.map((model) => {
+                                const isDefault =
+                                  activeModel?.providerId === currentProvider.id &&
+                                  activeModel.modelId === model.id;
+                                const tags = tagItems(model);
 
-                            return (
-                              <div
-                                key={model.id}
-                                className={clsx("model-picker-row", "active", isDefault && "default")}
-                              >
-                                <div className="model-picker-copy">
-                                  <div className="model-picker-title-line">
-                                    <strong>{model.label}</strong>
-                                    <div className="model-picker-tags">
-                                      {tags.map((tag) => {
-                                        const Icon = tag.icon;
-                                        return (
-                                          <span key={tag.key} className={clsx("model-capability-tag", tag.key)}>
-                                            <Icon size={12} />
-                                            {tag.label}
-                                          </span>
-                                        );
-                                      })}
+                                return (
+                                  <div
+                                    key={model.id}
+                                    className={clsx("model-picker-row", "active", isDefault && "default")}
+                                  >
+                                    <div className="model-picker-copy" title={model.description || model.label}>
+                                      <div className="model-picker-title-line">
+                                        <strong>{model.label}</strong>
+                                        <div className="model-picker-tags">
+                                          {tags.map((tag) => {
+                                            const Icon = tag.icon;
+                                            return (
+                                              <span
+                                                key={tag.key}
+                                                className={clsx("model-capability-tag", tag.key)}
+                                              >
+                                                <Icon size={12} />
+                                                {tag.label}
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                      <span>{model.id}</span>
+                                    </div>
+
+                                    <div className="model-picker-actions">
+                                      {isDefault ? <span className="stack-badge active">默认</span> : null}
+                                      <button
+                                        className="icon-action-button danger"
+                                        onClick={() => onToggleProviderModel(currentProvider.id, model.id)}
+                                        title="去除模型"
+                                        aria-label={`去除模型 ${model.label}`}
+                                        type="button"
+                                      >
+                                        <X size={18} />
+                                      </button>
                                     </div>
                                   </div>
-                                  <span>{model.id}</span>
-                                  {model.description ? <p>{model.description}</p> : null}
-                                </div>
-
-                                <div className="model-picker-actions">
-                                  {isDefault ? (
-                                    <span className="stack-badge active">默认</span>
-                                  ) : (
-                                    <button
-                                      className="server-row-action"
-                                      onClick={() => onSetDefaultProviderModel(currentProvider.id, model.id)}
-                                      type="button"
-                                    >
-                                      设为默认
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </section>
-                    ))}
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </section>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="empty-panel compact provider-empty">
                     <strong>还没有模型</strong>
-                    <p>先在“管理模型”里选择要显示的模型。</p>
                   </div>
                 )}
               </article>
@@ -401,7 +357,6 @@ export function AssistantSettings({
         ) : (
           <div className="empty-panel spacious">
             <strong>还没有模型提供商</strong>
-            <p>先添加一个提供商，填好名称、接口地址和密钥，然后就可以拉取模型列表了。</p>
             <button className="secondary-button" onClick={onAddModelProvider}>
               <Plus size={14} />
               添加提供商

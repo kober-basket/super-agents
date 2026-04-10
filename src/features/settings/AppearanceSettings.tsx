@@ -12,12 +12,15 @@ export function AppearanceSettings({
   appearance,
   onThemeChange,
 }: AppearanceSettingsProps) {
+  const activeTheme =
+    APPEARANCE_THEME_OPTIONS.find((option) => option.id === appearance.theme) ?? APPEARANCE_THEME_OPTIONS[0];
+
   return (
     <section className="settings-stage">
       <header className="settings-stage-header">
         <div>
-          <h1>界面设置</h1>
-          <p>切换应用色系，同时保留更简洁的桌面界面风格。</p>
+          <h1>外观设置</h1>
+          <p>切换应用配色方案，让界面风格更贴合你的工作状态。</p>
         </div>
       </header>
 
@@ -25,8 +28,8 @@ export function AppearanceSettings({
         <article className="panel-card form-card settings-surface">
           <div className="panel-head">
             <div>
-              <h2>色系方案</h2>
-              <p>选择一个更适合你工作状态的界面风格。</p>
+              <h2>配色方案</h2>
+              <p>现在提供更多主题，浅色、暖色、深色都可以直接切换。</p>
             </div>
           </div>
 
@@ -67,11 +70,11 @@ export function AppearanceSettings({
           <div className="appearance-note-list">
             <div className="appearance-note-item">
               <strong>当前主题</strong>
-              <span>{APPEARANCE_THEME_OPTIONS.find((option) => option.id === appearance.theme)?.label ?? "Linen"}</span>
+              <span>{activeTheme.label}</span>
             </div>
             <div className="appearance-note-item">
               <strong>窗口样式</strong>
-              <span>已使用更简洁的自定义标题栏，减少默认菜单栏干扰。</span>
+              <span>主题会同步作用于侧栏、卡片、按钮和标题栏，不再出现中英混杂。</span>
             </div>
           </div>
         </article>

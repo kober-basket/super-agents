@@ -222,7 +222,7 @@ export function ProviderModelPickerModal({
                             key={model.id}
                             className={clsx("model-picker-row", isAdded && "active", isDefault && "default")}
                           >
-                            <div className="model-picker-copy">
+                            <div className="model-picker-copy" title={model.description || model.label}>
                               <div className="model-picker-title-line">
                                 <strong>{model.label}</strong>
                                 <div className="model-picker-tags">
@@ -238,7 +238,6 @@ export function ProviderModelPickerModal({
                                 </div>
                               </div>
                               <span>{model.id}</span>
-                              {model.description ? <p>{model.description}</p> : null}
                             </div>
 
                             <div className="model-picker-actions">

@@ -1,6 +1,5 @@
 import {
   FolderOpen,
-  Layers3,
   Palette,
   Settings2,
   Sparkles,
@@ -14,7 +13,7 @@ export const CONTEXT_CHOICES: Array<{
   value: AppConfig["contextTier"];
   label: string;
 }> = [
-  { value: "low", label: "轻聊" },
+  { value: "low", label: "轻量" },
   { value: "medium", label: "均衡" },
   { value: "high", label: "深入" },
 ];
@@ -25,10 +24,9 @@ export const SETTINGS_SECTIONS: Array<{
   icon: LucideIcon;
 }> = [
   { id: "general", label: "常规", icon: Settings2 },
-  { id: "appearance", label: "界面", icon: Palette },
-  { id: "assistant", label: "模型配置", icon: Sparkles },
-  { id: "mcp", label: "MCP 工具", icon: Layers3 },
-  { id: "workspace", label: "资料与目录", icon: FolderOpen },
+  { id: "appearance", label: "外观", icon: Palette },
+  { id: "assistant", label: "模型", icon: Sparkles },
+  { id: "workspace", label: "工作区", icon: FolderOpen },
 ];
 
 export interface RecommendedMcpServer {
@@ -45,8 +43,8 @@ export const RECOMMENDED_MCP_SERVERS: RecommendedMcpServer[] = [
   {
     id: "feishu",
     name: "Feishu",
-    operator: "飞书",
-    description: "读取文档、日程、消息和协同办公数据",
+    operator: "Feishu",
+    description: "Read docs, messages, calendars, and team collaboration content.",
     badge: "FS",
     tone: "blue",
     transport: "remote",
@@ -55,7 +53,7 @@ export const RECOMMENDED_MCP_SERVERS: RecommendedMcpServer[] = [
     id: "notion",
     name: "Notion",
     operator: "Notion",
-    description: "访问知识库、同步页面并整理团队文档",
+    description: "Browse knowledge bases, synced pages, and workspace documents.",
     badge: "N",
     tone: "slate",
     transport: "remote",
@@ -64,7 +62,7 @@ export const RECOMMENDED_MCP_SERVERS: RecommendedMcpServer[] = [
     id: "google-drive",
     name: "Google Drive",
     operator: "Google",
-    description: "浏览云盘文件、表格和共享资料",
+    description: "Access drive files, spreadsheets, and shared documents.",
     badge: "GD",
     tone: "green",
     transport: "remote",

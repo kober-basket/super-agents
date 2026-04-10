@@ -1,115 +1,123 @@
 import clsx from "clsx";
-import {
-  Check,
-  Compass,
-  LoaderCircle,
-  Plus,
-  RefreshCw,
-  Search,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { Boxes, Compass, LoaderCircle, Plus, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { useEffect, useState } from "react";
 
+import { markdownToHtml } from "../../lib/format";
+import { workspaceClient } from "../../services/workspace-client";
 import type { RuntimeSkill, SkillConfig } from "../../types";
-import { makeBadgeText } from "../shared/utils";
-import { SKILL_TONES, type RecommendedSkill } from "./constants";
 
 export type InstalledSkillView = SkillConfig & { location: string };
 
 interface SkillsViewProps {
   filteredInstalledSkills: InstalledSkillView[];
-  filteredRecommendedSkills: RecommendedSkill[];
   filteredReferenceSkills: RuntimeSkill[];
   hasResults: boolean;
   skillQuery: string;
   skillsRefreshing: boolean;
   onPrepareSkillDraft: (name?: string, description?: string) => void;
   onRefresh: () => void | Promise<void>;
-  onRunSkill: (
-    skill: Pick<SkillConfig, "id" | "name" | "description" | "kind" | "enabled">,
-  ) => void | Promise<void>;
   onSkillQueryChange: (value: string) => void;
   onUninstallSkill: (skill: SkillConfig) => void | Promise<void>;
   onUpdateInstalledSkill: (skillId: string, patch: Partial<SkillConfig>) => void;
   onUseReferenceSkill: (skill: RuntimeSkill) => void;
 }
 
+type SkillModalState =
+  | { kind: "installed"; skill: InstalledSkillView }
+  | { kind: "reference"; skill: RuntimeSkill };
+
+const SKILL_ACCENTS = [
+  "skill-accent-sky",
+  "skill-accent-amber",
+  "skill-accent-violet",
+  "skill-accent-mint",
+  "skill-accent-rose",
+  "skill-accent-indigo",
+] as const;
+
 export function SkillsView({
   filteredInstalledSkills,
-  filteredRecommendedSkills,
   filteredReferenceSkills,
   hasResults,
   skillQuery,
   skillsRefreshing,
   onPrepareSkillDraft,
   onRefresh,
-  onRunSkill,
   onSkillQueryChange,
   onUninstallSkill,
   onUpdateInstalledSkill,
   onUseReferenceSkill,
 }: SkillsViewProps) {
-  const enabledInstalledCount = filteredInstalledSkills.filter((skill) => skill.enabled).length;
-  const codexInstalledCount = filteredInstalledSkills.filter((skill) => skill.kind === "codex").length;
+  const [activeSkill, setActiveSkill] = useState<SkillModalState | null>(null);
+  const [modalHtml, setModalHtml] = useState("");
+  const [modalLoading, setModalLoading] = useState(false);
+
+  useEffect(() => {
+    if (!activeSkill) return undefined;
+
+    let cancelled = false;
+
+    async function loadSkillContent() {
+      setModalLoading(true);
+      try {
+        const markdown = await resolveSkillMarkdown(activeSkill);
+        if (!cancelled) setModalHtml(markdownToHtml(markdown));
+      } catch {
+        if (!cancelled) setModalHtml(markdownToHtml(fallbackMarkdown(activeSkill)));
+      } finally {
+        if (!cancelled) setModalLoading(false);
+      }
+    }
+
+    void loadSkillContent();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSkill]);
+
+  useEffect(() => {
+    if (!activeSkill) return undefined;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setActiveSkill(null);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeSkill]);
 
   return (
     <section className="skills-page">
       <div className="skills-inner">
-        <header className="skills-hero">
-          <div className="skills-hero-copy">
-            <span className="section-kicker">Skill Workspace</span>
+        <header className="skills-toolbar">
+          <div className="skills-toolbar-copy">
             <h2>技能</h2>
-            <p>统一管理已安装技能、运行时发现的技能，以及可直接复用的推荐模板。</p>
-
-            <div className="skills-hero-stats" aria-label="技能概览">
-              <div className="skills-stat-card">
-                <strong>{filteredInstalledSkills.length}</strong>
-                <span>已安装</span>
-                <small>{enabledInstalledCount} 个当前启用</small>
-              </div>
-              <div className="skills-stat-card">
-                <strong>{filteredReferenceSkills.length}</strong>
-                <span>已发现</span>
-                <small>可快速带入当前对话</small>
-              </div>
-              <div className="skills-stat-card">
-                <strong>{filteredRecommendedSkills.length}</strong>
-                <span>推荐模板</span>
-                <small>{codexInstalledCount} 个 Codex 技能已接入</small>
-              </div>
-            </div>
           </div>
 
-          <div className="skills-hero-panel">
-            <div className="skills-toolbar-actions">
-              <button className="secondary-button" onClick={() => void onRefresh()} disabled={skillsRefreshing}>
-                {skillsRefreshing ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}
-                刷新
-              </button>
+          <div className="skills-toolbar-actions">
+            <label className="search-field skill-search-field">
+              <Search size={16} />
+              <input
+                value={skillQuery}
+                onChange={(event) => onSkillQueryChange(event.target.value)}
+                placeholder="搜索技能"
+              />
+            </label>
 
-              <label className="search-field skill-search-field">
-                <Search size={16} />
-                <input
-                  value={skillQuery}
-                  onChange={(event) => onSkillQueryChange(event.target.value)}
-                  placeholder="搜索技能名称、描述或来源"
-                />
-              </label>
+            <button className="secondary-button" onClick={() => void onRefresh()} disabled={skillsRefreshing}>
+              <RefreshCw size={14} className={skillsRefreshing ? "spin" : undefined} />
+              刷新
+            </button>
 
-              <button className="primary-button" onClick={() => onPrepareSkillDraft()}>
-                <Plus size={16} />
-                新建技能
-              </button>
-            </div>
-
-            <div className="skills-hero-hint">
-              <Sparkles size={16} />
-              <span>优先启用高频技能，把发现的技能先带入对话试跑，再决定是否沉淀成正式配置。</span>
-            </div>
+            <button className="primary-button" onClick={() => onPrepareSkillDraft()}>
+              <Plus size={16} />
+              新建技能
+            </button>
           </div>
         </header>
 
-        <div className="skills-section">
+        <section className="skills-section">
           <div className="skills-section-head">
             <div>
               <span className="section-kicker muted">Library</span>
@@ -119,73 +127,45 @@ export function SkillsView({
           </div>
 
           {filteredInstalledSkills.length > 0 ? (
-            <div className="skill-grid installed-grid">
-              {filteredInstalledSkills.map((skill, index) => {
-                const tone = SKILL_TONES[index % SKILL_TONES.length];
-                const isCodexSkill = skill.kind === "codex";
-                const sourceLabel = isCodexSkill ? "Codex" : "Workspace";
-
-                return (
-                  <article
-                    key={skill.id}
-                    className={clsx("skill-card installed", skill.enabled === false && "disabled")}
-                  >
-                    <div className="skill-card-main">
-                      <div className={clsx("skill-mark", `tone-${tone}`)}>{makeBadgeText(skill.name)}</div>
-                      <div className="skill-copy">
-                        <div className="skill-copy-head">
-                          <strong>{skill.name}</strong>
-                          <div className="skill-chip-row">
-                            <span className="skill-chip">{sourceLabel}</span>
-                            <span className={clsx("skill-chip", skill.enabled ? "success" : "muted")}>
-                              {skill.enabled ? "已启用" : "已禁用"}
-                            </span>
-                          </div>
-                        </div>
-                        <span>{skill.description || "暂无描述"}</span>
-                        <small>{skill.location}</small>
-                      </div>
-                    </div>
-
-                    <div className="skill-card-actions">
-                      <button
-                        className={clsx("skill-state-button installed", skill.enabled === false && "disabled")}
-                        onClick={() => void onRunSkill(skill)}
-                        title={isCodexSkill ? "带入对话" : "立即运行"}
-                        disabled={skill.enabled === false}
-                      >
-                        {isCodexSkill ? <Sparkles size={16} /> : <Check size={16} />}
-                        {isCodexSkill ? "带入对话" : "立即运行"}
-                      </button>
-                      <button
-                        className={clsx("toggle-button", skill.enabled && "active")}
-                        onClick={() => onUpdateInstalledSkill(skill.id, { enabled: !skill.enabled })}
-                      >
-                        {skill.enabled ? "停用" : "启用"}
-                      </button>
-                      <button className="ghost-text-button danger" onClick={() => void onUninstallSkill(skill)}>
-                        <X size={14} />
-                        卸载
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
+            <div className="skills-gallery">
+              {filteredInstalledSkills.map((skill, index) => (
+                <button
+                  key={skill.id}
+                  className="skill-tile"
+                  onClick={() => setActiveSkill({ kind: "installed", skill })}
+                  type="button"
+                >
+                  <div className={clsx("skill-icon-shell", resolveAccent(index))}>
+                    <Boxes size={20} />
+                  </div>
+                  <div className="skill-tile-copy">
+                    <strong title={skill.name}>{skill.name}</strong>
+                    <p title={skill.description || "暂无描述"}>
+                      {compactSkillDescription(skill.description, "暂无描述")}
+                    </p>
+                  </div>
+                  <div className="skill-tile-status">
+                    <span className={clsx("skill-status-chip", skill.enabled ? "enabled" : "disabled")}>
+                      {skill.enabled ? "启用" : "停用"}
+                    </span>
+                  </div>
+                </button>
+              ))}
             </div>
           ) : (
             <div className="empty-panel">
               <strong>还没有已安装技能</strong>
-              <p>可以先创建一个技能，或者从下方发现技能与推荐模板开始，快速补齐你的工作流。</p>
+              <p>可以先新建一个技能，或者先从下方已发现技能里挑一个试用。</p>
               <button className="secondary-button" onClick={() => onPrepareSkillDraft()}>
                 <Plus size={14} />
                 创建第一个技能
               </button>
             </div>
           )}
-        </div>
+        </section>
 
         {filteredReferenceSkills.length > 0 ? (
-          <div className="skills-section">
+          <section className="skills-section">
             <div className="skills-section-head">
               <div>
                 <span className="section-kicker muted">Discover</span>
@@ -194,94 +174,218 @@ export function SkillsView({
               <span className="section-count">{filteredReferenceSkills.length}</span>
             </div>
 
-            <div className="skill-grid installed-grid">
-              {filteredReferenceSkills.map((skill, index) => {
-                const tone = SKILL_TONES[(index + 2) % SKILL_TONES.length];
-
-                return (
-                  <article key={skill.id} className="skill-card installed">
-                    <div className="skill-card-main">
-                      <div className={clsx("skill-mark", `tone-${tone}`)}>{makeBadgeText(skill.name)}</div>
-                      <div className="skill-copy">
-                        <div className="skill-copy-head">
-                          <strong>{skill.name}</strong>
-                          <div className="skill-chip-row">
-                            <span className="skill-chip">Runtime</span>
-                            <span className="skill-chip muted">待引用</span>
-                          </div>
-                        </div>
-                        <span>{skill.description || "来自运行时发现的技能。"}</span>
-                        <small>{skill.location}</small>
-                      </div>
-                    </div>
-                    <div className="skill-card-actions">
-                      <button className="skill-state-button" onClick={() => onUseReferenceSkill(skill)} title="带入对话">
-                        <Sparkles size={16} />
-                        带入对话
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="skills-section">
-          <div className="skills-section-head">
-            <div>
-              <span className="section-kicker muted">Templates</span>
-              <h3>推荐模板</h3>
-            </div>
-            <span className="section-count">{filteredRecommendedSkills.length}</span>
-          </div>
-
-          {filteredRecommendedSkills.length > 0 ? (
-            <div className="skill-grid recommended-grid">
-              {filteredRecommendedSkills.map((skill) => (
-                <article key={skill.id} className="skill-card recommended">
-                  <div className="skill-card-main">
-                    <div className={clsx("skill-mark", `tone-${skill.tone}`)}>{skill.badge}</div>
-                    <div className="skill-copy">
-                      <div className="skill-copy-head">
-                        <strong>{skill.name}</strong>
-                        <div className="skill-chip-row">
-                          <span className="skill-chip">{skill.badge}</span>
-                          <span className="skill-chip muted">模板</span>
-                        </div>
-                      </div>
-                      <span>{skill.description}</span>
-                      <small>适合作为新技能草稿的起点，减少重复配置。</small>
-                    </div>
+            <div className="skills-gallery">
+              {filteredReferenceSkills.map((skill, index) => (
+                <button
+                  key={skill.id}
+                  className="skill-tile"
+                  onClick={() => setActiveSkill({ kind: "reference", skill })}
+                  type="button"
+                >
+                  <div className={clsx("skill-icon-shell", resolveAccent(index + 2))}>
+                    <Boxes size={20} />
                   </div>
-                  <div className="skill-card-actions">
-                    <button
-                      className="skill-state-button"
-                      onClick={() => onPrepareSkillDraft(skill.name, skill.description)}
-                      title="用这个模板创建技能"
-                    >
-                      <Plus size={16} />
-                      使用模板
-                    </button>
+                  <div className="skill-tile-copy">
+                    <strong title={skill.name}>{skill.name}</strong>
+                    <p title={skill.description || "运行时发现的技能"}>
+                      {compactSkillDescription(skill.description, "运行时发现的技能")}
+                    </p>
                   </div>
-                </article>
+                  <div className="skill-tile-status skill-tile-status-empty" />
+                </button>
               ))}
             </div>
-          ) : hasResults ? null : (
-            <div className="empty-panel compact">
-              <strong>没有匹配的技能结果</strong>
-              <p>换个关键词试试，或者直接新建一个技能模板，把当前想法先沉淀下来。</p>
-            </div>
-          )}
-        </div>
+          </section>
+        ) : null}
 
         {hasResults ? null : (
           <div className="skills-empty-banner">
             <Compass size={18} />
-            <span>当前搜索没有命中内容，试试输入来源、技能名或功能关键词。</span>
+            <span>当前搜索没有结果，试试更短的关键词。</span>
           </div>
         )}
       </div>
+
+      {activeSkill ? (
+        <div className="modal-scrim" onClick={() => setActiveSkill(null)}>
+          <div className="skill-detail-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="skill-detail-head">
+              <div className="skill-detail-title-wrap compact">
+                <div className={clsx("skill-icon-shell", "large", resolveAccent(activeSkill.skill.name.length))}>
+                  <Boxes size={28} />
+                </div>
+                <div className="skill-detail-title-copy">
+                  <div className="skill-detail-title-row">
+                    <h3>{activeSkill.skill.name}</h3>
+                    {activeSkill.kind === "installed" ? (
+                      <span className={clsx("skill-status-chip", activeSkill.skill.enabled ? "enabled" : "disabled")}>
+                        {activeSkill.skill.enabled ? "启用" : "停用"}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p>{activeSkill.skill.description || "暂无描述"}</p>
+                </div>
+              </div>
+
+              <button className="ghost-icon" onClick={() => setActiveSkill(null)} title="关闭" type="button">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="skill-detail-body">
+              {modalLoading ? (
+                <div className="skill-detail-loading">
+                  <LoaderCircle size={18} className="spin" />
+                  <span>正在读取技能内容...</span>
+                </div>
+              ) : (
+                <div className="skill-detail-markdown preview-markdown" dangerouslySetInnerHTML={{ __html: modalHtml }} />
+              )}
+            </div>
+
+            <div className="skill-detail-footer">
+              {activeSkill.kind === "installed" ? (
+                <>
+                  <button
+                    className={clsx("toggle-button", activeSkill.skill.enabled && "active")}
+                    onClick={() =>
+                      onUpdateInstalledSkill(activeSkill.skill.id, {
+                        enabled: !activeSkill.skill.enabled,
+                      })
+                    }
+                    type="button"
+                  >
+                    {activeSkill.skill.enabled ? "停用" : "启用"}
+                  </button>
+                  <button
+                    className="ghost-text-button danger"
+                    onClick={() => void onUninstallSkill(activeSkill.skill)}
+                    type="button"
+                  >
+                    <X size={14} />
+                    卸载
+                  </button>
+                </>
+              ) : (
+                <button className="primary-button" onClick={() => onUseReferenceSkill(activeSkill.skill)} type="button">
+                  <Sparkles size={14} />
+                  试用
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function compactSkillDescription(description: string | undefined, fallback: string) {
+  const text = (description || fallback).replace(/\s+/g, " ").trim();
+  return text.length > 68 ? `${text.slice(0, 68).trim()}...` : text;
+}
+
+function resolveAccent(seed: number) {
+  return SKILL_ACCENTS[Math.abs(seed) % SKILL_ACCENTS.length];
+}
+
+function appendSkillFilePath(sourcePath: string) {
+  return `${sourcePath.replace(/[\\/]+$/, "")}\\SKILL.md`;
+}
+
+async function resolveSkillMarkdown(activeSkill: SkillModalState) {
+  if (activeSkill.kind === "reference") {
+    return cleanSkillMarkdown(
+      activeSkill.skill.content || fallbackMarkdown(activeSkill),
+      activeSkill.skill.name,
+    );
+  }
+
+  if (activeSkill.skill.sourcePath) {
+    const preview = await workspaceClient.readPreview({
+      path: appendSkillFilePath(activeSkill.skill.sourcePath),
+      title: `${activeSkill.skill.name} Skill`,
+    });
+
+    return cleanSkillMarkdown(
+      preview.content || fallbackMarkdown(activeSkill),
+      activeSkill.skill.name,
+    );
+  }
+
+  if (activeSkill.skill.kind === "command" && activeSkill.skill.command) {
+    return cleanSkillMarkdown(
+      [
+      `# ${activeSkill.skill.name}`,
+      "",
+      activeSkill.skill.description || "暂无描述",
+      "",
+      "## Command",
+      "",
+      "```text",
+      activeSkill.skill.command,
+      "```",
+      ].join("\n"),
+      activeSkill.skill.name,
+    );
+  }
+
+  return cleanSkillMarkdown(fallbackMarkdown(activeSkill), activeSkill.skill.name);
+}
+
+function fallbackMarkdown(activeSkill: SkillModalState) {
+  if (activeSkill.kind === "reference") {
+    return [
+      `# ${activeSkill.skill.name}`,
+      "",
+      activeSkill.skill.description || "运行时发现的技能",
+      "",
+      "## Location",
+      "",
+      `\`${activeSkill.skill.location}\``,
+    ].join("\n");
+  }
+
+  return [
+    `# ${activeSkill.skill.name}`,
+    "",
+    activeSkill.skill.description || "暂无描述",
+    "",
+    "## Location",
+    "",
+    `\`${activeSkill.skill.location}\``,
+  ].join("\n");
+}
+
+function cleanSkillMarkdown(content: string, skillName: string) {
+  let next = content.replace(/\r\n/g, "\n").trimStart();
+
+  if (next.startsWith("---\n")) {
+    const frontmatterEnd = next.indexOf("\n---\n", 4);
+    if (frontmatterEnd >= 0) {
+      next = next.slice(frontmatterEnd + 5).trimStart();
+    }
+  } else {
+    const lines = next.split("\n");
+    const metadataLines: string[] = [];
+
+    for (const line of lines) {
+      if (!line.trim()) break;
+      if (/^[A-Za-z][\w-]*:\s*/.test(line)) {
+        metadataLines.push(line);
+      } else {
+        metadataLines.length = 0;
+        break;
+      }
+    }
+
+    if (metadataLines.length >= 2) {
+      next = lines.slice(metadataLines.length).join("\n").trimStart();
+    }
+  }
+
+  const escapedName = skillName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  next = next.replace(new RegExp(`^#\\s+${escapedName}\\s*\\n+`, "i"), "");
+
+  return next.trimStart();
 }

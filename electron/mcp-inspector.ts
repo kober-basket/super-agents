@@ -28,6 +28,7 @@ const CLIENT_INFO = {
 };
 
 type JsonRecord = Record<string, unknown>;
+type ChunkDecoder = (chunk: Buffer | string) => string;
 
 type ConnectionHandle = {
   client: Client;
@@ -42,6 +43,22 @@ function normalizeServerName(server: Pick<McpServerConfig, "id" | "name">) {
 
 function normalizeTimeout(timeoutMs?: number) {
   return Math.max(1_000, timeoutMs || DEFAULT_TIMEOUT_MS);
+}
+
+function createChunkDecoder(): ChunkDecoder {
+  if (process.platform !== "win32") {
+    return (chunk) => (typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+  }
+
+  const decoder = new TextDecoder("gbk", { fatal: false });
+  return (chunk) => {
+    if (typeof chunk === "string") return chunk;
+    try {
+      return decoder.decode(chunk, { stream: true });
+    } catch {
+      return chunk.toString("utf8");
+    }
+  };
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -201,11 +218,7 @@ function summarizeContent(content: unknown) {
         return item.text;
       }
 
-      if (
-        item.type === "resource" &&
-        isRecord(item.resource) &&
-        typeof item.resource.text === "string"
-      ) {
+      if (item.type === "resource" && isRecord(item.resource) && typeof item.resource.text === "string") {
         return item.resource.text;
       }
 
@@ -285,6 +298,7 @@ async function fileExists(filePath: string) {
 
 async function runInstaller(command: string, args: string[], cwd: string) {
   return await new Promise<void>((resolve, reject) => {
+    const decode = createChunkDecoder();
     const child = spawn(command, args, {
       cwd,
       env: process.env,
@@ -294,10 +308,10 @@ async function runInstaller(command: string, args: string[], cwd: string) {
 
     let output = "";
     child.stdout?.on("data", (chunk) => {
-      output += chunk.toString();
+      output += decode(chunk);
     });
     child.stderr?.on("data", (chunk) => {
-      output += chunk.toString();
+      output += decode(chunk);
     });
 
     child.once("error", reject);
@@ -333,11 +347,7 @@ async function ensurePlaywrightMcpCli() {
       process.cwd(),
     );
   } else {
-    await runInstaller(
-      "npm",
-      ["install", "--prefix", installDir, "@playwright/mcp@latest"],
-      process.cwd(),
-    );
+    await runInstaller("npm", ["install", "--prefix", installDir, "@playwright/mcp@latest"], process.cwd());
   }
 
   if (!(await fileExists(cliPath))) {
@@ -363,6 +373,18 @@ async function resolveLocalServer(server: McpServerConfig) {
 
 function getCommandBasename(command: string) {
   return path.basename(command.trim()).toLowerCase();
+}
+
+function normalizeLocalCommand(command: string) {
+  const trimmed = command.trim();
+  if (process.platform !== "win32") return trimmed;
+
+  const basename = getCommandBasename(trimmed);
+  if (["npm", "npx", "pnpm", "yarn"].includes(basename)) {
+    return `${trimmed}.cmd`;
+  }
+
+  return trimmed;
 }
 
 function isInterpreterLikeCommand(command: string) {
@@ -399,13 +421,30 @@ function formatCommandPreview(command: string, args: string[]) {
 
 function buildLocalServerError(server: McpServerConfig, stderr: string, fallback: string) {
   const commandPreview = formatCommandPreview(server.command, server.args);
-  const details = stderr || fallback;
+  const details = (stderr || fallback).trim();
+  const lowerDetails = details.toLowerCase();
+
+  if (
+    lowerDetails.includes("enoent") ||
+    lowerDetails.includes("not recognized") ||
+    lowerDetails.includes("不是内部或外部命令")
+  ) {
+    return new Error(
+      [
+        "未找到本地 MCP 启动命令，请检查 Node.js/npm 是否已安装，并确认命令在 PATH 中可用。",
+        commandPreview ? `命令: ${commandPreview}` : "",
+        details,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
 
   return new Error(
     [
       "stdio MCP 启动失败，请检查命令和参数。",
       commandPreview ? `命令: ${commandPreview}` : "",
-      details.trim(),
+      details,
     ]
       .filter(Boolean)
       .join("\n"),
@@ -428,22 +467,20 @@ async function connectWithServer(input: McpInspectInput): Promise<ConnectionHand
       throw new Error("stdio 模式需要填写启动命令。");
     }
 
-    if (
-      resolvedServer.args.filter(Boolean).length === 0 &&
-      isInterpreterLikeCommand(resolvedServer.command)
-    ) {
+    if (resolvedServer.args.filter(Boolean).length === 0 && isInterpreterLikeCommand(resolvedServer.command)) {
       throw new Error("stdio 模式缺少参数。当前命令像解释器或包管理器，请补充脚本路径、包名或启动参数。");
     }
 
+    const decodeStderr = createChunkDecoder();
     const transport = new StdioClientTransport({
-      command: resolvedServer.command.trim(),
+      command: normalizeLocalCommand(resolvedServer.command),
       args: resolvedServer.args.filter(Boolean),
       env: parseJsonRecord(resolvedServer.envJson, "环境变量"),
       stderr: "pipe",
       cwd: workspaceRoot?.trim() || undefined,
     });
 
-    transport.stderr?.on("data", (chunk) => appendStderr(stderrBuffer, chunk.toString()));
+    transport.stderr?.on("data", (chunk) => appendStderr(stderrBuffer, decodeStderr(chunk)));
 
     try {
       await client.connect(transport);
@@ -491,14 +528,8 @@ async function connectWithServer(input: McpInspectInput): Promise<ConnectionHand
     });
 
     await fallbackClient.connect(sseTransport).catch((sseError) => {
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : String(error);
-      const fallbackMessage =
-        sseError instanceof Error && sseError.message
-          ? sseError.message
-          : String(sseError);
+      const message = error instanceof Error && error.message ? error.message : String(error);
+      const fallbackMessage = sseError instanceof Error && sseError.message ? sseError.message : String(sseError);
 
       throw new Error(`远程 MCP 连接失败。Streamable HTTP: ${message}；SSE: ${fallbackMessage}`);
     });
@@ -638,12 +669,7 @@ export class McpInspector {
     return await withConnection(input, async (connection) => {
       const timeout = normalizeTimeout(input.server.timeoutMs);
       const args = parseArgumentsJson(input.argumentsJson);
-      const { result, taskLog } = await callToolWithTaskFallback(
-        connection.client,
-        input.toolName,
-        args,
-        timeout,
-      );
+      const { result, taskLog } = await callToolWithTaskFallback(connection.client, input.toolName, args, timeout);
 
       return {
         serverId: input.server.id,

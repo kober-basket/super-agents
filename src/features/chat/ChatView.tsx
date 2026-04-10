@@ -11,7 +11,6 @@ import {
   PanelRightOpen,
   Paperclip,
   Square,
-  Sparkles,
   X,
 } from "lucide-react";
 
@@ -24,9 +23,41 @@ import type {
   ThreadRecord,
 } from "../../types";
 import { normalizeDroppedFiles } from "../shared/utils";
-import { EMPTY_SUGGESTIONS } from "./constants";
 import { MessageBlock } from "./MessageBlock";
 import { QuestionCard } from "./QuestionCard";
+
+const OFFICE_SCENARIOS = [
+  {
+    title: "整理会议纪要",
+    description: "提炼结论、待办和负责人，输出清晰纪要。",
+    prompt: "请帮我整理这场会议纪要，提炼关键结论、待办事项、负责人和截止时间。",
+  },
+  {
+    title: "起草周报",
+    description: "把本周工作整理成简洁的汇报结构。",
+    prompt: "请根据我的工作内容起草一份周报，包含本周完成、风险阻塞和下周计划。",
+  },
+  {
+    title: "写邮件回复",
+    description: "快速生成专业、得体的办公邮件。",
+    prompt: "请帮我起草一封专业的邮件回复，语气简洁清楚，适合办公场景。",
+  },
+  {
+    title: "拆解任务计划",
+    description: "把目标拆成阶段、步骤和时间安排。",
+    prompt: "请把这个工作目标拆解为执行计划，包含阶段目标、关键动作、时间安排和风险提醒。",
+  },
+  {
+    title: "总结文档要点",
+    description: "长文快速提炼重点，适合汇报前浏览。",
+    prompt: "请帮我总结这份文档的核心要点，并整理成适合汇报的条目。",
+  },
+  {
+    title: "梳理需求清单",
+    description: "把零散想法整理成可执行需求列表。",
+    prompt: "请帮我梳理这份需求，按目标、范围、优先级和待确认问题整理输出。",
+  },
+] as const;
 
 interface ChatViewProps {
   activeThread: ThreadRecord | null;
@@ -117,6 +148,7 @@ export function ChatView({
 }: ChatViewProps) {
   const [knowledgePickerOpen, setKnowledgePickerOpen] = useState(false);
   const knowledgePickerRef = useRef<HTMLDivElement>(null);
+  const hasMessages = Boolean(activeThread?.messages.length);
   const hasAvailableModel = Boolean(composerModelId && selectableModels.length > 0);
   const canSend =
     hasAvailableModel && !threadBusy && !composing && !sending && (Boolean(composer.trim()) || attachments.length > 0);
@@ -191,7 +223,7 @@ export function ChatView({
         </div>
       </header>
 
-      <div className="workspace-main" ref={messageListRef}>
+      <div className={clsx("workspace-main", !hasMessages && "is-empty")} ref={messageListRef}>
         <div className="chat-column">
           {workspaceIssue ? (
             <div className="workspace-issue" role="alert">
@@ -200,7 +232,7 @@ export function ChatView({
             </div>
           ) : null}
 
-          {activeThread?.messages.length ? (
+          {hasMessages ? (
             <div className="message-list">
               {activeThread.messages.map((message) => (
                 <MessageBlock
@@ -230,15 +262,20 @@ export function ChatView({
             </div>
           ) : (
             <div className="empty-state">
-              <div className="empty-mark">
-                <Sparkles size={20} />
+              <div className="empty-state-copy">
+                <strong>开始新对话</strong>
+                <span>面向日常办公，直接开始提问，或从下面选择一个场景。</span>
               </div>
-              <strong>从这里开始这一轮工作</strong>
-              <span>你可以先切换当前会话的工作目录，再继续提问、附文件，或者直接使用技能。</span>
-              <div className="suggestion-row">
-                {EMPTY_SUGGESTIONS.map((item) => (
-                  <button key={item} className="suggestion-chip" onClick={() => onApplySuggestion(item)}>
-                    {item}
+              <div className="empty-state-scenarios">
+                {OFFICE_SCENARIOS.map((scenario) => (
+                  <button
+                    key={scenario.title}
+                    type="button"
+                    className="empty-state-card"
+                    onClick={() => onApplySuggestion(scenario.prompt)}
+                  >
+                    <strong>{scenario.title}</strong>
+                    <span>{scenario.description}</span>
                   </button>
                 ))}
               </div>
@@ -279,7 +316,7 @@ export function ChatView({
                 onChange={(event) => onComposerChange(event.target.value)}
                 onCompositionStart={() => onCompositionChange?.(true)}
                 onCompositionEnd={() => onCompositionChange?.(false)}
-                placeholder="写点什么，输入 / 可以选择技能"
+                placeholder="输入消息"
                 rows={5}
                 className={clsx(dragActive && "drag-active")}
                 onKeyDown={(event) => {
