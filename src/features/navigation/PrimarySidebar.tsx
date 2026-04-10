@@ -104,10 +104,12 @@ export function PrimarySidebar({
         )}
       </div>
 
-      <button className={clsx("sidebar-link", "bottom", view === "settings" && "active")} onClick={() => onSetView("settings")}>
-        <Settings2 size={18} />
-        <span>设置</span>
-      </button>
+      <div className="sidebar-footer">
+        <button className={clsx("sidebar-link", "bottom", view === "settings" && "active")} onClick={() => onSetView("settings")}>
+          <Settings2 size={18} />
+          <span>设置</span>
+        </button>
+      </div>
     </aside>
   );
 }

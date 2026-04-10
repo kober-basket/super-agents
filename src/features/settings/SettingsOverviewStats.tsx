@@ -17,7 +17,7 @@ export function SettingsOverviewStats({
       </div>
       <div className="settings-stat-card">
         <strong>{providerCount}</strong>
-        <span>供应商</span>
+        <span>模型源</span>
       </div>
       <div className="settings-stat-card">
         <strong>{mcpCount}</strong>

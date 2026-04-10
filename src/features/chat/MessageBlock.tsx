@@ -1,5 +1,6 @@
+import { useEffect, useState } from "react";
 import clsx from "clsx";
-import { ChevronDown, LoaderCircle, Sparkles, Wrench } from "lucide-react";
+import { ChevronDown, FileSearch, LoaderCircle, Sparkles, Wrench, X } from "lucide-react";
 
 import { formatDateTime, markdownToHtml } from "../../lib/format";
 import type { ChatMessage, FileDropEntry, PendingQuestion } from "../../types";
@@ -51,6 +52,29 @@ export function MessageBlock({
   onRejectQuestion,
   onAbortThread,
 }: MessageBlockProps) {
+  const renderedText = message.displayText ?? message.text;
+  const knowledgeResults = message.knowledge?.results ?? [];
+  const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
+  const [activeKnowledgeIndex, setActiveKnowledgeIndex] = useState(0);
+  const activeKnowledge = knowledgeResults[activeKnowledgeIndex] ?? knowledgeResults[0] ?? null;
+
+  useEffect(() => {
+    if (!knowledgeModalOpen) return undefined;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setKnowledgeModalOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [knowledgeModalOpen]);
+
+  useEffect(() => {
+    setActiveKnowledgeIndex(0);
+  }, [message.id]);
+
   if (message.role === "tool") {
     const summary = summarizeToolMessage(message, questionRequest);
     const statusLabel = toolStatusLabel(message, questionRequest);
@@ -125,10 +149,10 @@ export function MessageBlock({
           </div>
         ) : null}
 
-        {message.text ? (
+        {renderedText ? (
           <div
             className={clsx("message-text", message.role, message.status === "error" && "error")}
-            dangerouslySetInnerHTML={{ __html: markdownToHtml(message.text) }}
+            dangerouslySetInnerHTML={{ __html: markdownToHtml(renderedText) }}
             onClick={(event) => {
               const target = event.target;
               if (!(target instanceof HTMLElement)) return;
@@ -149,7 +173,79 @@ export function MessageBlock({
             ))}
           </div>
         ) : null}
+
+        {message.role === "user" && message.knowledge?.injected && knowledgeResults.length > 0 ? (
+          <button
+            type="button"
+            className="message-reference-button"
+            onClick={() => setKnowledgeModalOpen(true)}
+          >
+            <FileSearch size={13} />
+            <span>参考来源</span>
+            <em>{message.knowledge.resultCount} 条片段</em>
+          </button>
+        ) : null}
       </div>
+
+      {message.role === "user" && knowledgeModalOpen && knowledgeResults.length > 0 ? (
+        <div className="modal-scrim" onClick={() => setKnowledgeModalOpen(false)}>
+          <div className="knowledge-reference-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="knowledge-reference-head">
+              <div className="knowledge-reference-title">
+                <strong>参考来源</strong>
+                <span>{message.knowledge?.query || renderedText}</span>
+              </div>
+              <button
+                type="button"
+                className="knowledge-icon-button"
+                onClick={() => setKnowledgeModalOpen(false)}
+                title="关闭"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="knowledge-reference-body">
+              <div className="knowledge-reference-rail">
+                {knowledgeResults.map((item, index) => (
+                  <button
+                    key={`${message.id}-knowledge-item-${index}`}
+                    type="button"
+                    className={clsx("knowledge-reference-row", index === activeKnowledgeIndex && "active")}
+                    onClick={() => setActiveKnowledgeIndex(index)}
+                  >
+                    <strong>{item.knowledgeBaseName}</strong>
+                    <span>
+                      {typeof item.metadata.source === "string" ? item.metadata.source : "知识库片段"}
+                    </span>
+                    <p>{item.pageContent.trim().slice(0, 72)}</p>
+                  </button>
+                ))}
+              </div>
+
+              <div className="knowledge-reference-detail">
+                {activeKnowledge ? (
+                  <>
+                    <div className="knowledge-reference-meta">
+                      <strong>{activeKnowledge.knowledgeBaseName}</strong>
+                      <span>
+                        {typeof activeKnowledge.metadata.source === "string"
+                          ? activeKnowledge.metadata.source
+                          : "知识库片段"}
+                        {" · "}
+                        相似度 {activeKnowledge.score.toFixed(3)}
+                      </span>
+                    </div>
+                    <div className="knowledge-reference-content">
+                      <p>{activeKnowledge.pageContent.trim()}</p>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }

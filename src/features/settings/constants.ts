@@ -1,10 +1,4 @@
-import {
-  FolderOpen,
-  Palette,
-  Settings2,
-  Sparkles,
-  type LucideIcon,
-} from "lucide-react";
+import { Palette, Sparkles, type LucideIcon } from "lucide-react";
 
 import type { AppConfig, McpTransport } from "../../types";
 import type { SettingsSection } from "./types";
@@ -23,10 +17,8 @@ export const SETTINGS_SECTIONS: Array<{
   label: string;
   icon: LucideIcon;
 }> = [
-  { id: "general", label: "常规", icon: Settings2 },
   { id: "appearance", label: "外观", icon: Palette },
   { id: "assistant", label: "模型", icon: Sparkles },
-  { id: "workspace", label: "工作区", icon: FolderOpen },
 ];
 
 export interface RecommendedMcpServer {

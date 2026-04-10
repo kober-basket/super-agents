@@ -250,6 +250,7 @@ export interface KnowledgeInjectionMeta {
   resultCount: number;
   searchedBaseIds: string[];
   warnings: string[];
+  results?: KnowledgeSearchResultItem[];
 }
 
 export interface KnowledgeBaseCreateInput {
@@ -329,11 +330,13 @@ export interface ChatMessage {
   id: string;
   role: MessageRole;
   text: string;
+  displayText?: string;
   createdAt: number;
   status?: "loading" | "done" | "error";
   attachments?: MessageAttachment[];
   toolName?: string;
   skillName?: string;
+  knowledge?: KnowledgeInjectionMeta;
 }
 
 export interface PendingQuestionOption {

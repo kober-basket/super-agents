@@ -29,33 +29,15 @@ import { QuestionCard } from "./QuestionCard";
 const OFFICE_SCENARIOS = [
   {
     title: "整理会议纪要",
-    description: "提炼结论、待办和负责人，输出清晰纪要。",
     prompt: "请帮我整理这场会议纪要，提炼关键结论、待办事项、负责人和截止时间。",
   },
   {
     title: "起草周报",
-    description: "把本周工作整理成简洁的汇报结构。",
     prompt: "请根据我的工作内容起草一份周报，包含本周完成、风险阻塞和下周计划。",
   },
   {
     title: "写邮件回复",
-    description: "快速生成专业、得体的办公邮件。",
     prompt: "请帮我起草一封专业的邮件回复，语气简洁清楚，适合办公场景。",
-  },
-  {
-    title: "拆解任务计划",
-    description: "把目标拆成阶段、步骤和时间安排。",
-    prompt: "请把这个工作目标拆解为执行计划，包含阶段目标、关键动作、时间安排和风险提醒。",
-  },
-  {
-    title: "总结文档要点",
-    description: "长文快速提炼重点，适合汇报前浏览。",
-    prompt: "请帮我总结这份文档的核心要点，并整理成适合汇报的条目。",
-  },
-  {
-    title: "梳理需求清单",
-    description: "把零散想法整理成可执行需求列表。",
-    prompt: "请帮我梳理这份需求，按目标、范围、优先级和待确认问题整理输出。",
   },
 ] as const;
 
@@ -234,7 +216,7 @@ export function ChatView({
 
           {hasMessages ? (
             <div className="message-list">
-              {activeThread.messages.map((message) => (
+              {(activeThread?.messages ?? []).map((message) => (
                 <MessageBlock
                   key={message.id}
                   message={message}
@@ -264,7 +246,6 @@ export function ChatView({
             <div className="empty-state">
               <div className="empty-state-copy">
                 <strong>开始新对话</strong>
-                <span>面向日常办公，直接开始提问，或从下面选择一个场景。</span>
               </div>
               <div className="empty-state-scenarios">
                 {OFFICE_SCENARIOS.map((scenario) => (
@@ -275,7 +256,6 @@ export function ChatView({
                     onClick={() => onApplySuggestion(scenario.prompt)}
                   >
                     <strong>{scenario.title}</strong>
-                    <span>{scenario.description}</span>
                   </button>
                 ))}
               </div>
@@ -453,10 +433,10 @@ export function ChatView({
                     threadBusy
                       ? "停止当前运行"
                       : !hasAvailableModel
-                      ? "请先配置并启用可用模型"
-                      : composing
-                        ? "请先确认输入法候选词"
-                        : "发送"
+                        ? "请先配置并启用可用模型"
+                        : composing
+                          ? "请先确认输入法候选词"
+                          : "发送"
                   }
                 >
                   {sending ? <LoaderCircle size={16} className="spin" /> : threadBusy ? <Square size={16} /> : <ArrowUp size={16} />}

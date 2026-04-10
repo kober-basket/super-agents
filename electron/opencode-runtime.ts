@@ -775,13 +775,32 @@ function makeFilePart(file: FileDropEntry) {
 
 export class OpencodeRuntime {
   private handle: RuntimeHandle | null = null;
+  private startupPromise: Promise<string> | null = null;
 
   async dispose() {
+    this.startupPromise = null;
     await killProcessTree(this.handle);
     this.handle = null;
   }
 
   private async ensureStarted(config: AppConfig) {
+    if (this.startupPromise) {
+      return await this.startupPromise;
+    }
+
+    const startup = this.startRuntime(config);
+    this.startupPromise = startup;
+
+    try {
+      return await startup;
+    } finally {
+      if (this.startupPromise === startup) {
+        this.startupPromise = null;
+      }
+    }
+  }
+
+  private async startRuntime(config: AppConfig) {
     const bridgeUrl = config.bridgeUrl.trim();
     const signature = makeSignature(config);
 

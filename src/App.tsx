@@ -30,10 +30,8 @@ import { KnowledgeView } from "./features/knowledge/KnowledgeView";
 import { AppTitleBar } from "./features/navigation/AppTitleBar";
 import { AssistantSettings } from "./features/settings/AssistantSettings";
 import { AppearanceSettings } from "./features/settings/AppearanceSettings";
-import { GeneralSettings } from "./features/settings/GeneralSettings";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
-import { WorkspaceSettings } from "./features/settings/WorkspaceSettings";
 import { useSessionController } from "./features/session/useSessionController";
 import { cloneConfig, matchQuery } from "./features/session/utils";
 import { fileKind, sanitizeMcpName } from "./features/shared/utils";
@@ -44,7 +42,7 @@ function uid() {
 
 export default function App() {
   const [view, setView] = useState<AppSection>("chat");
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("assistant");
   const [preview, setPreview] = useState<FilePreviewPayload | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -799,18 +797,6 @@ export default function App() {
     filteredInstalledSkills.length > 0 || filteredReferenceSkills.length > 0;
 
   function renderSettingsView() {
-    if (settingsSection === "general") {
-      return (
-        <GeneralSettings
-          activeModelLabel={activeModel?.label ?? null}
-          mcpCount={settingsStats.mcpCount}
-          providerCount={settingsStats.providerCount}
-          threadCount={settingsStats.threadCount}
-          onOpenWorkspaceFolder={openWorkspaceFolder}
-        />
-      );
-    }
-
     if (settingsSection === "appearance") {
       return (
         <AppearanceSettings
@@ -841,17 +827,6 @@ export default function App() {
         />
       );
     }
-
-    return (
-      <WorkspaceSettings
-        bridgeUrl={config.bridgeUrl}
-        mcpCount={settingsStats.mcpCount}
-        opencodeRoot={config.opencodeRoot}
-        providerCount={settingsStats.providerCount}
-        threadCount={settingsStats.threadCount}
-        onOpenWorkspaceFolder={openWorkspaceFolder}
-      />
-    );
   }
 
   function renderMainView() {

@@ -1,6 +1,6 @@
 import type { ProviderModelConfig } from "../types";
 
-type ProviderModelCapabilities = NonNullable<ProviderModelConfig["models"][number]["capabilities"]>;
+type ProviderModelCapabilities = NonNullable<ProviderModelConfig["capabilities"]>;
 
 export interface ProviderModelMetadataHint {
   id: string;
@@ -316,7 +316,7 @@ export function inferProviderModelCapabilities(hint: ProviderModelMetadataHint) 
   return Object.values(capabilities).some(Boolean) ? capabilities : undefined;
 }
 
-export function enrichProviderModel(model: ProviderModelConfig["models"][number]) {
+export function enrichProviderModel(model: ProviderModelConfig) {
   const vendor = inferProviderModelVendor(model);
   const group = inferProviderModelGroup({ ...model, vendor: vendor || model.vendor });
   const capabilities = inferProviderModelCapabilities({

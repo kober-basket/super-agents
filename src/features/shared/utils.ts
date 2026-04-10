@@ -38,7 +38,7 @@ export function sanitizeMcpName(value: string) {
 }
 
 export function displayThreadTitle(title?: string | null) {
-  if (!title || title === "New Thread") return "新会话";
+  if (!title || title === "New Thread") return "新对话";
   return title;
 }
 
@@ -68,9 +68,9 @@ export function formatMcpStatusLabel(
     case "failed":
       return "连接失败";
     case "needs_auth":
-      return "需要认证";
+      return "需要登录";
     case "needs_client_registration":
-      return "待客户端注册";
+      return "需要注册客户端";
     case "connecting":
       return "连接中";
     default:

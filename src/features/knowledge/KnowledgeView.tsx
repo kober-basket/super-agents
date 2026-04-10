@@ -374,7 +374,6 @@ export function KnowledgeView({
         >
           {busyAction === "add-file" ? <LoaderCircle size={18} className="spin" /> : <FileText size={18} />}
           <strong>{busyAction === "add-file" ? "正在导入文件…" : "添加文件"}</strong>
-          <span>支持拖拽导入，也可以点击直接选择文件。</span>
         </button>
       );
     }
@@ -384,7 +383,6 @@ export function KnowledgeView({
         <div className={clsx("knowledge-composer-card", "compact", busyAction === "add-directory" && "busy")}>
           <div className="knowledge-composer-copy">
             <strong>导入目录</strong>
-            <span>一次性导入一个资料文件夹。</span>
           </div>
           <button className="primary-button" onClick={() => void handleAddDirectory()} disabled={controlsDisabled}>
             {busyAction === "add-directory" ? <LoaderCircle size={14} className="spin" /> : <Plus size={14} />}
@@ -394,10 +392,10 @@ export function KnowledgeView({
       );
     }
 
-    const triggerCopy: Record<Exclude<KnowledgeTabKey, "file" | "directory">, { title: string; hint: string; action: string }> = {
-      note: { title: "添加笔记", hint: "用弹窗填写标题和内容，避免主界面被输入区挤占。", action: "新建笔记" },
-      url: { title: "添加网址", hint: "输入一个具体页面链接，保存后会出现在下方列表。", action: "添加网址" },
-      website: { title: "添加网站", hint: "输入站点地址后采集整个网站内容。", action: "添加网站" },
+    const triggerCopy: Record<Exclude<KnowledgeTabKey, "file" | "directory">, { title: string; action: string }> = {
+      note: { title: "添加笔记", action: "新建笔记" },
+      url: { title: "添加网址", action: "添加网址" },
+      website: { title: "添加网站", action: "添加网站" },
     };
 
     const copy = triggerCopy[activeTab as keyof typeof triggerCopy];
@@ -405,7 +403,6 @@ export function KnowledgeView({
       <div className="knowledge-composer-card compact trigger-only">
         <div className="knowledge-composer-copy">
           <strong>{copy.title}</strong>
-          <span>{copy.hint}</span>
         </div>
         <button
           className="primary-button"
@@ -429,7 +426,6 @@ export function KnowledgeView({
             <div className="knowledge-modal-head">
               <div>
                 <strong>添加笔记</strong>
-                <span>保存一段说明、摘要或临时知识。</span>
               </div>
               <button className="knowledge-icon-button" onClick={closeComposerModal} disabled={controlsDisabled} title="关闭">
                 <X size={16} />
@@ -476,7 +472,6 @@ export function KnowledgeView({
           <div className="knowledge-modal-head">
             <div>
               <strong>{isUrl ? "添加网址" : "添加网站"}</strong>
-              <span>{isUrl ? "保存一个具体页面链接。" : "保存一个站点地址并采集内容。"}</span>
             </div>
             <button className="knowledge-icon-button" onClick={closeComposerModal} disabled={controlsDisabled} title="关闭">
               <X size={16} />
@@ -510,7 +505,6 @@ export function KnowledgeView({
         <aside className="knowledge-sidebar">
           <header className="knowledge-sidebar-head">
             <h2>知识库</h2>
-            <p>按库管理内容，保持检索清晰。</p>
           </header>
 
           <div className="knowledge-base-list">
@@ -547,7 +541,7 @@ export function KnowledgeView({
               value={draftBaseDescription}
               onChange={(event) => setDraftBaseDescription(event.target.value)}
               rows={3}
-              placeholder="一句话说明主要放什么"
+              placeholder="用途说明（可选）"
               disabled={controlsDisabled}
             />
             <button
@@ -784,7 +778,6 @@ export function KnowledgeView({
             ) : (
               <div className="knowledge-empty wide knowledge-empty-stage simple">
                 <strong>还没有知识库</strong>
-                <span>先在左侧创建一个知识库。</span>
               </div>
             )}
           </div>

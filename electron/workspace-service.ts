@@ -70,6 +70,13 @@ interface PersistedThreadMeta {
   title?: string;
   archived?: boolean;
   workspaceRoot?: string;
+  messagePresentation?: Record<
+    string,
+    {
+      displayText?: string;
+      knowledge?: SendMessageResult["knowledge"];
+    }
+  >;
 }
 
 const IFLY_RPA_BASE_URL = "https://oneapi.iflyrpa.com/v1";
@@ -350,12 +357,34 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
                 const meta = value as PersistedThreadMeta | null | undefined;
                 const title = typeof meta?.title === "string" ? meta.title.trim() : "";
                 const workspaceRoot = typeof meta?.workspaceRoot === "string" ? meta.workspaceRoot.trim() : "";
+                const messagePresentation =
+                  meta?.messagePresentation && typeof meta.messagePresentation === "object"
+                    ? Object.fromEntries(
+                        Object.entries(meta.messagePresentation)
+                          .map(([messageId, presentation]) => {
+                            const nextDisplayText =
+                              typeof presentation?.displayText === "string" ? presentation.displayText.trim() : "";
+                            const nextKnowledge = presentation?.knowledge;
+                            return [
+                              messageId,
+                              {
+                                ...(nextDisplayText ? { displayText: nextDisplayText } : {}),
+                                ...(nextKnowledge ? { knowledge: nextKnowledge } : {}),
+                              },
+                            ] as const;
+                          })
+                          .filter(([, presentation]) => Object.keys(presentation).length > 0),
+                      )
+                    : undefined;
                 return [
                   threadId,
                   {
                     ...(title ? { title } : {}),
                     ...(workspaceRoot ? { workspaceRoot } : {}),
                     ...(meta?.archived !== undefined ? { archived: meta.archived === true } : {}),
+                    ...(messagePresentation && Object.keys(messagePresentation).length > 0
+                      ? { messagePresentation }
+                      : {}),
                   } satisfies PersistedThreadMeta,
                 ] as const;
               })
@@ -654,6 +683,7 @@ async function importExternalCodexSkills(statePath: string) {
   const managedSystemRoot = getManagedCodexSystemSkillsRoot(statePath);
   const entries = await readdir(externalRoot, { withFileTypes: true }).catch(() => []);
 
+  await rm(managedRoot, { recursive: true, force: true }).catch(() => undefined);
   await mkdir(managedRoot, { recursive: true }).catch(() => undefined);
   await mkdir(managedSystemRoot, { recursive: true }).catch(() => undefined);
 
@@ -667,7 +697,7 @@ async function importExternalCodexSkills(statePath: string) {
         await cp(
           path.join(externalRoot, entry.name, systemEntry.name),
           path.join(managedSystemRoot, systemEntry.name),
-          { recursive: true, force: false, errorOnExist: false },
+          { recursive: true, force: true, errorOnExist: false },
         ).catch(() => undefined);
       }
       continue;
@@ -676,7 +706,7 @@ async function importExternalCodexSkills(statePath: string) {
     await cp(
       path.join(externalRoot, entry.name),
       path.join(managedRoot, entry.name),
-      { recursive: true, force: false, errorOnExist: false },
+      { recursive: true, force: true, errorOnExist: false },
     ).catch(() => undefined);
   }
 }
@@ -836,6 +866,25 @@ function updateThreadMeta(
     return;
   }
   state.threadMeta[threadId] = next;
+}
+
+function updateMessagePresentation(
+  state: PersistedWorkspaceState,
+  threadId: string,
+  messageId: string,
+  presentation: NonNullable<PersistedThreadMeta["messagePresentation"]>[string],
+) {
+  updateThreadMeta(state, threadId, (previous) => {
+    const nextPresentation = {
+      ...(previous.messagePresentation ?? {}),
+      [messageId]: presentation,
+    };
+
+    return {
+      ...previous,
+      messagePresentation: nextPresentation,
+    };
+  });
 }
 
 function isThreadArchived(state: PersistedWorkspaceState, threadId: string, session?: OpencodeSessionInfo) {
@@ -1019,6 +1068,21 @@ function convertMessages(messages: OpencodeSessionMessage[]): ChatMessage[] {
   return result.sort((left, right) => left.createdAt - right.createdAt);
 }
 
+function applyMessagePresentation(messages: ChatMessage[], meta?: PersistedThreadMeta): ChatMessage[] {
+  const presentation = meta?.messagePresentation;
+  if (!presentation) return messages;
+
+  return messages.map((message) => {
+    const next = presentation[message.id];
+    if (!next) return message;
+    return {
+      ...message,
+      ...(next.displayText ? { displayText: next.displayText } : {}),
+      ...(next.knowledge ? { knowledge: next.knowledge } : {}),
+    };
+  });
+}
+
 function createThreadSummary(
   session: OpencodeSessionInfo,
   messages: ChatMessage[],
@@ -1027,7 +1091,7 @@ function createThreadSummary(
   const lastMessage =
     [...messages]
       .reverse()
-      .map((item) => compact(item.text))
+      .map((item) => compact(item.displayText ?? item.text))
       .find(Boolean) ?? "";
 
   return {
@@ -1046,7 +1110,7 @@ function createThreadRecord(
   sourceMessages: OpencodeSessionMessage[],
   meta?: PersistedThreadMeta,
 ): ThreadRecord {
-  const messages = convertMessages(sourceMessages);
+  const messages = applyMessagePresentation(convertMessages(sourceMessages), meta);
   return {
     ...createThreadSummary(session, messages, meta),
     messages,
@@ -1077,6 +1141,7 @@ function buildKnowledgePrompt(message: string, searchPayload: KnowledgeSearchPay
         resultCount: 0,
         searchedBaseIds,
         warnings: searchPayload.warnings,
+        results: [],
       },
     };
   }
@@ -1112,6 +1177,7 @@ function buildKnowledgePrompt(message: string, searchPayload: KnowledgeSearchPay
       resultCount: searchPayload.results.length,
       searchedBaseIds,
       warnings: searchPayload.warnings,
+      results: searchPayload.results,
     },
   };
 }
@@ -1311,10 +1377,42 @@ export class WorkspaceService {
     }));
     let thread = await this.readThreadRecord(state, target.threadId);
     this.maybeAssignGeneratedThreadTitle(state, thread);
+
+    if (knowledgeMeta?.injected && transportMessage !== input.message) {
+      const targetUserMessage = [...thread.messages]
+        .reverse()
+        .find((message) => message.role === "user" && message.text === transportMessage);
+
+      if (targetUserMessage) {
+        updateMessagePresentation(state, target.threadId, targetUserMessage.id, {
+          displayText: input.message.trim() || input.message,
+          knowledge: knowledgeMeta,
+        });
+        thread = {
+          ...thread,
+          messages: thread.messages.map((message) =>
+            message.id === targetUserMessage.id
+              ? {
+                  ...message,
+                  displayText: input.message.trim() || input.message,
+                  knowledge: knowledgeMeta,
+                }
+              : message,
+          ),
+        };
+      }
+    }
+
     thread = {
       ...thread,
       title: getThreadMeta(state, target.threadId).title?.trim() || thread.title,
       archived: isThreadArchived(state, target.threadId),
+      lastMessage:
+        [...thread.messages]
+          .reverse()
+          .map((message) => compact(message.displayText ?? message.text))
+          .find(Boolean)
+          ?.slice(0, 120) ?? "",
     };
     await this.saveState(state);
     return {

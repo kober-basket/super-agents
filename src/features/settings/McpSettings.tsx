@@ -8,6 +8,7 @@ import type {
   McpServerToolsResult,
   McpToolDebugResult,
   McpToolInfo,
+  McpToolParameter,
 } from "../../types";
 import { formatMcpStatusLabel, sanitizeMcpName } from "../shared/utils";
 
@@ -22,6 +23,8 @@ type DebugState = {
   error?: string;
   result?: McpToolDebugResult;
 };
+
+type ToolFormState = Record<string, string>;
 
 interface McpSettingsProps {
   mcpAdvancedOpen: boolean;
@@ -43,45 +46,85 @@ function toolKey(serverId: string, toolName: string) {
   return `${serverId}::${toolName}`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function buildDraftValue(schema: unknown): unknown {
-  if (!isRecord(schema)) return "";
-  if ("default" in schema) return schema.default;
-  if (Array.isArray(schema.enum) && schema.enum.length > 0) return schema.enum[0];
-
-  const type = schema.type;
-  if (type === "number" || type === "integer") return 0;
-  if (type === "boolean") return false;
-  if (type === "array") return [];
-  if (type === "object") return {};
-
-  if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) {
-    return buildDraftValue(schema.anyOf[0]);
-  }
-
-  if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
-    return buildDraftValue(schema.oneOf[0]);
-  }
-
-  return "";
-}
-
-function buildArgumentsDraft(tool: McpToolInfo) {
-  const properties = isRecord(tool.inputSchema.properties) ? tool.inputSchema.properties : {};
-  const draft = Object.fromEntries(
-    Object.entries(properties).map(([name, schema]) => [name, buildDraftValue(schema)]),
+function buildFieldDefaults(tool: McpToolInfo): ToolFormState {
+  return Object.fromEntries(
+    tool.parameters.map((parameter) => {
+      const schema = parameter.schema;
+      if ("default" in schema && schema.default !== undefined && schema.default !== null) {
+        return [parameter.name, String(schema.default)];
+      }
+      if (Array.isArray(schema.enum) && schema.enum.length > 0) {
+        return [parameter.name, String(schema.enum[0])];
+      }
+      if (parameter.type === "boolean") return [parameter.name, "false"];
+      return [parameter.name, ""];
+    }),
   );
+}
 
-  return JSON.stringify(draft, null, 2);
+function buildArgumentsJson(tool: McpToolInfo, values: ToolFormState) {
+  const result: Record<string, unknown> = {};
+
+  for (const parameter of tool.parameters) {
+    const raw = (values[parameter.name] ?? "").trim();
+    if (!raw) continue;
+
+    const schema = parameter.schema;
+    const type = typeof schema.type === "string" ? schema.type : parameter.type;
+
+    if (type === "boolean") {
+      result[parameter.name] = raw === "true";
+      continue;
+    }
+
+    if (type === "number" || type === "integer") {
+      const nextNumber = Number(raw);
+      result[parameter.name] = Number.isNaN(nextNumber) ? raw : nextNumber;
+      continue;
+    }
+
+    if (type === "array" || type === "object") {
+      try {
+        result[parameter.name] = JSON.parse(raw);
+      } catch {
+        result[parameter.name] = raw;
+      }
+      continue;
+    }
+
+    result[parameter.name] = raw;
+  }
+
+  return JSON.stringify(result, null, 2);
+}
+
+function getSchemaEnum(schema: Record<string, unknown>) {
+  return Array.isArray(schema.enum) ? schema.enum.map((item) => String(item)) : [];
+}
+
+function getToolDisplayName(tool: McpToolInfo) {
+  return tool.title || tool.name;
+}
+
+function getToolParameterSummary(tool: McpToolInfo) {
+  const requiredCount = tool.parameters.filter((parameter) => parameter.required).length;
+  if (tool.parameters.length === 0) return "无需填写";
+  if (requiredCount === 0) return `${tool.parameters.length} 项可选`;
+  return `${requiredCount} 项必填`;
+}
+
+function getFieldPlaceholder(parameter: McpToolParameter) {
+  const type = typeof parameter.schema.type === "string" ? parameter.schema.type : parameter.type;
+  if (type === "array") return "请输入数组内容";
+  if (type === "object") return "请输入对象内容";
+  if (type === "number" || type === "integer") return "请输入数字";
+  return "请输入";
 }
 
 function formatTransportLabel(transport: McpServerToolsResult["transport"]) {
   if (transport === "stdio") return "本地";
   if (transport === "sse") return "SSE";
-  return "Streamable HTTP";
+  return "HTTP";
 }
 
 function formatTime(timestamp: number) {
@@ -109,18 +152,17 @@ export function McpSettings({
 }: McpSettingsProps) {
   const [activeServerId, setActiveServerId] = useState<string | null>(initialServerId ?? mcpServers[0]?.id ?? null);
   const [toolStates, setToolStates] = useState<Record<string, ToolState>>({});
-  const [debugDrafts, setDebugDrafts] = useState<Record<string, string>>({});
   const [debugStates, setDebugStates] = useState<Record<string, DebugState>>({});
-  const [debugOpenMap, setDebugOpenMap] = useState<Record<string, boolean>>({});
+  const [activeToolKey, setActiveToolKey] = useState<string | null>(null);
+  const [toolForms, setToolForms] = useState<Record<string, ToolFormState>>({});
 
   useEffect(() => {
     const activeServerIds = new Set(mcpServers.map((server) => server.id));
     const isActiveKey = (key: string) => activeServerIds.has(key.split("::", 1)[0] || "");
 
     setToolStates((previous) => Object.fromEntries(Object.entries(previous).filter(([serverId]) => activeServerIds.has(serverId))));
-    setDebugDrafts((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => isActiveKey(key))));
     setDebugStates((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => isActiveKey(key))));
-    setDebugOpenMap((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => isActiveKey(key))));
+    setToolForms((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => isActiveKey(key))));
 
     if (mcpServers.length === 0) {
       setActiveServerId(null);
@@ -153,7 +195,46 @@ export function McpSettings({
     [activeServerId, mcpServers],
   );
 
-  if (!open) return null;
+  const toolState = activeServer ? toolStates[activeServer.id] : undefined;
+  const tools = toolState?.payload?.tools ?? [];
+  const activeTool = useMemo(() => {
+    if (!activeServer || !toolState?.payload || !activeToolKey) return null;
+    return toolState.payload.tools.find((tool) => toolKey(activeServer.id, tool.name) === activeToolKey) ?? null;
+  }, [activeServer, activeToolKey, toolState]);
+
+  useEffect(() => {
+    if (!toolState?.payload || !activeServer) return;
+    const payload = toolState.payload;
+    const firstTool = payload.tools[0];
+    if (!firstTool) {
+      setActiveToolKey(null);
+      return;
+    }
+
+    const firstKey = toolKey(activeServer.id, firstTool.name);
+    const exists = payload.tools.some((tool) => toolKey(activeServer.id, tool.name) === activeToolKey);
+    if (!activeToolKey || !exists) {
+      setActiveToolKey(firstKey);
+    }
+
+    setToolForms((previous) => {
+      const next = { ...previous };
+      for (const tool of payload.tools) {
+        const key = toolKey(activeServer.id, tool.name);
+        if (!next[key]) {
+          next[key] = buildFieldDefaults(tool);
+        }
+      }
+      return next;
+    });
+  }, [activeServer, activeToolKey, toolState]);
+
+  if (!open || !activeServer) return null;
+
+  const normalized = sanitizeMcpName(activeServer.name);
+  const status = mcpStatusMap[normalized]?.status ?? (activeServer.enabled ? "connecting" : "disabled");
+  const error = mcpStatusMap[normalized]?.error;
+  const activeDebugState = activeTool ? debugStates[toolKey(activeServer.id, activeTool.name)] : undefined;
 
   async function inspectServer(server: McpServerConfig) {
     setToolStates((previous) => ({
@@ -174,23 +255,13 @@ export function McpSettings({
           payload,
         },
       }));
-      setDebugDrafts((previous) => {
-        const next = { ...previous };
-        for (const tool of payload.tools) {
-          const key = toolKey(server.id, tool.name);
-          if (!next[key]) {
-            next[key] = buildArgumentsDraft(tool);
-          }
-        }
-        return next;
-      });
     } catch (inspectError) {
       setToolStates((previous) => ({
         ...previous,
         [server.id]: {
           ...previous[server.id],
           loading: false,
-          error: inspectError instanceof Error ? inspectError.message : "获取工具列表失败",
+          error: inspectError instanceof Error ? inspectError.message : "获取工具失败",
         },
       }));
     }
@@ -198,7 +269,7 @@ export function McpSettings({
 
   async function runDebug(server: McpServerConfig, tool: McpToolInfo) {
     const key = toolKey(server.id, tool.name);
-    const argumentsJson = debugDrafts[key] ?? buildArgumentsDraft(tool);
+    const values = toolForms[key] ?? buildFieldDefaults(tool);
 
     setDebugStates((previous) => ({
       ...previous,
@@ -210,17 +281,13 @@ export function McpSettings({
     }));
 
     try {
-      const result = await onDebugTool(server, tool.name, argumentsJson);
+      const result = await onDebugTool(server, tool.name, buildArgumentsJson(tool, values));
       setDebugStates((previous) => ({
         ...previous,
         [key]: {
           loading: false,
           result,
         },
-      }));
-      setDebugOpenMap((previous) => ({
-        ...previous,
-        [key]: true,
       }));
     } catch (debugError) {
       setDebugStates((previous) => ({
@@ -252,50 +319,19 @@ export function McpSettings({
     });
   }
 
-  function handleRemove(serverId: string) {
-    onRemoveMcpServer(serverId);
-    onClose();
+  function updateToolForm(key: string, name: string, value: string) {
+    setToolForms((previous) => ({
+      ...previous,
+      [key]: {
+        ...(previous[key] ?? {}),
+        [name]: value,
+      },
+    }));
   }
-
-  if (!activeServer) {
-    return (
-      <div className="modal-scrim" onClick={onClose}>
-        <div className="mcp-workbench-modal" onClick={(event) => event.stopPropagation()}>
-          <div className="skill-detail-head">
-            <div className="skill-detail-title-wrap compact">
-              <div className="skill-icon-shell large skill-accent-mint">
-                <Wrench size={28} />
-              </div>
-              <div className="skill-detail-title-copy">
-                <div className="skill-detail-title-row">
-                  <h3>MCP 工作台</h3>
-                </div>
-                <p>当前没有可配置的 MCP。</p>
-              </div>
-            </div>
-
-            <button className="ghost-icon" onClick={onClose} title="关闭" type="button">
-              <X size={16} />
-            </button>
-          </div>
-
-          <div className="empty-panel spacious">
-            <strong>没有找到 MCP 配置</strong>
-            <p>回到工具页后先添加一个 MCP，再进入这个工作台配置和调试。</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const normalized = sanitizeMcpName(activeServer.name);
-  const status = mcpStatusMap[normalized]?.status ?? (activeServer.enabled ? "connecting" : "disabled");
-  const error = mcpStatusMap[normalized]?.error;
-  const toolState = toolStates[activeServer.id];
 
   return (
     <div className="modal-scrim" onClick={onClose}>
-      <div className="mcp-workbench-modal" onClick={(event) => event.stopPropagation()}>
+      <div className="mcp-workbench-modal simple" onClick={(event) => event.stopPropagation()}>
         <div className="skill-detail-head">
           <div className="skill-detail-title-wrap compact">
             <div className="skill-icon-shell large skill-accent-mint">
@@ -305,10 +341,9 @@ export function McpSettings({
               <div className="skill-detail-title-row">
                 <h3>{activeServer.name}</h3>
                 <span className={clsx("skill-status-chip", activeServer.enabled ? "enabled" : "disabled")}>
-                  {activeServer.enabled ? "启用" : "停用"}
+                  {formatMcpStatusLabel(status)}
                 </span>
               </div>
-              <p>只配置当前 MCP，并在这里获取工具列表和调试调用。</p>
             </div>
           </div>
 
@@ -328,31 +363,21 @@ export function McpSettings({
 
           <button className="secondary-button" onClick={() => void onRefresh()} disabled={mcpRefreshing} type="button">
             {mcpRefreshing ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}
-            刷新状态
+            刷新
           </button>
 
           <button className="ghost-text-button" onClick={onToggleAdvanced} type="button">
-            {mcpAdvancedOpen ? "收起详细配置" : "显示详细配置"}
+            {mcpAdvancedOpen ? "隐藏高级项" : "显示高级项"}
           </button>
 
-          <button className="ghost-text-button danger" onClick={() => handleRemove(activeServer.id)} type="button">
+          <button className="ghost-text-button danger" onClick={() => onRemoveMcpServer(activeServer.id)} type="button">
             <X size={14} />
             删除
           </button>
         </div>
 
-        <div className="mcp-workbench-body">
-          <section className="panel-card form-card settings-surface">
-            <div className="mcp-single-header">
-              <div className="mcp-single-meta">
-                <strong>连接配置</strong>
-                <span>
-                  状态：{formatMcpStatusLabel(status)}
-                  {error ? ` / ${error}` : ""}
-                </span>
-              </div>
-            </div>
-
+        <div className="mcp-workbench-body simple">
+          <section className="panel-card form-card settings-surface mcp-config-stage">
             <div className="mcp-form-grid">
               <label>
                 <span>名称</span>
@@ -384,7 +409,7 @@ export function McpSettings({
             {activeServer.transport === "remote" ? (
               <>
                 <label>
-                  <span>MCP 地址</span>
+                  <span>地址</span>
                   <input
                     value={activeServer.url}
                     onChange={(event) => onUpdateMcp(activeServer.id, { url: event.target.value })}
@@ -394,7 +419,7 @@ export function McpSettings({
 
                 {mcpAdvancedOpen ? (
                   <label>
-                    <span>请求头(JSON)</span>
+                    <span>请求头</span>
                     <textarea
                       value={activeServer.headersJson}
                       onChange={(event) => onUpdateMcp(activeServer.id, { headersJson: event.target.value })}
@@ -416,10 +441,7 @@ export function McpSettings({
 
                 <div className="mcp-args-block">
                   <div className="split-row">
-                    <div>
-                      <span className="mcp-block-title">参数列表</span>
-                      <p className="field-note">每一项都会作为独立参数传给本地 MCP 进程。</p>
-                    </div>
+                    <span className="mcp-block-title">参数</span>
                     <button className="ghost-text-button" onClick={() => addArgument(activeServer)} type="button">
                       添加参数
                     </button>
@@ -445,13 +467,13 @@ export function McpSettings({
                       ))}
                     </div>
                   ) : (
-                    <div className="mcp-empty-inline">当前没有参数。</div>
+                    <div className="mcp-empty-inline">还没有参数。</div>
                   )}
                 </div>
 
                 {mcpAdvancedOpen ? (
                   <label>
-                    <span>环境变量(JSON)</span>
+                    <span>环境变量</span>
                     <textarea
                       value={activeServer.envJson}
                       onChange={(event) => onUpdateMcp(activeServer.id, { envJson: event.target.value })}
@@ -464,7 +486,7 @@ export function McpSettings({
 
             {mcpAdvancedOpen ? (
               <label>
-                <span>超时(毫秒)</span>
+                <span>超时</span>
                 <input
                   value={String(activeServer.timeoutMs)}
                   onChange={(event) =>
@@ -476,13 +498,21 @@ export function McpSettings({
                 />
               </label>
             ) : null}
+
+            {error ? <div className="mcp-inline-error">{error}</div> : null}
           </section>
 
-          <section className="panel-card form-card settings-surface">
-            <div className="mcp-single-header">
-              <div className="mcp-single-meta">
-                <strong>工具获取与调试</strong>
-                <span>先抓取工具列表，再按需展开某个工具调试。</span>
+          <section className="panel-card form-card settings-surface mcp-tool-stage">
+            <div className="mcp-stage-topbar">
+              <div className="mcp-stage-title">
+                <strong>工具</strong>
+                {toolState?.payload ? (
+                  <div className="mcp-tool-meta">
+                    <span>{formatTransportLabel(toolState.payload.transport)}</span>
+                    <span>{toolState.payload.tools.length} 个工具</span>
+                    <span>{formatTime(toolState.payload.fetchedAt)}</span>
+                  </div>
+                ) : null}
               </div>
 
               <button
@@ -492,169 +522,162 @@ export function McpSettings({
                 type="button"
               >
                 {toolState?.loading ? <LoaderCircle size={14} className="spin" /> : <Wrench size={14} />}
-                {toolState?.payload ? "重新获取工具" : "获取工具列表"}
+                获取工具
               </button>
             </div>
 
-            {!activeServer.enabled ? (
-              <div className="mcp-empty-inline">请先启用这个 MCP，再获取工具列表。</div>
-            ) : null}
-
             {toolState?.error ? <pre className="mcp-debug-output error">{toolState.error}</pre> : null}
 
-            {toolState?.payload ? (
-              <div className="mcp-tool-panel">
-                <div className="mcp-tool-panel-head">
-                  <div className="mcp-tool-meta">
-                    <span>{formatTransportLabel(toolState.payload.transport)}</span>
-                    <span>{toolState.payload.tools.length} 个工具</span>
-                    <span>最近同步 {formatTime(toolState.payload.fetchedAt)}</span>
-                  </div>
-                </div>
-
-                {toolState.payload.tools.length === 0 ? (
-                  <div className="mcp-empty-inline">服务已连接，但没有返回任何工具。</div>
-                ) : (
-                  <div className="mcp-tool-list">
-                    {toolState.payload.tools.map((tool) => {
-                      const key = toolKey(activeServer.id, tool.name);
-                      const debugState = debugStates[key];
-                      const draft = debugDrafts[key] ?? buildArgumentsDraft(tool);
-                      const isDebugOpen = Boolean(debugOpenMap[key]);
-
-                      return (
-                        <article key={key} className="mcp-tool-card">
-                          <div className="mcp-tool-head">
-                            <div>
-                              <strong>{tool.title || tool.name}</strong>
-                              {tool.title && tool.title !== tool.name ? <p className="field-note">{tool.name}</p> : null}
-                            </div>
-
-                            <div className="mcp-card-actions">
-                              {tool.taskSupport ? <span className="mcp-task-pill">{tool.taskSupport}</span> : null}
-                              <button
-                                className="ghost-text-button"
-                                onClick={() =>
-                                  setDebugOpenMap((previous) => ({
-                                    ...previous,
-                                    [key]: !previous[key],
-                                  }))
-                                }
-                                type="button"
-                              >
-                                <Play size={14} />
-                                {isDebugOpen ? "收起调试" : "调试"}
-                              </button>
-                            </div>
-                          </div>
-
-                          <p className="field-note">{tool.description || "暂无工具描述。"}</p>
-
-                          {tool.parameters.length > 0 ? (
-                            <div className="mcp-parameter-list">
-                              {tool.parameters.map((parameter) => (
-                                <div key={`${key}-${parameter.name}`} className="mcp-parameter-item">
-                                  <div className="mcp-parameter-top">
-                                    <strong>{parameter.name}</strong>
-                                    <span>{parameter.type}</span>
-                                    {parameter.required ? <em>必填</em> : <em>可选</em>}
-                                  </div>
-                                  {parameter.description ? <p>{parameter.description}</p> : null}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="mcp-empty-inline">这个工具没有参数。</div>
-                          )}
-
-                          {isDebugOpen ? (
-                            <div className="mcp-debug-panel">
-                              <label>
-                                <span>调试参数(JSON)</span>
-                                <textarea
-                                  value={draft}
-                                  onChange={(event) =>
-                                    setDebugDrafts((previous) => ({
-                                      ...previous,
-                                      [key]: event.target.value,
-                                    }))
-                                  }
-                                  rows={Math.min(12, Math.max(5, draft.split("\n").length + 1))}
-                                />
-                              </label>
-
-                              <div className="mcp-card-actions">
-                                <button
-                                  className="secondary-button"
-                                  onClick={() => void runDebug(activeServer, tool)}
-                                  disabled={debugState?.loading}
-                                  type="button"
-                                >
-                                  {debugState?.loading ? <LoaderCircle size={14} className="spin" /> : <Play size={14} />}
-                                  运行调试
-                                </button>
-                              </div>
-
-                              {debugState?.error ? <pre className="mcp-debug-output error">{debugState.error}</pre> : null}
-
-                              {debugState?.result ? (
-                                <div className="mcp-debug-result">
-                                  <div className="mcp-tool-meta">
-                                    <span>{formatTransportLabel(debugState.result.transport)}</span>
-                                    <span>{debugState.result.isError ? "返回错误" : "调用完成"}</span>
-                                    <span>{formatTime(debugState.result.invokedAt)}</span>
-                                  </div>
-
-                                  {debugState.result.content ? (
-                                    <pre className="mcp-debug-output">{debugState.result.content}</pre>
-                                  ) : (
-                                    <div className="mcp-empty-inline">本次调用没有文本输出。</div>
-                                  )}
-
-                                  {debugState.result.taskLog ? (
-                                    <details>
-                                      <summary>任务执行日志</summary>
-                                      <pre className="mcp-debug-output">{debugState.result.taskLog}</pre>
-                                    </details>
-                                  ) : null}
-
-                                  {debugState.result.structuredContentJson ? (
-                                    <details>
-                                      <summary>结构化结果</summary>
-                                      <pre className="mcp-debug-output">{debugState.result.structuredContentJson}</pre>
-                                    </details>
-                                  ) : null}
-
-                                  {debugState.result.stderr ? (
-                                    <details>
-                                      <summary>服务 stderr</summary>
-                                      <pre className="mcp-debug-output">{debugState.result.stderr}</pre>
-                                    </details>
-                                  ) : null}
-
-                                  <details>
-                                    <summary>原始返回 JSON</summary>
-                                    <pre className="mcp-debug-output">{debugState.result.rawJson}</pre>
-                                  </details>
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {toolState.payload.stderr ? (
-                  <details>
-                    <summary>服务 stderr</summary>
-                    <pre className="mcp-debug-output">{toolState.payload.stderr}</pre>
-                  </details>
-                ) : null}
+            {!activeServer.enabled ? (
+              <div className="mcp-stage-empty">
+                <strong>先启用这个 MCP</strong>
+                <span>启用后就能获取工具并调试。</span>
+              </div>
+            ) : toolState?.loading ? (
+              <div className="mcp-stage-empty loading">
+                <LoaderCircle size={18} className="spin" />
+                <strong>正在获取工具</strong>
+              </div>
+            ) : !toolState?.payload ? (
+              <div className="mcp-stage-empty">
+                <strong>先获取工具</strong>
+                <span>点右上角“获取工具”，这里就会显示可用工具。</span>
+              </div>
+            ) : tools.length === 0 ? (
+              <div className="mcp-stage-empty">
+                <strong>还没有可用工具</strong>
+                <span>可以刷新一下，或者检查当前配置。</span>
               </div>
             ) : (
-              <div className="mcp-empty-inline">还没有获取工具列表。</div>
+              <div className="mcp-tool-workbench">
+                <div className="mcp-tool-rail">
+                  {tools.map((tool) => {
+                    const key = toolKey(activeServer.id, tool.name);
+                    return (
+                      <button
+                        key={key}
+                        className={clsx("mcp-tool-row", activeToolKey === key && "active")}
+                        onClick={() => setActiveToolKey(key)}
+                        type="button"
+                      >
+                        <strong>{getToolDisplayName(tool)}</strong>
+                        <span>{getToolParameterSummary(tool)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mcp-tool-editor">
+                  {activeTool ? (
+                    <>
+                      <div className="mcp-tool-editor-head">
+                        <div className="mcp-tool-editor-title">
+                          <strong>{getToolDisplayName(activeTool)}</strong>
+                          <span>{getToolParameterSummary(activeTool)}</span>
+                        </div>
+
+                        <button
+                          className="secondary-button"
+                          onClick={() => void runDebug(activeServer, activeTool)}
+                          disabled={activeDebugState?.loading}
+                          type="button"
+                        >
+                          {activeDebugState?.loading ? <LoaderCircle size={14} className="spin" /> : <Play size={14} />}
+                          调试
+                        </button>
+                      </div>
+
+                      {activeTool.parameters.length > 0 ? (
+                        <div className="mcp-simple-form">
+                          {activeTool.parameters.map((parameter) => {
+                            const key = toolKey(activeServer.id, activeTool.name);
+                            const value = toolForms[key]?.[parameter.name] ?? "";
+                            const type = typeof parameter.schema.type === "string" ? parameter.schema.type : parameter.type;
+                            const enumValues = getSchemaEnum(parameter.schema);
+
+                            if (type === "boolean") {
+                              return (
+                                <label key={parameter.name}>
+                                  <span>{parameter.name}{parameter.required ? " *" : ""}</span>
+                                  <div className="select-shell field-select full-width">
+                                    <select
+                                      value={value || "false"}
+                                      onChange={(event) => updateToolForm(key, parameter.name, event.target.value)}
+                                    >
+                                      <option value="false">否</option>
+                                      <option value="true">是</option>
+                                    </select>
+                                    <ChevronDown size={13} />
+                                  </div>
+                                </label>
+                              );
+                            }
+
+                            if (enumValues.length > 0) {
+                              return (
+                                <label key={parameter.name}>
+                                  <span>{parameter.name}{parameter.required ? " *" : ""}</span>
+                                  <div className="select-shell field-select full-width">
+                                    <select
+                                      value={value || enumValues[0]}
+                                      onChange={(event) => updateToolForm(key, parameter.name, event.target.value)}
+                                    >
+                                      {enumValues.map((option) => (
+                                        <option key={option} value={option}>
+                                          {option}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <ChevronDown size={13} />
+                                  </div>
+                                </label>
+                              );
+                            }
+
+                            if (type === "array" || type === "object") {
+                              return (
+                                <label key={parameter.name}>
+                                  <span>{parameter.name}{parameter.required ? " *" : ""}</span>
+                                  <textarea
+                                    value={value}
+                                    onChange={(event) => updateToolForm(key, parameter.name, event.target.value)}
+                                    placeholder={getFieldPlaceholder(parameter)}
+                                    rows={4}
+                                  />
+                                </label>
+                              );
+                            }
+
+                            return (
+                              <label key={parameter.name}>
+                                <span>{parameter.name}{parameter.required ? " *" : ""}</span>
+                                <input
+                                  value={value}
+                                  onChange={(event) => updateToolForm(key, parameter.name, event.target.value)}
+                                  placeholder={getFieldPlaceholder(parameter)}
+                                />
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="mcp-empty-inline">这个工具不需要填写参数。</div>
+                      )}
+
+                      {activeDebugState?.error ? <pre className="mcp-debug-output error">{activeDebugState.error}</pre> : null}
+
+                      {activeDebugState?.result ? (
+                        <div className="mcp-result-block">
+                          <div className="mcp-result-title">调试结果</div>
+                          <pre className="mcp-debug-output">
+                            {activeDebugState.result.content || activeDebugState.result.rawJson}
+                          </pre>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
+                </div>
+              </div>
             )}
           </section>
         </div>

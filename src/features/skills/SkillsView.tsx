@@ -58,12 +58,14 @@ export function SkillsView({
     let cancelled = false;
 
     async function loadSkillContent() {
+      const currentSkill = activeSkill;
+      if (!currentSkill) return;
       setModalLoading(true);
       try {
-        const markdown = await resolveSkillMarkdown(activeSkill);
+        const markdown = await resolveSkillMarkdown(currentSkill);
         if (!cancelled) setModalHtml(markdownToHtml(markdown));
       } catch {
-        if (!cancelled) setModalHtml(markdownToHtml(fallbackMarkdown(activeSkill)));
+        if (!cancelled) setModalHtml(markdownToHtml(fallbackMarkdown(currentSkill)));
       } finally {
         if (!cancelled) setModalLoading(false);
       }

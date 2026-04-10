@@ -19,7 +19,7 @@ export function SettingsSidebar({
     <aside className="sidebar settings-sidebar">
       <button className="settings-back-link" onClick={onBack}>
         <ArrowLeft size={18} />
-        <span>返回应用</span>
+        <span>返回</span>
       </button>
 
       <div className="settings-nav">
