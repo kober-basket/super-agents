@@ -2,8 +2,8 @@ import clsx from "clsx";
 import { Archive, ArchiveRestore, LoaderCircle, Trash2 } from "lucide-react";
 
 import { formatRelativeTime } from "../../lib/format";
+import { formatThreadTitle } from "../../lib/thread-title";
 import type { ThreadSummary } from "../../types";
-import { displayThreadTitle } from "../shared/utils";
 
 interface ThreadSectionProps {
   activeThreadId: string;
@@ -45,7 +45,7 @@ export function ThreadSection({
               <button className="thread-row-main" onClick={() => void onOpenThread(thread.id)} disabled={isBusy}>
                 <div className="thread-mark" />
                 <div className="thread-copy">
-                  <strong>{displayThreadTitle(thread.title)}</strong>
+                  <strong>{formatThreadTitle(thread.title, thread.lastMessage)}</strong>
                   <div className="thread-subline">
                     {isBusy ? (
                       <span className="thread-meta">

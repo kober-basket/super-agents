@@ -1,4 +1,4 @@
-import { Palette, Sparkles, type LucideIcon } from "lucide-react";
+import { MessageSquareShare, Palette, Sparkles, type LucideIcon } from "lucide-react";
 
 import type { AppConfig, McpTransport } from "../../types";
 import type { SettingsSection } from "./types";
@@ -7,9 +7,9 @@ export const CONTEXT_CHOICES: Array<{
   value: AppConfig["contextTier"];
   label: string;
 }> = [
-  { value: "low", label: "轻量" },
-  { value: "medium", label: "均衡" },
-  { value: "high", label: "深入" },
+  { value: "low", label: "\u8f7b\u91cf" },
+  { value: "medium", label: "\u5747\u8861" },
+  { value: "high", label: "\u6df1\u5165" },
 ];
 
 export const SETTINGS_SECTIONS: Array<{
@@ -17,8 +17,9 @@ export const SETTINGS_SECTIONS: Array<{
   label: string;
   icon: LucideIcon;
 }> = [
-  { id: "appearance", label: "外观", icon: Palette },
-  { id: "assistant", label: "模型", icon: Sparkles },
+  { id: "appearance", label: "\u5916\u89c2", icon: Palette },
+  { id: "assistant", label: "\u6a21\u578b", icon: Sparkles },
+  { id: "remote-control", label: "\u8fdc\u7a0b\u63a7\u5236", icon: MessageSquareShare },
 ];
 
 export interface RecommendedMcpServer {

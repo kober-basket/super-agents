@@ -18,12 +18,15 @@ import type {
   McpToolDebugResult,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
+  RemoteControlStatus,
   QuestionRejectInput,
   QuestionReplyInput,
   SendMessageInput,
   SendMessageResult,
   SkillRunInput,
   SkillRunResult,
+  WechatLoginStartResult,
+  WechatLoginWaitResult,
   ThreadRecord,
   ThreadSummary,
   WorkspaceToolCatalog,
@@ -57,11 +60,16 @@ declare global {
       runSkill: (payload: SkillRunInput) => Promise<SkillRunResult>;
       uninstallSkill: (skillId: string) => Promise<BootstrapPayload>;
       updateConfig: (patch: Partial<AppConfig>) => Promise<BootstrapPayload>;
+      getRemoteControlStatus: () => Promise<RemoteControlStatus>;
+      startWechatLogin: () => Promise<WechatLoginStartResult>;
+      waitWechatLogin: (payload: { sessionKey: string; timeoutMs?: number }) => Promise<WechatLoginWaitResult>;
+      disconnectWechat: () => Promise<RemoteControlStatus>;
       fetchProviderModels: (payload: ModelProviderFetchInput) => Promise<ModelProviderFetchResult>;
       inspectMcpServer: (payload: McpInspectInput) => Promise<McpServerToolsResult>;
       debugMcpTool: (payload: McpToolDebugInput) => Promise<McpToolDebugResult>;
       listTools: () => Promise<WorkspaceToolCatalog>;
       selectFiles: () => Promise<FileDropEntry[]>;
+      prepareAttachments: (filePaths: string[]) => Promise<FileDropEntry[]>;
       selectWorkspaceFolder: () => Promise<string>;
       setThreadWorkspace: (threadId: string, workspaceRoot: string) => Promise<BootstrapPayload>;
       readPreview: (payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) => Promise<FilePreviewPayload>;

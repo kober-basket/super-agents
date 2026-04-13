@@ -17,6 +17,7 @@ export function FileCard({ file, onOpen }: FileCardProps) {
     name: file.name,
     mimeType: file.mimeType,
   });
+  const secondaryText = file.size > 0 ? formatBytes(file.size) : "Attached file";
 
   return (
     <button className="file-tile" onClick={() => onOpen(file)}>
@@ -28,9 +29,7 @@ export function FileCard({ file, onOpen }: FileCardProps) {
           <strong>{file.name}</strong>
           <em>{presentation.label}</em>
         </div>
-        <span>
-          {formatBytes(file.size)} 路 {file.path}
-        </span>
+        <span>{secondaryText}</span>
       </div>
     </button>
   );

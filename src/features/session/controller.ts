@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useReducer, useRef } from "react";
 
 import { getActiveModelOption, getSelectableModels } from "../../lib/model-config";
+import { DEFAULT_THREAD_TITLE, formatThreadTitle, isGenericThreadTitle } from "../../lib/thread-title";
 import { workspaceClient } from "../../services/workspace-client";
 import type {
   AppConfig,
+  BootstrapPayload,
   ChatMessage,
   FileDropEntry,
   McpServerStatus,
@@ -78,6 +80,60 @@ type SessionAction =
   | { type: "pendingQuestions/set"; payload: PendingQuestion[] }
   | { type: "status/set"; payload: Partial<SessionStatus> };
 
+function sortThreadSummaries(threads: ThreadSummary[]) {
+  return [...threads].sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+function mergeThreadSummaries(existing: ThreadSummary[], incoming: ThreadSummary[]) {
+  const existingById = new Map(existing.map((thread) => [thread.id, thread] as const));
+
+  return sortThreadSummaries(
+    incoming.map((thread) => {
+      const previous = existingById.get(thread.id);
+      if (!previous) {
+        return thread;
+      }
+
+      return {
+        ...thread,
+        title:
+          isGenericThreadTitle(thread.title) && !isGenericThreadTitle(previous.title)
+            ? previous.title
+            : thread.title,
+        lastMessage: thread.lastMessage?.trim() ? thread.lastMessage : previous.lastMessage,
+        messageCount: thread.messageCount > 0 ? thread.messageCount : previous.messageCount,
+      };
+    }),
+  );
+}
+
+function upsertThreadSummary(threads: ThreadSummary[], nextThread: ThreadSummary) {
+  const existing = threads.some((thread) => thread.id === nextThread.id);
+  return sortThreadSummaries(
+    existing
+      ? threads.map((thread) => (thread.id === nextThread.id ? nextThread : thread))
+      : [nextThread, ...threads],
+  );
+}
+
+function isAbsoluteAttachmentPath(value: string) {
+  return /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(value);
+}
+
+function isSupportedComposerAttachment(file: FileDropEntry) {
+  if (file.dataUrl || file.mimeType.startsWith("image/")) return true;
+  if (typeof file.content === "string") return true;
+  if (file.url?.startsWith("data:image/") || file.url?.startsWith("data:text/")) return true;
+  if (file.mimeType === "application/pdf" || file.name.match(/\.pdf$/i)) return true;
+  return false;
+}
+
+function describeUnsupportedAttachments(files: FileDropEntry[]) {
+  const names = files.slice(0, 3).map((file) => file.name).join("、");
+  const suffix = files.length > 3 ? "等文件" : "";
+  return `当前暂不支持直接发送这些附件：${names}${suffix}。请转成 PDF、TXT、Markdown，或重新上传可提取文本的 DOCX。`;
+}
+
 function createInitialState(snapshot: WorkspaceSnapshot | null): SessionState {
   return {
     config: normalizeConfig(snapshot?.config),
@@ -137,11 +193,11 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     case "mcpStatuses/set":
       return { ...state, mcpStatuses: action.payload };
     case "threads/set":
-      return { ...state, threads: action.payload };
+      return { ...state, threads: mergeThreadSummaries(state.threads, action.payload) };
     case "thread/create":
       return {
         ...state,
-        threads: [action.payload, ...state.threads],
+        threads: upsertThreadSummary(state.threads, action.payload),
         activeThreadId: action.payload.id,
         activeThread: { ...action.payload, messages: [] },
         status: { ...state.status, creatingThread: false },
@@ -166,22 +222,21 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         archived: openedThread.archived,
         workspaceRoot: openedThread.workspaceRoot,
       };
-      const hasThread = state.threads.some((t) => t.id === openedThread.id);
       return {
         ...state,
         activeThreadId: action.payload.threadId,
         activeThread: openedThread,
-        threads: hasThread
-          ? state.threads.map((t) => (t.id === openedThread.id ? updatedSummary : t))
-          : [updatedSummary, ...state.threads],
+        threads: upsertThreadSummary(state.threads, updatedSummary),
         status: { ...state.status, openingThreadId: null },
       };
     }
     case "thread/archive":
       return {
         ...state,
-        threads: state.threads.map((t) =>
-          t.id === action.payload.threadId ? { ...t, archived: action.payload.archived } : t,
+        threads: sortThreadSummaries(
+          state.threads.map((t) =>
+            t.id === action.payload.threadId ? { ...t, archived: action.payload.archived } : t,
+          ),
         ),
         status: { ...state.status, mutatingThreadId: null },
       };
@@ -219,7 +274,112 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   const configSaveVersionRef = useRef(0);
   const skillMessageMarkersRef = useRef(state.skillMessageMarkers);
   const stateRef = useRef(state);
+  const threadRunVersionRef = useRef(new Map<string, number>());
+  const stoppingThreadsRef = useRef(new Map<string, number>());
   stateRef.current = state;
+
+  function bumpThreadRunVersion(threadId: string) {
+    const nextVersion = (threadRunVersionRef.current.get(threadId) ?? 0) + 1;
+    threadRunVersionRef.current.set(threadId, nextVersion);
+    return nextVersion;
+  }
+
+  function isLatestThreadRun(threadId: string, version: number) {
+    return (threadRunVersionRef.current.get(threadId) ?? 0) === version;
+  }
+
+  function clearThreadStopping(threadId?: string) {
+    if (!threadId) return;
+    stoppingThreadsRef.current.delete(threadId);
+  }
+
+  function isThreadStopping(threadId?: string) {
+    if (!threadId) return false;
+    const startedAt = stoppingThreadsRef.current.get(threadId);
+    if (!startedAt) return false;
+    if (Date.now() - startedAt > 5_000) {
+      stoppingThreadsRef.current.delete(threadId);
+      return false;
+    }
+    return true;
+  }
+
+  function markThreadStopping(threadId: string) {
+    stoppingThreadsRef.current.set(threadId, Date.now());
+    bumpThreadRunVersion(threadId);
+  }
+
+  function normalizeThreadForDisplay(thread: ThreadRecord, threadId = thread.id) {
+    if (!isThreadStopping(threadId)) {
+      return thread;
+    }
+
+    let changed = false;
+    const messages = thread.messages.map((message) => {
+      if (message.status !== "loading") {
+        return message;
+      }
+      changed = true;
+      return { ...message, status: "paused" as const };
+    });
+
+    if (!changed) {
+      clearThreadStopping(threadId);
+      return thread;
+    }
+
+    return {
+      ...thread,
+      messages,
+    };
+  }
+
+  function applyThreadSnapshot(threadId: string, thread: ThreadRecord) {
+    const hadLoadingBeforeNormalize = thread.messages.some((item) => item.status === "loading");
+    const normalizedThread = normalizeThreadForDisplay(thread, threadId);
+    dispatch({ type: "thread/open", payload: { threadId, thread: normalizedThread } });
+    if (!normalizedThread.messages.some((item) => item.status === "loading")) {
+      dispatch({ type: "status/set", payload: { sending: false } });
+      if (!hadLoadingBeforeNormalize) {
+        clearThreadStopping(threadId);
+      }
+    }
+    return normalizedThread;
+  }
+
+  async function prepareComposerAttachments(files: FileDropEntry[]) {
+    const localPaths = Array.from(
+      new Set(
+        files
+          .filter((file) => !file.content && !file.dataUrl && !file.url)
+          .map((file) => file.path)
+          .filter((filePath): filePath is string => Boolean(filePath) && isAbsoluteAttachmentPath(filePath)),
+      ),
+    );
+
+    if (localPaths.length === 0) {
+      return files;
+    }
+
+    const prepared = await workspaceClient.prepareAttachments(localPaths);
+    const preparedByPath = new Map(prepared.map((file) => [file.path, file] as const));
+
+    return files.map((file) => {
+      if (!isAbsoluteAttachmentPath(file.path)) {
+        return file;
+      }
+      return preparedByPath.get(file.path) ?? file;
+    });
+  }
+
+  function validateComposerAttachments(files: FileDropEntry[]) {
+    const unsupported = files.filter((file) => !isSupportedComposerAttachment(file));
+    if (unsupported.length > 0) {
+      onToast(describeUnsupportedAttachments(unsupported));
+      return false;
+    }
+    return true;
+  }
 
   // ── derived ────────────────────────────────────────────────────────────────
 
@@ -245,7 +405,10 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   const currentWorkspacePath =
     state.activeThread?.workspaceRoot || activeSummary?.workspaceRoot || state.config.opencodeRoot || "";
   const currentWorkspaceLabel = workspaceLabel(currentWorkspacePath);
-  const title = activeSummary?.title || state.activeThread?.title || "新会话";
+  const title = formatThreadTitle(
+    activeSummary?.title || state.activeThread?.title,
+    state.activeThread?.lastMessage || activeSummary?.lastMessage,
+  );
 
   const composerSkillOptionsById = useMemo(() => {
     const installed = state.config.skills
@@ -339,6 +502,26 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   }, [state.skillMessageMarkers]);
 
   useEffect(() => {
+    writeJsonStorage(WORKSPACE_SNAPSHOT_KEY, {
+      config: state.config,
+      threads: state.threads,
+      activeThreadId: state.activeThreadId,
+      currentThread: state.activeThread,
+      availableSkills: state.availableSkills,
+      mcpStatuses: state.mcpStatuses,
+      pendingQuestions: state.pendingQuestions,
+    } satisfies WorkspaceSnapshot);
+  }, [
+    state.activeThread,
+    state.activeThreadId,
+    state.availableSkills,
+    state.config,
+    state.mcpStatuses,
+    state.pendingQuestions,
+    state.threads,
+  ]);
+
+  useEffect(() => {
     if (!state.selectedComposerSkill) return;
     if (state.composer.trim().startsWith("/")) {
       dispatch({ type: "composerSkill/set", payload: null });
@@ -354,6 +537,53 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   }, []);
 
   // ── config ─────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    return workspaceClient.onWorkspaceChanged((payload) => {
+      applyBootstrapPayload(payload);
+    });
+  }, []);
+
+  useEffect(() => {
+    dispatch({ type: "status/set", payload: { bootstrapping: true } });
+    void refreshWorkspaceSnapshot().finally(() => {
+      dispatch({ type: "status/set", payload: { bootstrapping: false } });
+    });
+  }, []);
+
+  function applyBootstrapPayload(payload: BootstrapPayload, message?: string) {
+    dispatch({ type: "config/set", payload: payload.config });
+    dispatch({ type: "skills/set", payload: payload.availableSkills });
+    dispatch({ type: "mcpStatuses/set", payload: payload.mcpStatuses });
+    dispatch({ type: "threads/set", payload: payload.threads });
+    dispatch({ type: "pendingQuestions/set", payload: payload.pendingQuestions });
+
+    if (payload.currentThread) {
+      const threadId = payload.activeThreadId || payload.currentThread.id;
+      applyThreadSnapshot(threadId, payload.currentThread);
+    }
+
+    if (message) {
+      onToast(message);
+    }
+  }
+
+  async function ensureBackendThread() {
+    const existingThreadId = stateRef.current.activeThreadId;
+    if (existingThreadId) {
+      return {
+        threadId: existingThreadId,
+        thread: stateRef.current.activeThread,
+      };
+    }
+
+    const payload = await workspaceClient.createThread(DEFAULT_THREAD_TITLE);
+    applyBootstrapPayload(payload);
+    return {
+      threadId: payload.activeThreadId,
+      thread: payload.currentThread,
+    };
+  }
 
   function clearPendingConfigSave() {
     if (!pendingConfigSaveRef.current) return;
@@ -401,15 +631,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   async function refreshWorkspaceSnapshot(message?: string) {
     try {
       const payload = await workspaceClient.bootstrap();
-      dispatch({ type: "config/set", payload: payload.config });
-      dispatch({ type: "skills/set", payload: payload.availableSkills });
-      dispatch({ type: "mcpStatuses/set", payload: payload.mcpStatuses });
-      dispatch({ type: "threads/set", payload: payload.threads });
-      dispatch({ type: "pendingQuestions/set", payload: payload.pendingQuestions });
-      if (payload.currentThread) {
-        dispatch({ type: "thread/open", payload: { threadId: payload.activeThreadId, thread: payload.currentThread } });
-      }
-      if (message) onToast(message);
+      applyBootstrapPayload(payload, message);
     } catch (error) {
       onToast(formatErrorMessage(error, "Refresh failed"));
     }
@@ -465,7 +687,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
       onOpenChat();
       onToast(`Ran ${skill.name}`);
       if (result?.thread) {
-        dispatch({ type: "thread/open", payload: { threadId: result.thread.id, thread: result.thread } });
+        applyThreadSnapshot(result.thread.id, result.thread);
         await refreshThreadList();
       }
     } catch (error) {
@@ -490,24 +712,19 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     const composerSkill = state.selectedComposerSkill;
     const slashCommand = parseSlashSkillCommand(nextMessage);
 
+    if (!validateComposerAttachments(nextAttachments)) return;
+
     if (!composerSkill && !slashCommand?.skillToken) {
       // Plain message send (no skill)
       dispatch({ type: "status/set", payload: { sending: true } });
       dispatch({ type: "composer/clear" });
       try {
         // Use ref for fresh state — React state may be stale in closure
-        const fresh = stateRef.current;
-        let threadId = fresh.activeThreadId;
+        const ensured = await ensureBackendThread();
+        let threadId = ensured.threadId;
+        const currentThread = ensured.thread;
 
         // No active thread → create session on backend
-        if (!threadId) {
-          const bp = await workspaceClient.createThread();
-          threadId = bp.activeThreadId;
-          // Use thread/open which adds to list without overwriting
-          if (bp.currentThread) {
-            dispatch({ type: "thread/open", payload: { threadId, thread: bp.currentThread } });
-          }
-        }
 
         // Show user message + loading assistant placeholder immediately
         const userMsg: ChatMessage = {
@@ -524,7 +741,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
           createdAt: Date.now(),
           status: "loading",
         };
-        const currentMessages = stateRef.current.activeThread?.messages ?? [];
+        const currentMessages = currentThread?.messages ?? [];
         dispatch({
           type: "thread/open",
           payload: {
@@ -645,7 +862,185 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     onToast(`Skill not found: /${slashCommand?.skillToken ?? ""}`);
   }
 
-  function appendAttachments(files: FileDropEntry[]) { dispatch({ type: "attachments/append", payload: files }); }
+  async function sendMessageWithSkillsStable() {
+    if (stateRef.current.status.sending || state.composerComposing || (!state.composer.trim() && state.attachments.length === 0)) return;
+    if (!hasAvailableModel) { onToast("当前没有可用模型，请先在设置里启用模型。"); return; }
+
+    const nextMessage = state.composer.trim();
+    const nextAttachments = state.attachments;
+    const composerSkill = state.selectedComposerSkill;
+    const slashCommand = parseSlashSkillCommand(nextMessage);
+
+    if (!validateComposerAttachments(nextAttachments)) return;
+
+    if (!composerSkill && !slashCommand?.skillToken) {
+      dispatch({ type: "status/set", payload: { sending: true } });
+      dispatch({ type: "composer/clear" });
+      try {
+        const ensured = await ensureBackendThread();
+        const threadId = ensured.threadId;
+        const runVersion = bumpThreadRunVersion(threadId);
+        const currentThread = ensured.thread;
+        const currentMessages = currentThread?.messages ?? [];
+        const userMsg: ChatMessage = {
+          id: `temp-user-${Date.now()}`,
+          role: "user",
+          text: nextMessage,
+          createdAt: Date.now(),
+          status: "done",
+        };
+        const assistantMsg: ChatMessage = {
+          id: `temp-assistant-${Date.now()}`,
+          role: "assistant",
+          text: "",
+          createdAt: Date.now(),
+          status: "loading",
+        };
+
+        dispatch({
+          type: "thread/open",
+          payload: {
+            threadId,
+            thread: {
+              id: threadId,
+              title: formatThreadTitle(currentThread?.title, nextMessage),
+              updatedAt: Date.now(),
+              lastMessage: nextMessage,
+              messageCount: currentMessages.length + 2,
+              archived: false,
+              workspaceRoot: currentThread?.workspaceRoot,
+              messages: [...currentMessages, userMsg, assistantMsg],
+            },
+          },
+        });
+
+        const result = await workspaceClient.sendMessage({
+          threadId,
+          message: nextMessage,
+          attachments: nextAttachments,
+        });
+        if (!isLatestThreadRun(threadId, runVersion)) {
+          return;
+        }
+        if (result?.thread) {
+          applyThreadSnapshot(threadId, result.thread);
+        }
+        onOpenChat();
+      } catch (error) {
+        if (isThreadStopping(stateRef.current.activeThreadId)) {
+          return;
+        }
+        onToast(formatErrorMessage(error, "Send message failed"));
+      } finally {
+        dispatch({ type: "status/set", payload: { sending: false } });
+      }
+      return;
+    }
+
+    const installedSkill =
+      composerSkill?.source === "installed"
+        ? state.config.skills.find((s) => s.id === composerSkill.id) ?? null
+        : slashCommand?.skillToken ? installedSkillMap.get(slashCommand.skillToken) ?? null : null;
+
+    if (installedSkill) {
+      const promptText = composerSkill ? nextMessage : slashCommand?.prompt ?? "";
+      if (installedSkill.kind === "codex") {
+        dispatch({ type: "composerSkill/set", payload: null });
+        dispatch({ type: "status/set", payload: { sending: true } });
+        dispatch({ type: "composer/clear" });
+        try {
+          const ensured = await ensureBackendThread();
+          const threadId = ensured.threadId;
+          const runVersion = bumpThreadRunVersion(threadId);
+          const result = await workspaceClient.sendMessage({
+            threadId,
+            message: promptText,
+            attachments: nextAttachments,
+          });
+          if (!isLatestThreadRun(threadId, runVersion)) {
+            return;
+          }
+          if (result?.thread) {
+            applyThreadSnapshot(threadId, result.thread);
+          }
+          onOpenChat();
+          onToast(`Sent with /${installedSkill.name}`);
+        } catch (error) {
+          if (isThreadStopping(stateRef.current.activeThreadId)) {
+            return;
+          }
+          onToast(formatErrorMessage(error, "Send message failed"));
+        } finally {
+          dispatch({ type: "status/set", payload: { sending: false } });
+        }
+        return;
+      }
+
+      if (nextAttachments.length > 0) { onToast("Command skills do not support attachments yet"); return; }
+      dispatch({ type: "composerSkill/set", payload: null });
+      dispatch({ type: "composer/set", payload: "" });
+      dispatch({ type: "attachments/set", payload: [] });
+      await executeCommandSkill(installedSkill, promptText);
+      return;
+    }
+
+    const referenceSkill =
+      composerSkill?.source === "reference"
+        ? state.availableSkills.find((s) => s.id === composerSkill.id) ?? null
+        : slashCommand?.skillToken ? referenceSkillMap.get(slashCommand.skillToken) ?? null : null;
+
+    if (referenceSkill) {
+      dispatch({ type: "composerSkill/set", payload: null });
+      dispatch({ type: "status/set", payload: { sending: true } });
+      dispatch({ type: "composer/clear" });
+      try {
+        const ensured = await ensureBackendThread();
+        const threadId = ensured.threadId;
+        const runVersion = bumpThreadRunVersion(threadId);
+        const promptText = composerSkill ? nextMessage : slashCommand?.prompt ?? "";
+        const result = await workspaceClient.sendMessage({
+          threadId,
+          message: buildSkillPrompt(referenceSkill.name, referenceSkill.description, promptText),
+          attachments: nextAttachments,
+        });
+        if (!isLatestThreadRun(threadId, runVersion)) {
+          return;
+        }
+        if (result?.thread) {
+          applyThreadSnapshot(threadId, result.thread);
+        }
+        onOpenChat();
+        onToast(`Sent with /${referenceSkill.name}`);
+      } catch (error) {
+        if (isThreadStopping(stateRef.current.activeThreadId)) {
+          return;
+        }
+        onToast(formatErrorMessage(error, "Send message failed"));
+      } finally {
+        dispatch({ type: "status/set", payload: { sending: false } });
+      }
+      return;
+    }
+
+    onToast(`Skill not found: /${slashCommand?.skillToken ?? ""}`);
+  }
+
+  async function appendAttachments(files: FileDropEntry[]) {
+    try {
+      const prepared = await prepareComposerAttachments(files);
+      const supported = prepared.filter(isSupportedComposerAttachment);
+      const unsupported = prepared.filter((file) => !isSupportedComposerAttachment(file));
+
+      if (supported.length > 0) {
+        dispatch({ type: "attachments/append", payload: supported });
+      }
+      if (unsupported.length > 0) {
+        onToast(describeUnsupportedAttachments(unsupported));
+      }
+    } catch {
+      onToast("Read files failed");
+    }
+  }
   function setComposer(value: string) { dispatch({ type: "composer/set", payload: value }); }
   function applySuggestion(prompt: string) { dispatch({ type: "composer/set", payload: prompt }); }
   function removeAttachment(id: string) { dispatch({ type: "attachment/remove", payload: id }); }
@@ -665,7 +1060,9 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   async function pickFiles() {
     try {
       const files = await workspaceClient.selectFiles();
-      if (files.length > 0) dispatch({ type: "attachments/append", payload: files });
+      if (files.length > 0) {
+        await appendAttachments(files);
+      }
     } catch { onToast("Read files failed"); }
   }
 
@@ -701,12 +1098,25 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     onOpenChat();
   }
 
+  async function createThreadStable() {
+    try {
+      dispatch({ type: "status/set", payload: { sending: false, creatingThread: true } });
+      dispatch({ type: "composer/clear" });
+      const payload = await workspaceClient.createThread(DEFAULT_THREAD_TITLE);
+      applyBootstrapPayload(payload);
+      onOpenChat();
+    } catch (error) {
+      onToast(formatErrorMessage(error, "Failed to create thread"));
+    } finally {
+      dispatch({ type: "status/set", payload: { creatingThread: false } });
+    }
+  }
+
   async function openThread(threadId: string) {
     try {
-      dispatch({ type: "status/set", payload: { openingThreadId: threadId } });
+      onOpenChat();
       const thread = await workspaceClient.setActiveThread(threadId);
       dispatch({ type: "thread/open", payload: { threadId, thread } });
-      onOpenChat();
     } catch (error) {
       onToast(formatErrorMessage(error, "Failed to open thread"));
       dispatch({ type: "status/set", payload: { openingThreadId: null } });
@@ -744,19 +1154,41 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   }
 
   async function abortThread(threadId?: string) {
+    const target = threadId || stateRef.current.activeThreadId;
+    if (!target) return;
+    markThreadStopping(target);
+
+    const activeThread = stateRef.current.activeThread;
+    if (activeThread?.id === target && activeThread.messages.some((message) => message.status === "loading")) {
+      dispatch({
+        type: "thread/open",
+        payload: {
+          threadId: target,
+          thread: {
+            ...activeThread,
+            updatedAt: Date.now(),
+            messages: activeThread.messages.map((message) =>
+              message.status === "loading" ? { ...message, status: "paused" } : message,
+            ),
+          },
+        },
+      });
+    }
+
+    dispatch({ type: "status/set", payload: { sending: false } });
+
     try {
-      const target = threadId || stateRef.current.activeThreadId;
-      if (!target) return;
       const payload = await workspaceClient.abortThread(target);
-      dispatch({ type: "status/set", payload: { sending: false } });
       dispatch({ type: "pendingQuestions/set", payload: payload.pendingQuestions });
       // Refresh thread to show partial response
       const thread = await workspaceClient.getThread(target).catch(() => null);
       if (thread) {
-        dispatch({ type: "thread/open", payload: { threadId: target, thread } });
+        applyThreadSnapshot(target, thread);
+      } else {
+        clearThreadStopping(target);
       }
     } catch (error) {
-      dispatch({ type: "status/set", payload: { sending: false } });
+      clearThreadStopping(target);
       onToast(formatErrorMessage(error, "Failed to abort thread"));
     }
   }
@@ -798,6 +1230,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     activeSummary,
     activeThread: state.activeThread,
     activeThreadId: state.activeThreadId,
+    activeThreadStopping: isThreadStopping(state.activeThreadId),
     activeThreads,
     applySuggestion,
     appendAttachments,
@@ -837,7 +1270,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     selectableModels,
     selectedComposerSkill: state.selectedComposerSkill,
     selectComposerSkill,
-    sendMessageWithSkills,
+    sendMessageWithSkills: sendMessageWithSkillsStable,
     sending: state.status.sending,
     setComposer,
     setComposerComposing: (composing: boolean) => dispatch({ type: "composer/composing", payload: composing }),

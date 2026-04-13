@@ -5,6 +5,7 @@ import type {
   ThreadRecord,
   ThreadSummary,
 } from "../../types"
+import { DEFAULT_REMOTE_CONTROL_CONFIG, normalizeRemoteControlConfig } from "../../lib/remote-control-config"
 import { fileKind } from "../shared/utils"
 import type { SkillPromptMeta } from "./types"
 
@@ -41,6 +42,7 @@ export function emptyConfig(): AppConfig {
       chunkSize: 1200,
       chunkOverlap: 160,
     },
+    remoteControl: DEFAULT_REMOTE_CONTROL_CONFIG,
   }
 }
 
@@ -88,6 +90,7 @@ export function normalizeConfig(config?: Partial<AppConfig> | null): AppConfig {
           ? config.knowledgeBase.chunkOverlap
           : fallback.knowledgeBase.chunkOverlap,
     },
+    remoteControl: normalizeRemoteControlConfig(config.remoteControl),
   }
 }
 
@@ -286,6 +289,14 @@ export function formatErrorMessage(error: unknown, fallback: string) {
   }
   if (normalized.includes("opencode server exited early")) {
     return "运行时服务启动后很快退出，请检查本地环境或代理配置后重试。"
+  }
+
+  if (
+    normalized.includes("file part media type") ||
+    normalized.includes("functionality not supported") ||
+    normalized.includes("wordprocessingml.document")
+  ) {
+    return "当前不支持直接发送该附件类型，请先转成 PDF、TXT 或 Markdown；DOCX 可重新上传后再试。"
   }
 
   return text || fallback

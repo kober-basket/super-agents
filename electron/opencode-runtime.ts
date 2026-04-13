@@ -753,22 +753,22 @@ function makeFilePart(file: FileDropEntry) {
     };
   }
 
-  if (file.path && path.isAbsolute(file.path)) {
-    return {
-      type: "file" as const,
-      mime: file.mimeType,
-      filename: file.name,
-      url: pathToFileURL(file.path).href,
-    };
-  }
-
-  if (file.content) {
+  if (typeof file.content === "string") {
     const encoded = Buffer.from(file.content, "utf8").toString("base64");
     return {
       type: "file" as const,
       mime: file.mimeType,
       filename: file.name,
       url: `data:${file.mimeType};base64,${encoded}`,
+    };
+  }
+
+  if (file.path && path.isAbsolute(file.path)) {
+    return {
+      type: "file" as const,
+      mime: file.mimeType,
+      filename: file.name,
+      url: pathToFileURL(file.path).href,
     };
   }
 
@@ -946,23 +946,23 @@ export class OpencodeRuntime {
   }
 
   listSessions(config: AppConfig) {
-    return this.request<OpencodeSessionInfo[]>(config, "/session", undefined, undefined, null);
+    return this.request<OpencodeSessionInfo[]>(config, "/session");
   }
 
   getSession(config: AppConfig, sessionID: string) {
-    return this.request<OpencodeSessionInfo>(config, `/session/${sessionID}`, undefined, undefined, null);
+    return this.request<OpencodeSessionInfo>(config, `/session/${sessionID}`);
   }
 
   listMessages(config: AppConfig, sessionID: string) {
-    return this.request<OpencodeSessionMessage[]>(config, `/session/${sessionID}/message`, undefined, undefined, null);
+    return this.request<OpencodeSessionMessage[]>(config, `/session/${sessionID}/message`);
   }
 
   listSessionStatuses(config: AppConfig) {
-    return this.request<Record<string, OpencodeSessionStatus>>(config, "/session/status", undefined, undefined, null);
+    return this.request<Record<string, OpencodeSessionStatus>>(config, "/session/status");
   }
 
   listQuestions(config: AppConfig) {
-    return this.request<OpencodeQuestionRequest[]>(config, "/question", undefined, undefined, null);
+    return this.request<OpencodeQuestionRequest[]>(config, "/question");
   }
 
   createSession(config: AppConfig, title?: string) {
@@ -991,7 +991,7 @@ export class OpencodeRuntime {
   deleteSession(config: AppConfig, sessionID: string) {
     return this.request<boolean>(config, `/session/${sessionID}`, {
       method: "DELETE",
-    }, undefined, null);
+    });
   }
 
   async prompt(config: AppConfig, sessionID: string, message: string, attachments: FileDropEntry[]) {
@@ -1043,7 +1043,19 @@ export class OpencodeRuntime {
         model,
         parts,
       }),
-    });
+    }).catch(() =>
+      this.request<unknown>(config, `/session/${sessionID}/message`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          agent: "build",
+          model,
+          parts,
+        }),
+      }),
+    );
   }
 
   async command(config: AppConfig, sessionID: string, command: string, argumentsText: string, attachments: FileDropEntry[]) {
@@ -1100,7 +1112,7 @@ export class OpencodeRuntime {
   abortSession(config: AppConfig, sessionID: string) {
     return this.request<boolean>(config, `/session/${sessionID}/abort`, {
       method: "POST",
-    }, undefined, null);
+    });
   }
 
   replyQuestion(config: AppConfig, requestID: string, answers: string[][]) {
@@ -1112,13 +1124,13 @@ export class OpencodeRuntime {
       body: JSON.stringify({
         answers,
       }),
-    }, undefined, null);
+    });
   }
 
   rejectQuestion(config: AppConfig, requestID: string) {
     return this.request<boolean>(config, `/question/${requestID}/reject`, {
       method: "POST",
-    }, undefined, null);
+    });
   }
 
   async listSkills(config: AppConfig): Promise<RuntimeSkill[]> {

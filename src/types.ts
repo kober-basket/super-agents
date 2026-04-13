@@ -294,6 +294,27 @@ export interface AppearanceConfig {
   theme: AppearanceThemeId;
 }
 
+export interface RemoteControlPlaceholderConfig {
+  enabled: boolean;
+}
+
+export interface WechatRemoteControlConfig {
+  enabled: boolean;
+  baseUrl: string;
+  cdnBaseUrl: string;
+  botToken: string;
+  accountId: string;
+  userId: string;
+  connectedAt: number | null;
+}
+
+export interface RemoteControlConfig {
+  dingtalk: RemoteControlPlaceholderConfig;
+  feishu: RemoteControlPlaceholderConfig;
+  wechat: WechatRemoteControlConfig;
+  wecom: RemoteControlPlaceholderConfig;
+}
+
 export interface AppConfig {
   opencodeRoot: string;
   bridgeUrl: string;
@@ -307,6 +328,38 @@ export interface AppConfig {
   skills: SkillConfig[];
   hiddenCodexSkillIds: string[];
   knowledgeBase: KnowledgeBaseConnectionConfig;
+  remoteControl: RemoteControlConfig;
+}
+
+export interface WechatLoginStartResult {
+  sessionKey: string;
+  qrCodeUrl?: string;
+  message: string;
+}
+
+export interface WechatLoginWaitResult {
+  connected: boolean;
+  message: string;
+  accountId?: string;
+  userId?: string;
+}
+
+export interface WechatRemoteRuntimeStatus {
+  enabled: boolean;
+  connected: boolean;
+  running: boolean;
+  pendingLogin: boolean;
+  pendingLoginQrCodeUrl?: string;
+  accountId: string;
+  userId: string;
+  lastError?: string;
+  lastInboundAt?: number;
+  lastOutboundAt?: number;
+  activePeerCount: number;
+}
+
+export interface RemoteControlStatus {
+  wechat: WechatRemoteRuntimeStatus;
 }
 
 export interface DesktopWindowState {
@@ -332,7 +385,7 @@ export interface ChatMessage {
   text: string;
   displayText?: string;
   createdAt: number;
-  status?: "loading" | "done" | "error";
+  status?: "loading" | "paused" | "done" | "error";
   attachments?: MessageAttachment[];
   toolName?: string;
   skillName?: string;

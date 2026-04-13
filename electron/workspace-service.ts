@@ -1,9 +1,10 @@
-import { cp, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import mime from "mime-types";
+import mammoth from "mammoth";
 
 import {
   createRuntimeModelId,
@@ -11,11 +12,17 @@ import {
   normalizeProviderModels,
   sanitizeModelProviderId,
 } from "../src/lib/model-config";
+import { DEFAULT_REMOTE_CONTROL_CONFIG, normalizeRemoteControlConfig } from "../src/lib/remote-control-config";
 import {
   inferProviderModelCapabilities,
   inferProviderModelGroup,
   inferProviderModelVendor,
 } from "../src/lib/model-metadata";
+import {
+  DEFAULT_THREAD_TITLE as FALLBACK_THREAD_TITLE,
+  deriveThreadTitleFromMessages,
+  formatThreadTitle,
+} from "../src/lib/thread-title";
 import { KnowledgeService } from "./knowledge-service";
 import { readJsonFile, writeJsonFile } from "./store";
 import {
@@ -58,6 +65,8 @@ import type {
 
 interface PersistedWorkspaceState {
   config: AppConfig;
+  activeThreadId: string;
+  threads: ThreadSummary[];
 }
 
 const IFLY_RPA_BASE_URL = "https://oneapi.iflyrpa.com/v1";
@@ -88,6 +97,10 @@ const DEFAULT_MODEL_PROVIDERS: ModelProviderConfig[] = [
 ];
 
 const DEFAULT_MCP: McpServerConfig[] = [];
+const DOCX_MIME_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+const INLINE_TEXT_KINDS = new Set<PreviewKind>(["text", "code", "markdown", "html"]);
 
 const DEFAULT_SKILLS: SkillConfig[] = [
   {
@@ -146,12 +159,46 @@ const DEFAULT_CONFIG: AppConfig = {
     chunkSize: 1200,
     chunkOverlap: 160,
   },
+  remoteControl: DEFAULT_REMOTE_CONTROL_CONFIG,
 };
 
 const BUILTIN_TOOL_DESCRIPTIONS: Record<string, string> = {
   question: "Ask the user for confirmation or missing input before continuing.",
   webfetch: "Fetch a web page and extract the parts needed for the current task.",
 };
+
+const DEFAULT_THREAD_TITLE = "新会话";
+
+function sortPersistedThreads(threads: ThreadSummary[]) {
+  return [...threads].sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+function normalizePersistedThreads(value: unknown): ThreadSummary[] {
+  if (!Array.isArray(value)) return [];
+
+  const byId = new Map<string, ThreadSummary>();
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Partial<ThreadSummary>;
+    const id = typeof record.id === "string" ? record.id.trim() : "";
+    if (!id) continue;
+
+    byId.set(id, {
+      id,
+      title: typeof record.title === "string" && record.title.trim() ? record.title.trim() : DEFAULT_THREAD_TITLE,
+      updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : 0,
+      lastMessage: typeof record.lastMessage === "string" ? record.lastMessage : "",
+      messageCount: typeof record.messageCount === "number" ? record.messageCount : 0,
+      archived: record.archived === true,
+      workspaceRoot:
+        typeof record.workspaceRoot === "string" && record.workspaceRoot.trim()
+          ? record.workspaceRoot.trim()
+          : undefined,
+    });
+  }
+
+  return sortPersistedThreads(Array.from(byId.values()));
+}
 
 function createEmptyState(): PersistedWorkspaceState {
   return {
@@ -164,7 +211,10 @@ function createEmptyState(): PersistedWorkspaceState {
       mcpServers: DEFAULT_MCP.map((server) => ({ ...server })),
       skills: DEFAULT_SKILLS.map((skill) => ({ ...skill })),
       hiddenCodexSkillIds: [],
+      remoteControl: normalizeRemoteControlConfig(undefined),
     },
+    activeThreadId: "",
+    threads: [],
   };
 }
 
@@ -305,6 +355,7 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
             ? Math.min(Math.max(Math.round(rawConfig.knowledgeBase.chunkOverlap), 0), 800)
             : DEFAULT_CONFIG.knowledgeBase.chunkOverlap,
       },
+      remoteControl: normalizeRemoteControlConfig(rawConfig.remoteControl),
       mcpServers:
         Array.isArray(rawConfig.mcpServers) && rawConfig.mcpServers.length > 0
           ? rawConfig.mcpServers.map((item) => ({
@@ -327,6 +378,8 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
             }))
           : DEFAULT_CONFIG.skills,
     },
+    activeThreadId: typeof state?.activeThreadId === "string" ? state.activeThreadId.trim() : "",
+    threads: normalizePersistedThreads(state?.threads),
   };
 }
 
@@ -692,7 +745,37 @@ function detectKind(filePath: string, mimeType?: string): PreviewKind {
     return "code";
   }
   if ([".txt", ".log", ".out", ".err"].includes(extension)) return "text";
+  if (mimeType?.startsWith("text/")) return "text";
   return "binary";
+}
+
+function isDocxDocument(filePath: string, mimeType?: string) {
+  return path.extname(filePath).toLowerCase() === ".docx" || DOCX_MIME_TYPES.has(mimeType ?? "");
+}
+
+async function extractDocxText(filePath: string) {
+  const result = await mammoth.extractRawText({ path: filePath });
+  return result.value.replace(/\r\n/g, "\n");
+}
+
+async function readAttachmentInlineContent(filePath: string, mimeType: string, kind: PreviewKind) {
+  if (INLINE_TEXT_KINDS.has(kind)) {
+    return {
+      content: await readFile(filePath, "utf8"),
+      kind,
+      mimeType: "text/plain",
+    };
+  }
+
+  if (isDocxDocument(filePath, mimeType)) {
+    return {
+      content: await extractDocxText(filePath),
+      kind: "text" as const,
+      mimeType: "text/plain",
+    };
+  }
+
+  return null;
 }
 
 function normalizeName(value: string) {
@@ -720,15 +803,34 @@ function makeFileAttachment(filePath: string, content: string, mimeType: string,
   };
 }
 
-function attachmentFromFilePart(part: OpencodeFilePart): FileDropEntry {
+function byteLengthFromDataUrl(url: string) {
+  const [, payload = ""] = url.split(",", 2);
+  const normalized = payload.replace(/\s+/g, "");
+  const padding = normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function attachmentFromFilePart(part: OpencodeFilePart): Promise<FileDropEntry> {
   const localPath =
     part.source?.type === "file" ? part.source.path ?? filePathFromUrl(part.url) : filePathFromUrl(part.url);
   const displayPath = localPath ?? part.filename ?? part.url;
+  let size = 0;
+
+  if (localPath) {
+    size = await stat(localPath).then((entry) => entry.size).catch(() => 0);
+  } else if (part.url.startsWith("data:")) {
+    size = byteLengthFromDataUrl(part.url);
+  }
+
   return {
     id: part.id,
     name: part.filename ?? path.basename(displayPath) ?? "attachment",
     path: displayPath,
-    size: 0,
+    size,
     mimeType: part.mime,
     kind: detectKind(displayPath, part.mime),
     url: part.url,
@@ -740,11 +842,23 @@ function formatToolInput(input: Record<string, unknown>) {
   return JSON.stringify(input, null, 2);
 }
 
-function toolMessageFromPart(part: OpencodeToolPart): ChatMessage {
+type SessionExecutionState = {
+  busy: boolean;
+  blockedOnQuestion: boolean;
+};
+
+function isSessionActivelyRunning(state: SessionExecutionState) {
+  return state.busy || state.blockedOnQuestion;
+}
+
+async function toolMessageFromPart(
+  part: OpencodeToolPart,
+  executionState: SessionExecutionState,
+): Promise<ChatMessage> {
   const input = formatToolInput(part.state.input);
   const lines: string[] = [];
   const attachments =
-    part.state.status === "completed" ? (part.state.attachments ?? []).map(attachmentFromFilePart) : [];
+    part.state.status === "completed" ? await Promise.all((part.state.attachments ?? []).map(attachmentFromFilePart)) : [];
 
   if (input) {
     lines.push("Input:");
@@ -788,7 +902,9 @@ function toolMessageFromPart(part: OpencodeToolPart): ChatMessage {
         ? "done"
         : part.state.status === "error"
           ? "error"
-          : "loading",
+          : isSessionActivelyRunning(executionState)
+            ? "loading"
+            : "paused",
     attachments,
   };
 }
@@ -832,7 +948,10 @@ function messageTimestamp(message: OpencodeSessionMessage) {
   return message.info.time.created;
 }
 
-function convertMessages(messages: OpencodeSessionMessage[]): ChatMessage[] {
+async function convertMessages(
+  messages: OpencodeSessionMessage[],
+  executionState: SessionExecutionState,
+): Promise<ChatMessage[]> {
   const result: ChatMessage[] = [];
 
   for (const message of messages) {
@@ -840,13 +959,15 @@ function convertMessages(messages: OpencodeSessionMessage[]): ChatMessage[] {
       message.info.role === "assistant" &&
       !message.info.error &&
       message.info.time.completed === undefined;
-    const fileAttachments = message.parts
-      .filter((part): part is OpencodeFilePart => part.type === "file")
-      .map(attachmentFromFilePart);
+    const fileAttachments = await Promise.all(
+      message.parts
+        .filter((part): part is OpencodeFilePart => part.type === "file")
+        .map(attachmentFromFilePart),
+    );
 
     for (const part of message.parts) {
       if (part.type === "tool") {
-        result.push(toolMessageFromPart(part));
+        result.push(await toolMessageFromPart(part, executionState));
       }
     }
 
@@ -861,7 +982,14 @@ function convertMessages(messages: OpencodeSessionMessage[]): ChatMessage[] {
       text,
       createdAt: messageTimestamp(message),
       attachments: fileAttachments,
-      status: message.info.error ? "error" : isPendingAssistant ? "loading" : "done",
+      status:
+        message.info.error
+          ? "error"
+          : isPendingAssistant
+            ? isSessionActivelyRunning(executionState)
+              ? "loading"
+              : "paused"
+            : "done",
     });
   }
 
@@ -873,6 +1001,7 @@ export class WorkspaceService {
   private readonly knowledge: KnowledgeService;
   private activeThreadId: string = "";
   private threadSessionMap = new Map<string, string>();
+  private threadSummaryCache = new Map<string, ThreadSummary>();
 
   constructor(private readonly statePath: string) {
     this.knowledge = new KnowledgeService(path.join(path.dirname(statePath), "knowledge"));
@@ -913,8 +1042,60 @@ export class WorkspaceService {
     };
   }
 
+  async getConfigSnapshot(): Promise<AppConfig> {
+    const state = await this.loadState();
+    return state.config;
+  }
+
   async shutdown() {
     await this.runtime.dispose();
+  }
+
+  private rememberThreadSummary(summary: ThreadSummary) {
+    const previous = this.threadSummaryCache.get(summary.id);
+    const normalized = {
+      ...summary,
+      title: formatThreadTitle(summary.title, previous?.title || summary.lastMessage || FALLBACK_THREAD_TITLE),
+    };
+    this.threadSummaryCache.set(summary.id, normalized);
+    return normalized;
+  }
+
+  private syncPersistedThread(state: PersistedWorkspaceState, summary: ThreadSummary | ThreadRecord) {
+    const normalized = this.rememberThreadSummary({
+      id: summary.id,
+      title: summary.title || DEFAULT_THREAD_TITLE,
+      updatedAt: summary.updatedAt,
+      lastMessage: summary.lastMessage || "",
+      messageCount: summary.messageCount,
+      archived: summary.archived,
+      workspaceRoot: summary.workspaceRoot,
+    });
+    const nextThreads = state.threads.filter((thread) => thread.id !== normalized.id);
+    nextThreads.push(normalized);
+    state.threads = sortPersistedThreads(nextThreads);
+    return normalized;
+  }
+
+  private removePersistedThread(state: PersistedWorkspaceState, threadId: string) {
+    state.threads = state.threads.filter((thread) => thread.id !== threadId);
+    if (state.activeThreadId === threadId) {
+      state.activeThreadId = "";
+    }
+  }
+
+  async getThreadProgress(threadId: string) {
+    const state = await this.loadState();
+    const sessionId = this.threadSessionMap.get(threadId) || threadId;
+    const [statuses, questions] = await Promise.all([
+      this.runtime.listSessionStatuses(state.config).catch(() => ({})),
+      this.runtime.listQuestions(state.config).catch(() => []),
+    ]);
+    const sessionStatus = statuses[sessionId];
+    return {
+      busy: sessionStatus?.type === "busy" || sessionStatus?.type === "retry",
+      blockedOnQuestion: questions.some((question) => question.sessionID === sessionId),
+    };
   }
 
   async runSkill(input: SkillRunInput): Promise<SkillRunResult> {
@@ -952,6 +1133,7 @@ export class WorkspaceService {
       skills: patch.skills ?? state.config.skills,
       hiddenCodexSkillIds: patch.hiddenCodexSkillIds ?? state.config.hiddenCodexSkillIds,
       knowledgeBase: patch.knowledgeBase ?? state.config.knowledgeBase,
+      remoteControl: patch.remoteControl ?? state.config.remoteControl,
     };
     await this.saveState(state);
     return await this.bootstrap();
@@ -1042,6 +1224,10 @@ export class WorkspaceService {
   }
 
   async selectFiles(filePaths: string[]) {
+    return await this.prepareAttachments(filePaths);
+  }
+
+  async prepareAttachments(filePaths: string[]) {
     return await Promise.all(filePaths.map((filePath) => this.readSelectedFile(filePath)));
   }
 
@@ -1138,6 +1324,21 @@ export class WorkspaceService {
       };
     }
 
+    try {
+      const inline = await readAttachmentInlineContent(resolvedPath, mimeType, kind);
+      if (inline) {
+        return {
+          title: payload.title ?? fileName,
+          path: resolvedPath,
+          kind: inline.kind,
+          mimeType: inline.mimeType,
+          content: inline.content,
+        };
+      }
+    } catch {
+      // Fall back to the original file preview below if inline extraction fails.
+    }
+
     if (kind === "binary") {
       return {
         title: payload.title ?? fileName,
@@ -1175,7 +1376,94 @@ export class WorkspaceService {
 
   async listThreads(): Promise<ThreadSummary[]> {
     const state = await this.loadState();
+    const previousSnapshot = JSON.stringify({
+      activeThreadId: state.activeThreadId,
+      threads: state.threads,
+    });
+    const managedSessions = await this.runtime.listSessions(state.config).catch(() => null);
+
+    if (!managedSessions) {
+      return sortPersistedThreads(state.threads);
+    }
+
+    if (state.threads.length === 0 && managedSessions.length > 0) {
+      const latestSession = [...managedSessions].sort((left, right) => right.time.updated - left.time.updated)[0];
+      if (latestSession) {
+        this.syncPersistedThread(state, {
+          id: latestSession.id,
+          title: formatThreadTitle(latestSession.title, ""),
+          updatedAt: latestSession.time.updated,
+          lastMessage: "",
+          messageCount: 0,
+          archived: !!latestSession.time.archived,
+          workspaceRoot: latestSession.directory || undefined,
+        });
+        if (!state.activeThreadId) {
+          state.activeThreadId = latestSession.id;
+        }
+      }
+    }
+
+    const managedSessionsById = new Map(managedSessions.map((session) => [session.id, session] as const));
+    const managedSummaries = sortPersistedThreads(
+      state.threads
+        .map((storedThread) => {
+          const session = managedSessionsById.get(storedThread.id);
+          if (!session) {
+            return null;
+          }
+          this.threadSessionMap.set(session.id, session.id);
+          const cached = this.threadSummaryCache.get(session.id);
+          return this.rememberThreadSummary({
+            id: session.id,
+            title: formatThreadTitle(
+              session.title,
+              cached?.title || storedThread.title || storedThread.lastMessage || cached?.lastMessage || "",
+            ),
+            updatedAt: Math.max(session.time.updated, cached?.updatedAt ?? 0, storedThread.updatedAt),
+            lastMessage: cached?.lastMessage || storedThread.lastMessage || "",
+            messageCount: Math.max(cached?.messageCount ?? 0, storedThread.messageCount),
+            archived: !!session.time.archived,
+            workspaceRoot: session.directory || cached?.workspaceRoot || storedThread.workspaceRoot,
+          });
+        })
+        .filter((thread): thread is ThreadSummary => Boolean(thread)),
+    );
+
+    state.threads = managedSummaries;
+    if (state.activeThreadId && !managedSummaries.some((thread) => thread.id === state.activeThreadId)) {
+      state.activeThreadId = "";
+    }
+    if (!this.activeThreadId && state.activeThreadId) {
+      this.activeThreadId = state.activeThreadId;
+    }
+
+    const nextSnapshot = JSON.stringify({
+      activeThreadId: state.activeThreadId,
+      threads: state.threads,
+    });
+    if (previousSnapshot !== nextSnapshot) {
+      await this.saveState(state);
+    }
+
+    return managedSummaries;
     const sessions = await this.runtime.listSessions(state.config).catch(() => []);
+
+    const summaries = sessions.map((session) => {
+      this.threadSessionMap.set(session.id, session.id);
+      const cached = this.threadSummaryCache.get(session.id);
+      return this.rememberThreadSummary({
+        id: session.id,
+        title: session.title || cached?.title || DEFAULT_THREAD_TITLE,
+        updatedAt: Math.max(session.time.updated, cached?.updatedAt ?? 0),
+        lastMessage: cached?.lastMessage || "",
+        messageCount: cached?.messageCount ?? 0,
+        archived: !!session.time.archived,
+        workspaceRoot: session.directory || cached?.workspaceRoot,
+      });
+    });
+
+    return summaries.sort((left, right) => right.updatedAt - left.updatedAt);
 
     return sessions.map((session) => {
       this.threadSessionMap.set(session.id, session.id);
@@ -1195,12 +1483,52 @@ export class WorkspaceService {
     const state = await this.loadState();
     const sessionId = this.threadSessionMap.get(threadId) || threadId;
 
-    const [session, messages] = await Promise.all([
+    const [session, messages, statuses, questions] = await Promise.all([
       this.runtime.getSession(state.config, sessionId),
       this.runtime.listMessages(state.config, sessionId),
+      this.runtime.listSessionStatuses(state.config).catch(() => ({})),
+      this.runtime.listQuestions(state.config).catch(() => []),
     ]);
 
-    const chatMessages = convertMessages(messages);
+    const sessionStatus = statuses[sessionId];
+    const executionState: SessionExecutionState = {
+      busy: sessionStatus?.type === "busy" || sessionStatus?.type === "retry",
+      blockedOnQuestion: questions.some((question) => question.sessionID === sessionId),
+    };
+
+    const chatMessages = await convertMessages(messages, executionState);
+    const derivedTitle = deriveThreadTitleFromMessages(chatMessages);
+    const lastMessage =
+      [...chatMessages]
+        .reverse()
+        .find((message) => message.text.trim())?.text || "";
+    const thread: ThreadRecord = {
+      id: session.id,
+      title: formatThreadTitle(session.title, derivedTitle || lastMessage),
+      updatedAt: session.time.updated,
+      lastMessage,
+      messageCount: chatMessages.length,
+      archived: !!session.time.archived,
+      workspaceRoot: session.directory || undefined,
+      messages: chatMessages,
+    };
+    const previousSnapshot = JSON.stringify({
+      activeThreadId: state.activeThreadId,
+      threads: state.threads,
+    });
+    this.threadSessionMap.set(thread.id, session.id);
+    this.syncPersistedThread(state, thread);
+    if (state.activeThreadId === threadId) {
+      state.activeThreadId = thread.id;
+    }
+    const nextSnapshot = JSON.stringify({
+      activeThreadId: state.activeThreadId,
+      threads: state.threads,
+    });
+    if (previousSnapshot !== nextSnapshot) {
+      await this.saveState(state);
+    }
+    return thread;
 
     return {
       id: session.id,
@@ -1216,12 +1544,15 @@ export class WorkspaceService {
 
   async createThread(title?: string): Promise<BootstrapPayload> {
     const state = await this.loadState();
-    const session = await this.runtime.createSession(state.config, title);
+    const previousSnapshot = JSON.stringify({
+      activeThreadId: state.activeThreadId,
+      threads: state.threads,
+    });
+    const session = await this.runtime.createSession(state.config, title?.trim() || DEFAULT_THREAD_TITLE);
 
     this.threadSessionMap.set(session.id, session.id);
     this.activeThreadId = session.id;
 
-    const threads = await this.listThreads();
     const currentThread: ThreadRecord = {
       id: session.id,
       title: session.title || "新会话",
@@ -1232,22 +1563,86 @@ export class WorkspaceService {
       workspaceRoot: session.directory || undefined,
       messages: [],
     };
+    this.rememberThreadSummary({
+      id: currentThread.id,
+      title: currentThread.title,
+      updatedAt: currentThread.updatedAt,
+      lastMessage: currentThread.lastMessage,
+      messageCount: currentThread.messageCount,
+      archived: currentThread.archived,
+      workspaceRoot: currentThread.workspaceRoot,
+    });
+    state.activeThreadId = currentThread.id;
+    this.syncPersistedThread(state, currentThread);
+    const nextSnapshot = JSON.stringify({
+      activeThreadId: state.activeThreadId,
+      threads: state.threads,
+    });
+    if (previousSnapshot !== nextSnapshot) {
+      await this.saveState(state);
+    }
 
-    return {
-      config: state.config,
-      threads,
-      activeThreadId: session.id,
-      currentThread,
-      availableSkills: [],
-      availableAgents: [],
-      mcpStatuses: [],
-      pendingQuestions: [],
+    return await this.bootstrap();
+  }
+
+  async createBackgroundThread(title?: string): Promise<ThreadRecord> {
+    const state = await this.loadState();
+    const previousSnapshot = JSON.stringify({
+      activeThreadId: state.activeThreadId,
+      threads: state.threads,
+    });
+    const session = await this.runtime.createSession(state.config, title?.trim() || DEFAULT_THREAD_TITLE);
+
+    this.threadSessionMap.set(session.id, session.id);
+
+    const thread: ThreadRecord = {
+      id: session.id,
+      title: session.title || DEFAULT_THREAD_TITLE,
+      updatedAt: session.time.updated,
+      lastMessage: "",
+      messageCount: 0,
+      archived: false,
+      workspaceRoot: session.directory || undefined,
+      messages: [],
     };
+    this.rememberThreadSummary({
+      id: thread.id,
+      title: thread.title,
+      updatedAt: thread.updatedAt,
+      lastMessage: thread.lastMessage,
+      messageCount: thread.messageCount,
+      archived: thread.archived,
+      workspaceRoot: thread.workspaceRoot,
+    });
+    this.syncPersistedThread(state, thread);
+    const nextSnapshot = JSON.stringify({
+      activeThreadId: state.activeThreadId,
+      threads: state.threads,
+    });
+    if (previousSnapshot !== nextSnapshot) {
+      await this.saveState(state);
+    }
+    return thread;
   }
 
   async setActiveThread(threadId: string): Promise<ThreadRecord> {
-    this.activeThreadId = threadId;
-    return await this.getThread(threadId);
+    const thread = await this.getThread(threadId);
+    const state = await this.loadState();
+    const previousSnapshot = JSON.stringify({
+      activeThreadId: state.activeThreadId,
+      threads: state.threads,
+    });
+    this.activeThreadId = thread.id;
+    state.activeThreadId = thread.id;
+    this.syncPersistedThread(state, thread);
+    const nextSnapshot = JSON.stringify({
+      activeThreadId: state.activeThreadId,
+      threads: state.threads,
+    });
+    if (previousSnapshot !== nextSnapshot) {
+      await this.saveState(state);
+    }
+    return thread;
   }
 
   async resetThread(threadId: string): Promise<ThreadRecord> {
@@ -1274,10 +1669,16 @@ export class WorkspaceService {
 
     await this.runtime.deleteSession(state.config, sessionId);
     this.threadSessionMap.delete(threadId);
+    this.threadSummaryCache.delete(threadId);
+    this.removePersistedThread(state, threadId);
 
     if (this.activeThreadId === threadId) {
       this.activeThreadId = "";
     }
+    if (state.activeThreadId === threadId) {
+      state.activeThreadId = "";
+    }
+    await this.saveState(state);
 
     return await this.bootstrap();
   }
@@ -1293,22 +1694,7 @@ export class WorkspaceService {
     const sessionId = this.threadSessionMap.get(threadId) || threadId;
     const attachments = payload.attachments || [];
 
-    // Fire async prompt, then poll until the assistant reply appears
     await this.runtime.promptAsync(state.config, sessionId, payload.message, attachments);
-
-    // Poll for completion (assistant message with completed status)
-    const maxWait = 120_000;
-    const interval = 1_000;
-    const start = Date.now();
-    while (Date.now() - start < maxWait) {
-      const statuses = await this.runtime.listSessionStatuses(state.config).catch(() => ({}));
-      const sessionStatus = statuses[sessionId];
-      if (!sessionStatus || sessionStatus.type === "idle") {
-        break;
-      }
-      await new Promise((r) => setTimeout(r, interval));
-    }
-
     const thread = await this.getThread(threadId);
     return { thread };
   }
@@ -1319,7 +1705,34 @@ export class WorkspaceService {
 
     if (targetThreadId) {
       const sessionId = this.threadSessionMap.get(targetThreadId) || targetThreadId;
-      await this.runtime.abortSession(state.config, sessionId);
+      let forceRestart = false;
+
+      try {
+        await this.runtime.abortSession(state.config, sessionId);
+      } catch {
+        forceRestart = true;
+      }
+
+      if (!forceRestart) {
+        const deadline = Date.now() + 600;
+        while (Date.now() < deadline) {
+          const statuses = await this.runtime.listSessionStatuses(state.config).catch(() => ({}));
+          const sessionStatus = statuses[sessionId];
+          const busy = sessionStatus?.type === "busy" || sessionStatus?.type === "retry";
+          if (!busy) {
+            break;
+          }
+          await delay(50);
+        }
+
+        const statuses = await this.runtime.listSessionStatuses(state.config).catch(() => ({}));
+        const sessionStatus = statuses[sessionId];
+        forceRestart = sessionStatus?.type === "busy" || sessionStatus?.type === "retry";
+      }
+
+      if (forceRestart) {
+        await this.runtime.dispose();
+      }
     }
 
     return await this.bootstrap();
@@ -1347,32 +1760,43 @@ export class WorkspaceService {
   private async readSelectedFile(filePath: string): Promise<FileDropEntry> {
     const mimeType = String(mime.lookup(filePath) || "application/octet-stream");
     const kind = detectKind(filePath, mimeType);
+    const size = await stat(filePath).then((entry) => entry.size).catch(() => 0);
 
     if (kind === "image") {
       const buffer = await readFile(filePath);
       const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
-      return makeFileAttachment(filePath, buffer.toString("base64"), mimeType, dataUrl);
+      return {
+        ...makeFileAttachment(filePath, buffer.toString("base64"), mimeType, dataUrl),
+        kind,
+        size,
+      };
     }
 
     try {
-      const content = await readFile(filePath, "utf8");
-      return {
-        id: randomUUID(),
-        name: path.basename(filePath),
-        path: filePath,
-        size: Buffer.byteLength(content),
-        mimeType,
-      };
+      const inline = await readAttachmentInlineContent(filePath, mimeType, kind);
+      if (inline) {
+        return {
+          id: randomUUID(),
+          name: path.basename(filePath),
+          path: filePath,
+          size,
+          mimeType: inline.mimeType,
+          kind: inline.kind,
+          content: inline.content,
+        };
+      }
     } catch {
-      const buffer = await readFile(filePath);
-      return {
-        id: randomUUID(),
-        name: path.basename(filePath),
-        path: filePath,
-        size: buffer.length,
-        mimeType,
-      };
+      // Fall through to the original file reference when inline extraction fails.
     }
+
+    return {
+      id: randomUUID(),
+      name: path.basename(filePath),
+      path: filePath,
+      size,
+      mimeType,
+      kind,
+    };
   }
 
   private async loadState(): Promise<PersistedWorkspaceState> {
@@ -1382,6 +1806,13 @@ export class WorkspaceService {
     const synced = await syncManagedCodexSkills(this.statePath, normalized);
     if (JSON.stringify(state) !== JSON.stringify(synced)) {
       await this.saveState(synced);
+    }
+    if (!this.activeThreadId && synced.activeThreadId) {
+      this.activeThreadId = synced.activeThreadId;
+    }
+    for (const thread of synced.threads) {
+      this.threadSessionMap.set(thread.id, thread.id);
+      this.threadSummaryCache.set(thread.id, thread);
     }
     return synced;
   }

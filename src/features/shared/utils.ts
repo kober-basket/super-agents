@@ -29,6 +29,7 @@ export function normalizeDroppedFiles(fileList: FileList): FileDropEntry[] {
 }
 
 export function fileKind(file: FileDropEntry): PreviewKind {
+  if (file.kind) return file.kind;
   if (file.dataUrl || file.url?.startsWith("data:image/") || file.mimeType.startsWith("image/")) {
     return "image";
   }
@@ -39,6 +40,7 @@ export function fileKind(file: FileDropEntry): PreviewKind {
     return "code";
   }
   if (file.name.match(/\.(txt|log|out|err)$/i)) return "text";
+  if (file.mimeType.startsWith("text/")) return "text";
   return "binary";
 }
 

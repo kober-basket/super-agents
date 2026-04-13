@@ -38,6 +38,11 @@ export const workspaceClient = {
   uninstallSkill: (skillId: string) => window.desktopAgent.uninstallSkill(skillId),
   updateConfig: (patch: Parameters<typeof window.desktopAgent.updateConfig>[0]) =>
     window.desktopAgent.updateConfig(patch),
+  getRemoteControlStatus: () => window.desktopAgent.getRemoteControlStatus(),
+  startWechatLogin: () => window.desktopAgent.startWechatLogin(),
+  waitWechatLogin: (payload: Parameters<typeof window.desktopAgent.waitWechatLogin>[0]) =>
+    window.desktopAgent.waitWechatLogin(payload),
+  disconnectWechat: () => window.desktopAgent.disconnectWechat(),
   fetchProviderModels: (payload: Parameters<typeof window.desktopAgent.fetchProviderModels>[0]) =>
     window.desktopAgent.fetchProviderModels(payload),
   inspectMcpServer: (payload: Parameters<typeof window.desktopAgent.inspectMcpServer>[0]) =>
@@ -46,6 +51,7 @@ export const workspaceClient = {
     window.desktopAgent.debugMcpTool(payload),
   listTools: () => window.desktopAgent.listTools(),
   selectFiles: () => window.desktopAgent.selectFiles(),
+  prepareAttachments: (filePaths: string[]) => window.desktopAgent.prepareAttachments(filePaths),
   selectWorkspaceFolder: () => window.desktopAgent.selectWorkspaceFolder(),
   setThreadWorkspace: (threadId: string, workspaceRoot: string) =>
     window.desktopAgent.setThreadWorkspace(threadId, workspaceRoot),

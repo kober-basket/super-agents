@@ -7,7 +7,6 @@ import {
   Check,
   ChevronDown,
   FolderOpen,
-  LoaderCircle,
   PanelRightClose,
   PanelRightOpen,
   Paperclip,
@@ -69,7 +68,7 @@ interface ChatViewProps {
   onComposerChange: (value: string) => void;
   onCompositionChange?: (composing: boolean) => void;
   onDragActiveChange: (active: boolean) => void;
-  onFilesDropped: (files: FileDropEntry[]) => void;
+  onFilesDropped: (files: FileDropEntry[]) => void | Promise<void>;
   onOpenFile: (file: FileDropEntry) => void;
   onOpenKnowledge: () => void;
   onOpenLink: (url: string) => void;
@@ -133,8 +132,9 @@ export function ChatView({
   const knowledgePickerRef = useRef<HTMLDivElement>(null);
   const hasMessages = Boolean(activeThread?.messages.length);
   const hasAvailableModel = Boolean(composerModelId && selectableModels.length > 0);
+  const canStop = sending || threadBusy;
   const canSend =
-    hasAvailableModel && !threadBusy && !composing && !sending && (Boolean(composer.trim()) || attachments.length > 0);
+    hasAvailableModel && !canStop && !composing && (Boolean(composer.trim()) || attachments.length > 0);
   const selectedKnowledgeBases = useMemo(
     () => knowledgeBases.filter((base) => knowledgeConfig.selectedBaseIds.includes(base.id)),
     [knowledgeBases, knowledgeConfig.selectedBaseIds],
@@ -312,7 +312,7 @@ export function ChatView({
                     return;
                   }
 
-                  if (event.key === "Enter" && !event.shiftKey && hasAvailableModel && !threadBusy && !sending) {
+                  if (event.key === "Enter" && !event.shiftKey && hasAvailableModel && !canStop) {
                     event.preventDefault();
                     void onSend();
                   }
@@ -322,7 +322,7 @@ export function ChatView({
                   onDragActiveChange(false);
                   const files = normalizeDroppedFiles(event.dataTransfer.files);
                   if (files.length > 0) {
-                    onFilesDropped(files);
+                    void onFilesDropped(files);
                   }
                 }}
                 onDragOver={(event) => {
@@ -457,10 +457,10 @@ export function ChatView({
               <div className="toolbar-right">
                 <button
                   className="send-button"
-                  onClick={() => void (threadBusy ? onStop() : onSend())}
-                  disabled={threadBusy ? false : !canSend}
+                  onClick={() => void (canStop ? onStop() : onSend())}
+                  disabled={canStop ? false : !canSend}
                   title={
-                    threadBusy
+                    canStop
                       ? "停止当前运行"
                       : !hasAvailableModel
                         ? "请先配置并启用可用模型"
@@ -470,7 +470,7 @@ export function ChatView({
                   }
                   type="button"
                 >
-                  {sending ? <LoaderCircle size={16} className="spin" /> : threadBusy ? <Square size={16} /> : <ArrowUp size={16} />}
+                  {canStop ? <Square size={16} /> : <ArrowUp size={16} />}
                 </button>
               </div>
             </div>

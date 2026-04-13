@@ -8,6 +8,7 @@ import {
   FileSearch,
   LoaderCircle,
   Sparkles,
+  Square,
   Wrench,
   X,
 } from "lucide-react";
@@ -118,6 +119,7 @@ function summarizeToolMessage(message: ChatMessage, questionRequest?: PendingQue
 
   if (!normalized) {
     if (message.status === "loading") return "正在执行...";
+    if (message.status === "paused") return "已停止";
     if (message.status === "error") return "执行失败";
     return "查看详情";
   }
@@ -142,6 +144,14 @@ function toolStatusMeta(
       label: "运行中",
       icon: <LoaderCircle size={12} className="spin" />,
       tone: "loading",
+    };
+  }
+
+  if (message.status === "paused") {
+    return {
+      label: "已停止",
+      icon: <Square size={11} />,
+      tone: "default",
     };
   }
 
@@ -296,6 +306,13 @@ export function MessageBlock({
           </div>
         ) : null}
 
+        {message.role === "assistant" && message.status === "paused" && !message.text ? (
+          <div className="message-loading">
+            <Square size={12} />
+            <span>已停止</span>
+          </div>
+        ) : null}
+
         {renderedText ? (
           <div
             className={clsx("message-text", message.role, message.status === "error" && "error")}
@@ -379,7 +396,7 @@ export function MessageBlock({
                         {typeof activeKnowledge.metadata.source === "string"
                           ? activeKnowledge.metadata.source
                           : "知识库片段"}
-                        {" 路 "}
+                        {" · "}
                         相似度 {activeKnowledge.score.toFixed(3)}
                       </span>
                     </div>

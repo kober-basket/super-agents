@@ -20,12 +20,15 @@ import type {
   McpToolDebugResult,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
+  RemoteControlStatus,
   QuestionRejectInput,
   QuestionReplyInput,
   SendMessageInput,
   SendMessageResult,
   SkillRunInput,
   SkillRunResult,
+  WechatLoginStartResult,
+  WechatLoginWaitResult,
   ThreadRecord,
   ThreadSummary,
   WorkspaceToolCatalog,
@@ -79,6 +82,14 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:uninstall-skill", skillId) as Promise<BootstrapPayload>,
   updateConfig: (patch: Partial<AppConfig>) =>
     ipcRenderer.invoke("desktop:update-config", patch) as Promise<BootstrapPayload>,
+  getRemoteControlStatus: () =>
+    ipcRenderer.invoke("desktop:get-remote-control-status") as Promise<RemoteControlStatus>,
+  startWechatLogin: () =>
+    ipcRenderer.invoke("desktop:start-wechat-login") as Promise<WechatLoginStartResult>,
+  waitWechatLogin: (payload: { sessionKey: string; timeoutMs?: number }) =>
+    ipcRenderer.invoke("desktop:wait-wechat-login", payload) as Promise<WechatLoginWaitResult>,
+  disconnectWechat: () =>
+    ipcRenderer.invoke("desktop:disconnect-wechat") as Promise<RemoteControlStatus>,
   fetchProviderModels: (payload: ModelProviderFetchInput) =>
     ipcRenderer.invoke("desktop:fetch-provider-models", payload) as Promise<ModelProviderFetchResult>,
   inspectMcpServer: (payload: McpInspectInput) =>
@@ -88,6 +99,8 @@ const desktopAgent = {
   listTools: () =>
     ipcRenderer.invoke("desktop:list-tools") as Promise<WorkspaceToolCatalog>,
   selectFiles: () => ipcRenderer.invoke("desktop:select-files") as Promise<FileDropEntry[]>,
+  prepareAttachments: (filePaths: string[]) =>
+    ipcRenderer.invoke("desktop:prepare-attachments", filePaths) as Promise<FileDropEntry[]>,
   selectWorkspaceFolder: () => ipcRenderer.invoke("desktop:select-workspace-folder") as Promise<string>,
   setThreadWorkspace: (threadId: string, workspaceRoot: string) =>
     ipcRenderer.invoke("desktop:set-thread-workspace", { threadId, workspaceRoot }) as Promise<BootstrapPayload>,

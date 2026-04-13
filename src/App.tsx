@@ -17,6 +17,7 @@ import type {
   KnowledgeBaseSummary,
   McpServerConfig,
   ModelProviderConfig,
+  RemoteControlStatus,
   SkillConfig,
   WorkspaceTool,
 } from "./types";
@@ -30,6 +31,7 @@ import { KnowledgeView } from "./features/knowledge/KnowledgeView";
 import { AppTitleBar } from "./features/navigation/AppTitleBar";
 import { AssistantSettings } from "./features/settings/AssistantSettings";
 import { AppearanceSettings } from "./features/settings/AppearanceSettings";
+import { RemoteControlSettings } from "./features/settings/RemoteControlSettings";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
 import { useSessionController } from "./features/session/useSessionController";
@@ -86,6 +88,9 @@ export default function App() {
   const [providerRefreshingId, setProviderRefreshingId] = useState<string | null>(null);
   const [selectedModelProviderId, setSelectedModelProviderId] = useState("");
   const [windowState, setWindowState] = useState<DesktopWindowState | null>(null);
+  const [remoteStatus, setRemoteStatus] = useState<RemoteControlStatus | null>(null);
+  const [remoteStatusRefreshing, setRemoteStatusRefreshing] = useState(false);
+  const [wechatConnecting, setWechatConnecting] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     readStoredWidth(SIDEBAR_WIDTH_STORAGE_KEY, SIDEBAR_DEFAULT_WIDTH),
   );
@@ -105,6 +110,7 @@ export default function App() {
     activeSummary,
     activeThread,
     activeThreadId,
+    activeThreadStopping,
     activeThreads,
     applySuggestion,
     appendAttachments,
@@ -319,6 +325,19 @@ export default function App() {
 
     void refreshKnowledgeView({ silent: true });
   }, [knowledgeRefreshing, view]);
+
+  useEffect(() => {
+    if (view !== "settings" || settingsSection !== "remote-control") {
+      return undefined;
+    }
+
+    void refreshRemoteControlStatus({ silent: true });
+    const timer = window.setInterval(() => {
+      void refreshRemoteControlStatus({ silent: true });
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, [settingsSection, view]);
 
   useEffect(() => {
     if (config.modelProviders.length === 0) {
@@ -731,6 +750,81 @@ export default function App() {
     }
   }
 
+  async function refreshRemoteControlStatus(options?: { silent?: boolean }) {
+    setRemoteStatusRefreshing(true);
+    try {
+      const payload = await workspaceClient.getRemoteControlStatus();
+      setRemoteStatus(payload);
+      if (!options?.silent) {
+        setToast("远程控制状态已刷新");
+      }
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "刷新远程控制状态失败");
+    } finally {
+      setRemoteStatusRefreshing(false);
+    }
+  }
+
+  function updateWechatRemoteControl(enabled: boolean) {
+    void commitConfig(
+      {
+        ...cloneConfig(config),
+        remoteControl: {
+          ...cloneConfig(config).remoteControl,
+          wechat: {
+            ...cloneConfig(config).remoteControl.wechat,
+            enabled,
+          },
+        },
+      },
+      enabled ? "微信远程控制已启用" : "微信远程控制已停用",
+    );
+    window.setTimeout(() => {
+      void refreshRemoteControlStatus({ silent: true });
+    }, 300);
+  }
+
+  async function connectWechatRemoteControl() {
+    setWechatConnecting(true);
+    try {
+      const start = await workspaceClient.startWechatLogin();
+      setRemoteStatus((current) =>
+        current
+          ? {
+              ...current,
+              wechat: {
+                ...current.wechat,
+                pendingLogin: true,
+                pendingLoginQrCodeUrl: start.qrCodeUrl,
+              },
+            }
+          : current,
+      );
+      await refreshRemoteControlStatus({ silent: true });
+      const result = await workspaceClient.waitWechatLogin({
+        sessionKey: start.sessionKey,
+        timeoutMs: 480000,
+      });
+      await refreshRemoteControlStatus({ silent: true });
+      setToast(result.connected ? "微信连接成功" : result.message || "微信连接未完成");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "微信连接失败");
+      await refreshRemoteControlStatus({ silent: true });
+    } finally {
+      setWechatConnecting(false);
+    }
+  }
+
+  async function disconnectWechatRemoteControl() {
+    try {
+      await workspaceClient.disconnectWechat();
+      await refreshRemoteControlStatus({ silent: true });
+      setToast("微信连接已断开");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "断开微信失败");
+    }
+  }
+
   async function createKnowledgeBase(name: string, description: string) {
     const trimmedName = name.trim();
     const trimmedDescription = description.trim();
@@ -929,7 +1023,9 @@ export default function App() {
             : `${activeSidebarWidth}px minmax(0, 1fr)`,
         }
       : undefined;
-  const threadBusy = !drafting && (activeThread?.messages.some((message) => message.status === "loading") ?? false);
+  const threadBusy =
+    !drafting &&
+    (activeThreadStopping || activeThread?.messages.some((message) => message.status === "loading") || false);
   const settingsStats = {
     threadCount: activeThreads.length + archivedThreads.length,
     providerCount: config.modelProviders.length,
@@ -995,6 +1091,21 @@ export default function App() {
           onSetDefaultProviderModel={setDefaultProviderModel}
           onToggleProviderModel={toggleProviderModel}
           onUpdateModelProvider={updateModelProvider}
+        />
+      );
+    }
+
+    if (settingsSection === "remote-control") {
+      return (
+        <RemoteControlSettings
+          remoteControl={config.remoteControl}
+          remoteStatus={remoteStatus}
+          refreshing={remoteStatusRefreshing}
+          wechatConnecting={wechatConnecting}
+          onRefresh={refreshRemoteControlStatus}
+          onToggleWechatEnabled={updateWechatRemoteControl}
+          onStartWechatLogin={connectWechatRemoteControl}
+          onDisconnectWechat={disconnectWechatRemoteControl}
         />
       );
     }
@@ -1153,10 +1264,10 @@ export default function App() {
           />
         ) : (
           <PrimarySidebar
-            activeThreadId={activeThreadId}
+            activeThreadId={view === "chat" ? activeThreadId : ""}
             activeThreads={activeThreads}
             archivedThreads={archivedThreads}
-            busyThreadId={sessionStatus.openingThreadId ?? sessionStatus.mutatingThreadId}
+            busyThreadId={sessionStatus.mutatingThreadId}
             creatingThread={sessionStatus.creatingThread}
             view={view}
             workspaceIssue={workspaceIssue}
