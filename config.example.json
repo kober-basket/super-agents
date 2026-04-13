@@ -2,6 +2,7 @@
   "opencodeRoot": "F:/work/github/opencode",
   "bridgeUrl": "",
   "environment": "local",
+  "defaultAgentMode": "general",
   "activeModelId": "iflyrpa::azure/gpt-5-mini",
   "contextTier": "high",
   "appearance": {
@@ -52,5 +53,33 @@
     }
   ],
   "mcpServers": [],
-  "skills": []
+  "skills": [],
+  "remoteControl": {
+    "dingtalk": {
+      "enabled": false,
+      "clientId": "",
+      "clientSecret": ""
+    },
+    "feishu": {
+      "enabled": false,
+      "appId": "",
+      "appSecret": "",
+      "domain": "feishu"
+    },
+    "wechat": {
+      "enabled": false,
+      "baseUrl": "https://ilinkai.weixin.qq.com",
+      "cdnBaseUrl": "https://novac2c.cdn.weixin.qq.com/c2c",
+      "botToken": "",
+      "accountId": "",
+      "userId": "",
+      "connectedAt": null
+    },
+    "wecom": {
+      "enabled": false,
+      "botId": "",
+      "secret": "",
+      "websocketUrl": "wss://openws.work.weixin.qq.com"
+    }
+  }
 }

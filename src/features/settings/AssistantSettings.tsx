@@ -15,17 +15,19 @@ import {
 } from "lucide-react";
 
 import { compareModelGroupNames, enrichProviderModel } from "../../lib/model-metadata";
-import type { ModelProviderConfig, RuntimeModelOption } from "../../types";
+import type { AppConfig, ModelProviderConfig, RuntimeModelOption } from "../../types";
 import { ProviderModelPickerModal } from "./ProviderModelPickerModal";
 
 interface AssistantSettingsProps {
   activeModel: RuntimeModelOption | null;
   composerModelId: string;
+  defaultAgentMode: AppConfig["defaultAgentMode"];
   modelProviders: ModelProviderConfig[];
   providerRefreshingId: string | null;
   selectedModelProviderId: string;
   selectableModels: RuntimeModelOption[];
   onAddModelProvider: () => void;
+  onDefaultAgentModeChange: (mode: AppConfig["defaultAgentMode"]) => void;
   onModelChange: (modelId: string) => void;
   onRefreshProviderModels: (providerId: string) => void | Promise<void>;
   onRemoveModelProvider: (providerId: string) => void;
@@ -53,11 +55,13 @@ function tagItems(model: EnrichedProviderModel) {
 export function AssistantSettings({
   activeModel,
   composerModelId,
+  defaultAgentMode,
   modelProviders,
   providerRefreshingId,
   selectedModelProviderId,
   selectableModels,
   onAddModelProvider,
+  onDefaultAgentModeChange,
   onModelChange,
   onRefreshProviderModels,
   onRemoveModelProvider,
@@ -143,6 +147,32 @@ export function AssistantSettings({
           添加提供商
         </button>
       </header>
+
+      <div className="settings-block">
+        <div className="settings-stage-grid">
+          <article className="panel-card form-card settings-surface">
+            <h3>默认助手模式</h3>
+            <label>
+              <span>新对话默认角色</span>
+              <div className="select-shell field-select full-width">
+                <select
+                  value={defaultAgentMode}
+                  onChange={(event) =>
+                    onDefaultAgentModeChange(event.target.value as AppConfig["defaultAgentMode"])
+                  }
+                >
+                  <option value="general">通用办公助手</option>
+                  <option value="build">编程助手</option>
+                </select>
+                <ChevronDown size={16} />
+              </div>
+            </label>
+            <p className="field-note">
+              选择“通用办公助手”后，新消息会默认按日常办公、写作、总结和资料处理来响应。
+            </p>
+          </article>
+        </div>
+      </div>
 
       <div className="settings-block">
         {modelProviders.length > 0 ? (

@@ -16,8 +16,12 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.18.2",
+    "@larksuiteoapi/node-sdk": "^1.60.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@wecom/aibot-node-sdk": "^1.0.6",
     "clsx": "^2.1.1",
+    "dingtalk-stream-sdk-nodejs": "^2.0.4",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.511.0",
     "mammoth": "^1.12.0",

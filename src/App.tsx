@@ -1,4 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy } from "react";
 import clsx from "clsx";
 import {
   createRuntimeModelId,
@@ -23,20 +24,42 @@ import type {
 } from "./types";
 import { workspaceClient } from "./services/workspace-client";
 import { ChatView } from "./features/chat/ChatView";
-import { PreviewPane } from "./features/chat/PreviewPane";
 import { PrimarySidebar } from "./features/navigation/PrimarySidebar";
-import { SkillsView } from "./features/skills/SkillsView";
-import { ToolsView } from "./features/tools/ToolsView";
-import { KnowledgeView } from "./features/knowledge/KnowledgeView";
 import { AppTitleBar } from "./features/navigation/AppTitleBar";
-import { AssistantSettings } from "./features/settings/AssistantSettings";
-import { AppearanceSettings } from "./features/settings/AppearanceSettings";
-import { RemoteControlSettings } from "./features/settings/RemoteControlSettings";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
 import { useSessionController } from "./features/session/useSessionController";
 import { cloneConfig, matchQuery } from "./features/session/utils";
 import { fileKind, sanitizeMcpName } from "./features/shared/utils";
+
+const PreviewPane = lazy(async () => {
+  const module = await import("./features/chat/PreviewPane");
+  return { default: module.PreviewPane };
+});
+const SkillsView = lazy(async () => {
+  const module = await import("./features/skills/SkillsView");
+  return { default: module.SkillsView };
+});
+const ToolsView = lazy(async () => {
+  const module = await import("./features/tools/ToolsView");
+  return { default: module.ToolsView };
+});
+const KnowledgeView = lazy(async () => {
+  const module = await import("./features/knowledge/KnowledgeView");
+  return { default: module.KnowledgeView };
+});
+const AssistantSettings = lazy(async () => {
+  const module = await import("./features/settings/AssistantSettings");
+  return { default: module.AssistantSettings };
+});
+const AppearanceSettings = lazy(async () => {
+  const module = await import("./features/settings/AppearanceSettings");
+  return { default: module.AppearanceSettings };
+});
+const RemoteControlSettings = lazy(async () => {
+  const module = await import("./features/settings/RemoteControlSettings");
+  return { default: module.RemoteControlSettings };
+});
 
 function uid() {
   return Math.random().toString(36).slice(2);
@@ -56,6 +79,7 @@ const PREVIEW_PANE_MIN_WIDTH = 300;
 const PREVIEW_PANE_MAX_WIDTH = 640;
 
 type ResizeTarget = "sidebar" | "settings-sidebar" | "preview";
+type RemoteControlChannelKey = keyof AppConfig["remoteControl"];
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -69,6 +93,14 @@ function readStoredWidth(key: string, fallback: number) {
   const rawValue = window.localStorage.getItem(key);
   const parsedValue = rawValue ? Number.parseInt(rawValue, 10) : Number.NaN;
   return Number.isFinite(parsedValue) ? parsedValue : fallback;
+}
+
+function LazyViewFallback() {
+  return (
+    <div className="empty-panel">
+      <strong>Loading...</strong>
+    </div>
+  );
 }
 
 export default function App() {
@@ -110,7 +142,6 @@ export default function App() {
     activeSummary,
     activeThread,
     activeThreadId,
-    activeThreadStopping,
     activeThreads,
     applySuggestion,
     appendAttachments,
@@ -765,23 +796,97 @@ export default function App() {
     }
   }
 
-  function updateWechatRemoteControl(enabled: boolean) {
-    void commitConfig(
-      {
-        ...cloneConfig(config),
-        remoteControl: {
-          ...cloneConfig(config).remoteControl,
-          wechat: {
-            ...cloneConfig(config).remoteControl.wechat,
-            enabled,
-          },
-        },
+  function buildRemoteControlConfig<K extends RemoteControlChannelKey>(
+    channel: K,
+    patch: Partial<AppConfig["remoteControl"][K]>,
+  ) {
+    const nextConfig = cloneConfig(config);
+    nextConfig.remoteControl = {
+      ...nextConfig.remoteControl,
+      [channel]: {
+        ...nextConfig.remoteControl[channel],
+        ...patch,
       },
-      enabled ? "微信远程控制已启用" : "微信远程控制已停用",
-    );
+    };
+    return nextConfig;
+  }
+
+  function updateRemoteControlChannel<K extends RemoteControlChannelKey>(
+    channel: K,
+    patch: Partial<AppConfig["remoteControl"][K]>,
+    options?: {
+      immediate?: boolean;
+      toast?: string;
+    },
+  ) {
+    const nextConfig = buildRemoteControlConfig(channel, patch);
+    if (options?.immediate) {
+      void commitConfig(nextConfig, options.toast || "远程控制配置已更新");
+    } else {
+      scheduleConfigPersist(nextConfig);
+    }
+
     window.setTimeout(() => {
       void refreshRemoteControlStatus({ silent: true });
     }, 300);
+  }
+
+  function updateWechatRemoteControl(enabled: boolean) {
+    updateRemoteControlChannel(
+      "wechat",
+      {
+        enabled,
+      },
+      {
+        immediate: true,
+        toast: enabled ? "微信远程控制已启用" : "微信远程控制已停用",
+      },
+    );
+  }
+
+  function updateDingtalkRemoteControl(
+    patch: Partial<AppConfig["remoteControl"]["dingtalk"]>,
+    options?: { immediate?: boolean },
+  ) {
+    updateRemoteControlChannel("dingtalk", patch, {
+      immediate: options?.immediate,
+      toast:
+        patch.enabled === true
+          ? "钉钉远程控制已启用"
+          : patch.enabled === false
+            ? "钉钉远程控制已停用"
+            : undefined,
+    });
+  }
+
+  function updateFeishuRemoteControl(
+    patch: Partial<AppConfig["remoteControl"]["feishu"]>,
+    options?: { immediate?: boolean },
+  ) {
+    updateRemoteControlChannel("feishu", patch, {
+      immediate: options?.immediate,
+      toast:
+        patch.enabled === true
+          ? "飞书远程控制已启用"
+          : patch.enabled === false
+            ? "飞书远程控制已停用"
+            : undefined,
+    });
+  }
+
+  function updateWecomRemoteControl(
+    patch: Partial<AppConfig["remoteControl"]["wecom"]>,
+    options?: { immediate?: boolean },
+  ) {
+    updateRemoteControlChannel("wecom", patch, {
+      immediate: options?.immediate,
+      toast:
+        patch.enabled === true
+          ? "企微远程控制已启用"
+          : patch.enabled === false
+            ? "企微远程控制已停用"
+            : undefined,
+    });
   }
 
   async function connectWechatRemoteControl() {
@@ -1023,9 +1128,7 @@ export default function App() {
             : `${activeSidebarWidth}px minmax(0, 1fr)`,
         }
       : undefined;
-  const threadBusy =
-    !drafting &&
-    (activeThreadStopping || activeThread?.messages.some((message) => message.status === "loading") || false);
+  const threadBusy = !drafting && (activeThread?.messages.some((message) => message.status === "loading") ?? false);
   const settingsStats = {
     threadCount: activeThreads.length + archivedThreads.length,
     providerCount: config.modelProviders.length,
@@ -1066,47 +1169,58 @@ export default function App() {
   function renderSettingsView() {
     if (settingsSection === "appearance") {
       return (
-        <AppearanceSettings
-          appearance={config.appearance}
-          onThemeChange={updateAppearanceTheme}
-        />
+        <Suspense fallback={<LazyViewFallback />}>
+          <AppearanceSettings
+            appearance={config.appearance}
+            onThemeChange={updateAppearanceTheme}
+          />
+        </Suspense>
       );
     }
 
     if (settingsSection === "assistant") {
       return (
-        <AssistantSettings
-          activeModel={activeModel}
-          composerModelId={composerModelId}
-          modelProviders={config.modelProviders}
-          providerRefreshingId={providerRefreshingId}
-          selectedModelProviderId={selectedModelProviderId}
-          selectableModels={selectableModels}
-          onAddModelProvider={addModelProvider}
-          onModelChange={(value) => updateConfigField("activeModelId", value)}
-          onRefreshProviderModels={refreshProviderModels}
-          onRemoveModelProvider={removeModelProvider}
-          onSelectProvider={setSelectedModelProviderId}
-          onSetProviderModelsEnabled={setProviderModelsEnabled}
-          onSetDefaultProviderModel={setDefaultProviderModel}
-          onToggleProviderModel={toggleProviderModel}
-          onUpdateModelProvider={updateModelProvider}
-        />
+        <Suspense fallback={<LazyViewFallback />}>
+          <AssistantSettings
+            activeModel={activeModel}
+            composerModelId={composerModelId}
+            defaultAgentMode={config.defaultAgentMode}
+            modelProviders={config.modelProviders}
+            providerRefreshingId={providerRefreshingId}
+            selectedModelProviderId={selectedModelProviderId}
+            selectableModels={selectableModels}
+            onAddModelProvider={addModelProvider}
+            onDefaultAgentModeChange={(value) => updateConfigField("defaultAgentMode", value)}
+            onModelChange={(value) => updateConfigField("activeModelId", value)}
+            onRefreshProviderModels={refreshProviderModels}
+            onRemoveModelProvider={removeModelProvider}
+            onSelectProvider={setSelectedModelProviderId}
+            onSetProviderModelsEnabled={setProviderModelsEnabled}
+            onSetDefaultProviderModel={setDefaultProviderModel}
+            onToggleProviderModel={toggleProviderModel}
+            onUpdateModelProvider={updateModelProvider}
+          />
+        </Suspense>
       );
     }
 
     if (settingsSection === "remote-control") {
       return (
-        <RemoteControlSettings
-          remoteControl={config.remoteControl}
-          remoteStatus={remoteStatus}
-          refreshing={remoteStatusRefreshing}
-          wechatConnecting={wechatConnecting}
-          onRefresh={refreshRemoteControlStatus}
-          onToggleWechatEnabled={updateWechatRemoteControl}
-          onStartWechatLogin={connectWechatRemoteControl}
-          onDisconnectWechat={disconnectWechatRemoteControl}
-        />
+        <Suspense fallback={<LazyViewFallback />}>
+          <RemoteControlSettings
+            remoteControl={config.remoteControl}
+            remoteStatus={remoteStatus}
+            refreshing={remoteStatusRefreshing}
+            wechatConnecting={wechatConnecting}
+            onRefresh={refreshRemoteControlStatus}
+            onToggleWechatEnabled={updateWechatRemoteControl}
+            onStartWechatLogin={connectWechatRemoteControl}
+            onDisconnectWechat={disconnectWechatRemoteControl}
+            onUpdateDingtalk={updateDingtalkRemoteControl}
+            onUpdateFeishu={updateFeishuRemoteControl}
+            onUpdateWecom={updateWecomRemoteControl}
+          />
+        </Suspense>
       );
     }
   }
@@ -1114,75 +1228,81 @@ export default function App() {
   function renderMainView() {
     if (view === "skills") {
       return (
-        <SkillsView
-          filteredInstalledSkills={filteredInstalledSkills}
-          filteredReferenceSkills={filteredReferenceSkills}
-          hasResults={hasSkillResults}
-          skillQuery={skillQuery}
-          skillsRefreshing={skillsRefreshing}
-          onPrepareSkillDraft={prepareSkillDraft}
-          onRefresh={refreshSkillsView}
-          onSkillQueryChange={setSkillQuery}
-          onUninstallSkill={uninstallSkill}
-          onUpdateInstalledSkill={updateInstalledSkill}
-          onUseReferenceSkill={useReferenceSkill}
-        />
+        <Suspense fallback={<LazyViewFallback />}>
+          <SkillsView
+            filteredInstalledSkills={filteredInstalledSkills}
+            filteredReferenceSkills={filteredReferenceSkills}
+            hasResults={hasSkillResults}
+            skillQuery={skillQuery}
+            skillsRefreshing={skillsRefreshing}
+            onPrepareSkillDraft={prepareSkillDraft}
+            onRefresh={refreshSkillsView}
+            onSkillQueryChange={setSkillQuery}
+            onUninstallSkill={uninstallSkill}
+            onUpdateInstalledSkill={updateInstalledSkill}
+            onUseReferenceSkill={useReferenceSkill}
+          />
+        </Suspense>
       );
     }
 
     if (view === "tools") {
       return (
-        <ToolsView
-          mcpAdvancedOpen={mcpAdvancedOpen}
-          mcpRefreshing={mcpRefreshing}
-          mcpServers={config.mcpServers}
-          mcpStatusMap={mcpStatusMap}
-          tools={tools}
-          toolsRefreshing={toolsRefreshing}
-          onAddMcpServer={addMcpServer}
-          onDebugTool={(server, toolName, argumentsJson) =>
-            workspaceClient.debugMcpTool({
-              server,
-              workspaceRoot: config.opencodeRoot,
-              toolName,
-              argumentsJson,
-            })
-          }
-          onInspectServer={(server) =>
-            workspaceClient.inspectMcpServer({
-              server,
-              workspaceRoot: config.opencodeRoot,
-            })
-          }
-          onRefresh={refreshToolsView}
-          onRefreshMcp={refreshMcpView}
-          onRemoveMcpServer={removeMcpServer}
-          onToggleAdvanced={() => setMcpAdvancedOpen((value) => !value)}
-          onUpdateMcp={updateMcp}
-        />
+        <Suspense fallback={<LazyViewFallback />}>
+          <ToolsView
+            mcpAdvancedOpen={mcpAdvancedOpen}
+            mcpRefreshing={mcpRefreshing}
+            mcpServers={config.mcpServers}
+            mcpStatusMap={mcpStatusMap}
+            tools={tools}
+            toolsRefreshing={toolsRefreshing}
+            onAddMcpServer={addMcpServer}
+            onDebugTool={(server, toolName, argumentsJson) =>
+              workspaceClient.debugMcpTool({
+                server,
+                workspaceRoot: config.opencodeRoot,
+                toolName,
+                argumentsJson,
+              })
+            }
+            onInspectServer={(server) =>
+              workspaceClient.inspectMcpServer({
+                server,
+                workspaceRoot: config.opencodeRoot,
+              })
+            }
+            onRefresh={refreshToolsView}
+            onRefreshMcp={refreshMcpView}
+            onRemoveMcpServer={removeMcpServer}
+            onToggleAdvanced={() => setMcpAdvancedOpen((value) => !value)}
+            onUpdateMcp={updateMcp}
+          />
+        </Suspense>
       );
     }
 
     if (view === "knowledge") {
       return (
-        <KnowledgeView
-          config={config.knowledgeBase}
-          modelProviders={config.modelProviders}
-          knowledgeBases={knowledgeBases}
-          knowledgeRefreshing={knowledgeRefreshing}
-          onRefresh={refreshKnowledgeView}
-          onChangeEmbeddingProvider={(embeddingProviderId) => updateKnowledgeBaseConfig({ embeddingProviderId })}
-          onChangeEmbeddingModel={(embeddingModel) => updateKnowledgeBaseConfig({ embeddingModel })}
-          onToast={(message) => setToast(message)}
-          onCreateKnowledgeBase={createKnowledgeBase}
-          onDeleteKnowledgeBase={deleteKnowledgeBase}
-          onAddKnowledgeFiles={addKnowledgeFiles}
-          onAddKnowledgeDirectory={addKnowledgeDirectory}
-          onAddKnowledgeNote={addKnowledgeNote}
-          onAddKnowledgeUrl={addKnowledgeUrl}
-          onAddKnowledgeWebsite={addKnowledgeWebsite}
-          onDeleteKnowledgeItem={deleteKnowledgeItem}
-        />
+        <Suspense fallback={<LazyViewFallback />}>
+          <KnowledgeView
+            config={config.knowledgeBase}
+            modelProviders={config.modelProviders}
+            knowledgeBases={knowledgeBases}
+            knowledgeRefreshing={knowledgeRefreshing}
+            onRefresh={refreshKnowledgeView}
+            onChangeEmbeddingProvider={(embeddingProviderId) => updateKnowledgeBaseConfig({ embeddingProviderId })}
+            onChangeEmbeddingModel={(embeddingModel) => updateKnowledgeBaseConfig({ embeddingModel })}
+            onToast={(message) => setToast(message)}
+            onCreateKnowledgeBase={createKnowledgeBase}
+            onDeleteKnowledgeBase={deleteKnowledgeBase}
+            onAddKnowledgeFiles={addKnowledgeFiles}
+            onAddKnowledgeDirectory={addKnowledgeDirectory}
+            onAddKnowledgeNote={addKnowledgeNote}
+            onAddKnowledgeUrl={addKnowledgeUrl}
+            onAddKnowledgeWebsite={addKnowledgeWebsite}
+            onDeleteKnowledgeItem={deleteKnowledgeItem}
+          />
+        </Suspense>
       );
     }
 
@@ -1316,13 +1436,15 @@ export default function App() {
         ) : null}
 
         {showPreviewPane && preview ? (
-          <PreviewPane
-            preview={preview}
-            onClearPreview={() => setPreview(null)}
-            onClosePane={() => setPreviewOpen(false)}
-            onOpenLink={openPreviewLink}
-            onOpenExternal={openPreviewExternally}
-          />
+          <Suspense fallback={<LazyViewFallback />}>
+            <PreviewPane
+              preview={preview}
+              onClearPreview={() => setPreview(null)}
+              onClosePane={() => setPreviewOpen(false)}
+              onOpenLink={openPreviewLink}
+              onOpenExternal={openPreviewExternally}
+            />
+          </Suspense>
         ) : null}
       </div>
 

@@ -19,6 +19,7 @@ export function emptyConfig(): AppConfig {
     opencodeRoot: "",
     bridgeUrl: "",
     environment: "local",
+    defaultAgentMode: "general",
     activeModelId: "ifly-azure-gpt-5-mini",
     contextTier: "high",
     appearance: {

@@ -180,7 +180,7 @@ const BUNDLED_OPENCODE_WINDOWS_RELATIVE_PATH = path.join(
   "opencode.exe",
 );
 
-function sanitizeId(value: string) {
+export function sanitizeId(value: string) {
   return value
     .trim()
     .toLowerCase()
@@ -221,6 +221,10 @@ function normalizeUrl(value: string) {
 
 function withDefault<T>(value: T | undefined, fallback: T) {
   return value === undefined ? fallback : value;
+}
+
+export function getPrimaryAgentMode(config: AppConfig) {
+  return config.defaultAgentMode === "build" ? "build" : "general";
 }
 
 function pickActiveModel(config: AppConfig) {
@@ -340,7 +344,7 @@ function hasUsableLocalCommand(server: McpServerConfig) {
   return !isInterpreterLikeCommand(command);
 }
 
-function shouldIncludeMcpServerInRuntime(server: McpServerConfig) {
+export function shouldIncludeMcpServerInRuntime(server: McpServerConfig) {
   if (!server.enabled) {
     return false;
   }
@@ -352,7 +356,7 @@ function shouldIncludeMcpServerInRuntime(server: McpServerConfig) {
   return hasUsableLocalCommand(server) || Boolean(getPlaywrightMcpExtraArgs(server));
 }
 
-function getRuntimeMcpServers(config: AppConfig) {
+export function getRuntimeMcpServers(config: AppConfig) {
   return config.mcpServers.filter(shouldIncludeMcpServerInRuntime);
 }
 
@@ -390,7 +394,7 @@ async function resolveBundledWindowsOpencodeCommand() {
   );
 }
 
-async function resolveOpencodeCommand() {
+export async function resolveOpencodeCommand() {
   if (process.platform === "win32") {
     return await resolveBundledWindowsOpencodeCommand();
   }
@@ -472,7 +476,7 @@ async function ensurePlaywrightMcpCli(configDir: string) {
   return cliPath;
 }
 
-async function resolveMcpServers(servers: McpServerConfig[], configDir: string) {
+export async function resolveMcpServers(servers: McpServerConfig[], configDir: string) {
   const resolvedServers: McpServerConfig[] = [];
 
   for (const server of servers) {
@@ -493,12 +497,13 @@ async function resolveMcpServers(servers: McpServerConfig[], configDir: string) 
   return resolvedServers;
 }
 
-function buildRuntimeConfig(
+export function buildRuntimeConfig(
   config: AppConfig,
   resolvedMcpServers: McpServerConfig[] = getRuntimeMcpServers(config),
 ): JsonObject {
   const active = pickActiveModel(config);
   const activeModelRef = buildModelRef(config);
+  const primaryAgentMode = getPrimaryAgentMode(config);
   const provider: Record<string, JsonObject> = {};
 
   for (const item of config.modelProviders) {
@@ -564,7 +569,7 @@ function buildRuntimeConfig(
   return {
     model: activeModelRef ? `${activeModelRef.providerID}/${activeModelRef.modelID}` : undefined,
     small_model: activeModelRef ? `${activeModelRef.providerID}/${activeModelRef.modelID}` : undefined,
-    default_agent: "build",
+    default_agent: primaryAgentMode,
     permission: {
       "*": "allow",
     },
@@ -612,7 +617,7 @@ function parseJsonRecord(input: string) {
   }
 }
 
-function makeSpawnEnv(config: AppConfig, configDir: string, resolvedMcpServers: McpServerConfig[]) {
+export function makeSpawnEnv(config: AppConfig, configDir: string, resolvedMcpServers: McpServerConfig[]) {
   const appDataDir = path.dirname(configDir);
   return {
     ...process.env,
@@ -633,11 +638,11 @@ function getGeneratedConfigDir() {
   return resolveOpencodeConfigDir(appDataRoot);
 }
 
-function buildGeneratedCommand(skill: AppConfig["skills"][number]) {
-  return `---\ndescription: ${skill.description}\nagent: build\n---\n\n${skill.command.trim()}\n`;
+function buildGeneratedCommand(skill: AppConfig["skills"][number], agent: AppConfig["defaultAgentMode"]) {
+  return `---\ndescription: ${skill.description}\nagent: ${agent}\n---\n\n${skill.command.trim()}\n`;
 }
 
-async function syncGeneratedCommands(config: AppConfig) {
+export async function syncGeneratedCommands(config: AppConfig) {
   const configDir = getGeneratedConfigDir();
   const commandsDir = path.join(configDir, "commands");
   await mkdir(commandsDir, { recursive: true });
@@ -656,7 +661,7 @@ async function syncGeneratedCommands(config: AppConfig) {
     enabledSkills.map((skill) =>
       writeFile(
         path.join(commandsDir, `${sanitizeId(skill.name || skill.id)}.md`),
-        buildGeneratedCommand(skill),
+        buildGeneratedCommand(skill, getPrimaryAgentMode(config)),
         "utf8",
       ),
     ),
@@ -665,7 +670,7 @@ async function syncGeneratedCommands(config: AppConfig) {
   return configDir;
 }
 
-function makeSignature(config: AppConfig) {
+export function makeSignature(config: AppConfig) {
   return JSON.stringify({
     bridgeUrl: config.bridgeUrl,
     proxy: config.proxy,
@@ -996,6 +1001,7 @@ export class OpencodeRuntime {
 
   async prompt(config: AppConfig, sessionID: string, message: string, attachments: FileDropEntry[]) {
     const model = buildModelRef(config);
+    const agent = getPrimaryAgentMode(config);
     if (!model) {
       throw new Error("No available model configured. Configure and enable a model before sending messages.");
     }
@@ -1022,6 +1028,7 @@ export class OpencodeRuntime {
 
   async promptAsync(config: AppConfig, sessionID: string, message: string, attachments: FileDropEntry[]) {
     const model = buildModelRef(config);
+    const agent = getPrimaryAgentMode(config);
     if (!model) {
       throw new Error("No available model configured. Configure and enable a model before sending messages.");
     }
@@ -1039,7 +1046,7 @@ export class OpencodeRuntime {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        agent: "build",
+        agent,
         model,
         parts,
       }),
@@ -1050,7 +1057,7 @@ export class OpencodeRuntime {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          agent: "build",
+          agent,
           model,
           parts,
         }),

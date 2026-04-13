@@ -3,12 +3,17 @@ import path from "node:path";
 import type {
   AppConfig,
   ChatMessage,
+  RemoteChannelId,
   RemoteControlStatus,
   WechatLoginStartResult,
   WechatLoginWaitResult,
 } from "../src/types";
 import { readJsonFile, writeJsonFile } from "./store";
+import type { RemoteChannelMonitor } from "./remote-control-common";
 import type { WorkspaceService } from "./workspace-service";
+import { startDingtalkRemoteMonitor } from "./dingtalk-remote";
+import { startFeishuRemoteMonitor } from "./feishu-remote";
+import { startWecomRemoteMonitor } from "./wecom-remote";
 import {
   downloadWechatAttachments,
   extractWechatText,
@@ -21,7 +26,8 @@ import {
   type WechatProtocolMessage,
 } from "./wechat-remote";
 
-interface WechatThreadBinding {
+interface RemoteThreadBinding {
+  channel: RemoteChannelId;
   accountId: string;
   peerId: string;
   threadId: string;
@@ -31,9 +37,9 @@ interface WechatThreadBinding {
 }
 
 interface RemoteControlPersistedState {
+  bindings: RemoteThreadBinding[];
   wechat: {
     syncCursorByAccountId: Record<string, string>;
-    bindings: WechatThreadBinding[];
   };
 }
 
@@ -41,36 +47,89 @@ interface RemoteControlServiceOptions {
   onWorkspaceChanged?: () => Promise<void>;
 }
 
+interface RemoteChannelRuntimeState {
+  running: boolean;
+  lastError: string;
+  lastInboundAt: number;
+  lastOutboundAt: number;
+}
+
+interface InboundBridgeMessage {
+  channel: RemoteChannelId;
+  accountId: string;
+  peerId: string;
+  title: string;
+  text: string;
+  attachmentPaths: string[];
+  contextToken?: string;
+  replyText: (text: string, binding: RemoteThreadBinding) => Promise<void>;
+}
+
 const DEFAULT_STATE: RemoteControlPersistedState = {
+  bindings: [],
   wechat: {
     syncCursorByAccountId: {},
-    bindings: [],
   },
 };
 
 function cloneDefaultState(): RemoteControlPersistedState {
   return {
+    bindings: [],
     wechat: {
       syncCursorByAccountId: {},
-      bindings: [],
     },
   };
 }
 
-function sanitizePathSegment(value: string) {
-  return value.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-") || "unknown";
+function createRuntimeState(): RemoteChannelRuntimeState {
+  return {
+    running: false,
+    lastError: "",
+    lastInboundAt: 0,
+    lastOutboundAt: 0,
+  };
 }
 
 function describeWechatPeer(peerId: string) {
   return `微信 · ${peerId}`;
 }
 
+function normalizeBindings(value: unknown): RemoteThreadBinding[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) => {
+      const channel =
+        item.channel === "dingtalk" ||
+        item.channel === "feishu" ||
+        item.channel === "wechat" ||
+        item.channel === "wecom"
+          ? item.channel
+          : "wechat";
+      return {
+        channel,
+        accountId: typeof item.accountId === "string" ? item.accountId.trim() : "",
+        peerId: typeof item.peerId === "string" ? item.peerId.trim() : "",
+        threadId: typeof item.threadId === "string" ? item.threadId.trim() : "",
+        title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "远程会话",
+        contextToken:
+          typeof item.contextToken === "string" && item.contextToken.trim()
+            ? item.contextToken.trim()
+            : undefined,
+        updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : Date.now(),
+      };
+    })
+    .filter((item) => item.accountId && item.peerId && item.threadId);
+}
+
 export class RemoteControlService {
   private readonly statePath: string;
+  private readonly mediaRootDir: string;
   private state: RemoteControlPersistedState = cloneDefaultState();
   private config: AppConfig | null = null;
-  private monitorAbort: AbortController | null = null;
-  private monitorPromise: Promise<void> | null = null;
   private processingQueues = new Map<string, Promise<void>>();
   private pendingWechatLogin:
     | {
@@ -78,12 +137,20 @@ export class RemoteControlService {
         qrCodeUrl?: string;
       }
     | null = null;
-  private wechatRuntime = {
-    running: false,
-    lastError: "",
-    lastInboundAt: 0,
-    lastOutboundAt: 0,
+  private readonly runtimes = {
+    dingtalk: createRuntimeState(),
+    feishu: createRuntimeState(),
+    wechat: createRuntimeState(),
+    wecom: createRuntimeState(),
   };
+  private dingtalkMonitor: RemoteChannelMonitor | null = null;
+  private dingtalkMonitorKey = "";
+  private feishuMonitor: RemoteChannelMonitor | null = null;
+  private feishuMonitorKey = "";
+  private wecomMonitor: RemoteChannelMonitor | null = null;
+  private wecomMonitorKey = "";
+  private wechatMonitorAbort: AbortController | null = null;
+  private wechatMonitorPromise: Promise<void> | null = null;
 
   constructor(
     workspaceStatePath: string,
@@ -91,59 +158,103 @@ export class RemoteControlService {
     private readonly options: RemoteControlServiceOptions = {},
   ) {
     this.statePath = path.join(path.dirname(workspaceStatePath), "remote-control.json");
+    this.mediaRootDir = path.join(path.dirname(workspaceStatePath), "remote-control-media");
   }
 
   async initialize(config: AppConfig) {
     const loaded = await readJsonFile(this.statePath, cloneDefaultState());
+    const directBindings = normalizeBindings(loaded?.bindings);
+    const legacyWechatBindings = normalizeBindings(
+      Array.isArray((loaded as { wechat?: { bindings?: unknown[] } } | null)?.wechat?.bindings)
+        ? (loaded as { wechat: { bindings: unknown[] } }).wechat.bindings?.map((item) => ({
+            ...(item as Record<string, unknown>),
+            channel: "wechat",
+          }))
+        : [],
+    );
     this.state = {
+      bindings: directBindings.length > 0 ? directBindings : legacyWechatBindings,
       wechat: {
         syncCursorByAccountId:
           loaded?.wechat?.syncCursorByAccountId &&
           typeof loaded.wechat.syncCursorByAccountId === "object"
             ? loaded.wechat.syncCursorByAccountId
             : {},
-        bindings: Array.isArray(loaded?.wechat?.bindings) ? loaded.wechat.bindings : [],
       },
     };
     await this.syncWithConfig(config);
   }
 
   async shutdown() {
-    await this.stopWechatMonitor();
+    await Promise.all([
+      this.stopDingtalkMonitor(),
+      this.stopFeishuMonitor(),
+      this.stopWechatMonitor(),
+      this.stopWecomMonitor(),
+    ]);
   }
 
   async syncWithConfig(config: AppConfig) {
     this.config = config;
-    const wechat = config.remoteControl.wechat;
-    const shouldRun = wechat.enabled && Boolean(wechat.botToken && wechat.accountId);
-    if (!shouldRun) {
-      await this.stopWechatMonitor();
-      return;
-    }
-    await this.ensureWechatMonitor({
-      accountId: wechat.accountId,
-      baseUrl: wechat.baseUrl,
-      cdnBaseUrl: wechat.cdnBaseUrl,
-      botToken: wechat.botToken,
-      userId: wechat.userId,
-    });
+
+    await Promise.allSettled([
+      this.syncDingtalkMonitor(config),
+      this.syncFeishuMonitor(config),
+      this.syncWechatMonitor(config),
+      this.syncWecomMonitor(config),
+    ]);
   }
 
   async getStatus(config: AppConfig | null = this.config): Promise<RemoteControlStatus> {
+    const dingtalk = config?.remoteControl.dingtalk;
+    const feishu = config?.remoteControl.feishu;
     const wechat = config?.remoteControl.wechat;
+    const wecom = config?.remoteControl.wecom;
+
     return {
+      dingtalk: {
+        enabled: dingtalk?.enabled === true,
+        configured: Boolean(dingtalk?.clientId && dingtalk?.clientSecret),
+        connected: this.runtimes.dingtalk.running,
+        running: this.runtimes.dingtalk.running,
+        lastError: this.runtimes.dingtalk.lastError || undefined,
+        lastInboundAt: this.runtimes.dingtalk.lastInboundAt || undefined,
+        lastOutboundAt: this.runtimes.dingtalk.lastOutboundAt || undefined,
+        activePeerCount: this.countBindings("dingtalk", dingtalk?.clientId || ""),
+      },
+      feishu: {
+        enabled: feishu?.enabled === true,
+        configured: Boolean(feishu?.appId && feishu?.appSecret),
+        connected: this.runtimes.feishu.running,
+        running: this.runtimes.feishu.running,
+        lastError: this.runtimes.feishu.lastError || undefined,
+        lastInboundAt: this.runtimes.feishu.lastInboundAt || undefined,
+        lastOutboundAt: this.runtimes.feishu.lastOutboundAt || undefined,
+        activePeerCount: this.countBindings("feishu", feishu?.appId || ""),
+      },
       wechat: {
         enabled: wechat?.enabled === true,
+        configured: Boolean(wechat?.botToken && wechat?.accountId),
         connected: Boolean(wechat?.botToken && wechat?.accountId),
-        running: this.wechatRuntime.running,
+        running: this.runtimes.wechat.running,
         pendingLogin: Boolean(this.pendingWechatLogin),
         pendingLoginQrCodeUrl: this.pendingWechatLogin?.qrCodeUrl,
         accountId: wechat?.accountId || "",
         userId: wechat?.userId || "",
-        lastError: this.wechatRuntime.lastError || undefined,
-        lastInboundAt: this.wechatRuntime.lastInboundAt || undefined,
-        lastOutboundAt: this.wechatRuntime.lastOutboundAt || undefined,
-        activePeerCount: this.state.wechat.bindings.filter((item) => item.accountId === (wechat?.accountId || "")).length,
+        lastError: this.runtimes.wechat.lastError || undefined,
+        lastInboundAt: this.runtimes.wechat.lastInboundAt || undefined,
+        lastOutboundAt: this.runtimes.wechat.lastOutboundAt || undefined,
+        activePeerCount: this.countBindings("wechat", wechat?.accountId || ""),
+      },
+      wecom: {
+        enabled: wecom?.enabled === true,
+        configured: Boolean(wecom?.botId && wecom?.secret),
+        connected: this.runtimes.wecom.running,
+        running: this.runtimes.wecom.running,
+        lastError: this.runtimes.wecom.lastError || undefined,
+        lastInboundAt: this.runtimes.wecom.lastInboundAt || undefined,
+        lastOutboundAt: this.runtimes.wecom.lastOutboundAt || undefined,
+        activePeerCount: this.countBindings("wecom", wecom?.botId || ""),
       },
     };
   }
@@ -157,7 +268,10 @@ export class RemoteControlService {
     return result;
   }
 
-  async waitWechatLogin(sessionKey: string, timeoutMs?: number): Promise<WechatLoginWaitResult & { profile?: WechatAccountProfile }> {
+  async waitWechatLogin(
+    sessionKey: string,
+    timeoutMs?: number,
+  ): Promise<WechatLoginWaitResult & { profile?: WechatAccountProfile }> {
     const result = await waitForWechatQrLogin(sessionKey, timeoutMs);
     if (this.pendingWechatLogin?.sessionKey === sessionKey) {
       this.pendingWechatLogin = null;
@@ -165,11 +279,236 @@ export class RemoteControlService {
     return result;
   }
 
+  private async syncDingtalkMonitor(config: AppConfig) {
+    const channelConfig = config.remoteControl.dingtalk;
+    const shouldRun = channelConfig.enabled && Boolean(channelConfig.clientId && channelConfig.clientSecret);
+    if (!shouldRun) {
+      await this.stopDingtalkMonitor();
+      return;
+    }
+
+    const nextKey = `${channelConfig.clientId}::${channelConfig.clientSecret}`;
+    if (this.dingtalkMonitor && this.dingtalkMonitorKey === nextKey) {
+      return;
+    }
+
+    await this.stopDingtalkMonitor();
+    this.runtimes.dingtalk.lastError = "";
+
+    try {
+      this.dingtalkMonitor = await startDingtalkRemoteMonitor({
+        config: channelConfig,
+        rootDir: this.mediaRootDir,
+        callbacks: {
+          onMessage: (message) => {
+            this.noteInbound("dingtalk");
+            this.enqueueInboundMessage({
+              channel: "dingtalk",
+              accountId: message.accountId,
+              peerId: message.peerId,
+              title: message.title,
+              text: message.text,
+              attachmentPaths: message.attachmentPaths,
+              contextToken: message.contextToken,
+              replyText: async (reply) => {
+                await message.replyText(reply);
+                this.noteOutbound("dingtalk");
+              },
+            });
+          },
+          onError: (error) => {
+            this.noteError("dingtalk", error);
+          },
+          onRunningChange: (running) => {
+            this.runtimes.dingtalk.running = running;
+          },
+        },
+      });
+      this.dingtalkMonitorKey = nextKey;
+    } catch (error) {
+      this.noteError("dingtalk", error);
+      this.runtimes.dingtalk.running = false;
+      this.dingtalkMonitor = null;
+      this.dingtalkMonitorKey = "";
+    }
+  }
+
+  private async syncFeishuMonitor(config: AppConfig) {
+    const channelConfig = config.remoteControl.feishu;
+    const shouldRun = channelConfig.enabled && Boolean(channelConfig.appId && channelConfig.appSecret);
+    if (!shouldRun) {
+      await this.stopFeishuMonitor();
+      return;
+    }
+
+    const nextKey = `${channelConfig.appId}::${channelConfig.appSecret}::${channelConfig.domain}`;
+    if (this.feishuMonitor && this.feishuMonitorKey === nextKey) {
+      return;
+    }
+
+    await this.stopFeishuMonitor();
+    this.runtimes.feishu.lastError = "";
+
+    try {
+      this.feishuMonitor = await startFeishuRemoteMonitor({
+        config: channelConfig,
+        rootDir: this.mediaRootDir,
+        callbacks: {
+          onMessage: (message) => {
+            this.noteInbound("feishu");
+            this.enqueueInboundMessage({
+              channel: "feishu",
+              accountId: message.accountId,
+              peerId: message.peerId,
+              title: message.title,
+              text: message.text,
+              attachmentPaths: message.attachmentPaths,
+              replyText: async (reply) => {
+                await message.replyText(reply);
+                this.noteOutbound("feishu");
+              },
+            });
+          },
+          onError: (error) => {
+            this.noteError("feishu", error);
+          },
+          onRunningChange: (running) => {
+            this.runtimes.feishu.running = running;
+          },
+        },
+      });
+      this.feishuMonitorKey = nextKey;
+    } catch (error) {
+      this.noteError("feishu", error);
+      this.runtimes.feishu.running = false;
+      this.feishuMonitor = null;
+      this.feishuMonitorKey = "";
+    }
+  }
+
+  private async syncWechatMonitor(config: AppConfig) {
+    const wechat = config.remoteControl.wechat;
+    const shouldRun = wechat.enabled && Boolean(wechat.botToken && wechat.accountId);
+    if (!shouldRun) {
+      await this.stopWechatMonitor();
+      return;
+    }
+
+    await this.ensureWechatMonitor({
+      accountId: wechat.accountId,
+      baseUrl: wechat.baseUrl,
+      cdnBaseUrl: wechat.cdnBaseUrl,
+      botToken: wechat.botToken,
+      userId: wechat.userId,
+    });
+  }
+
+  private async syncWecomMonitor(config: AppConfig) {
+    const channelConfig = config.remoteControl.wecom;
+    const shouldRun = channelConfig.enabled && Boolean(channelConfig.botId && channelConfig.secret);
+    if (!shouldRun) {
+      await this.stopWecomMonitor();
+      return;
+    }
+
+    const nextKey = `${channelConfig.botId}::${channelConfig.secret}::${channelConfig.websocketUrl}`;
+    if (this.wecomMonitor && this.wecomMonitorKey === nextKey) {
+      return;
+    }
+
+    await this.stopWecomMonitor();
+    this.runtimes.wecom.lastError = "";
+
+    try {
+      this.wecomMonitor = await startWecomRemoteMonitor({
+        config: channelConfig,
+        rootDir: this.mediaRootDir,
+        callbacks: {
+          onMessage: (message) => {
+            this.noteInbound("wecom");
+            this.enqueueInboundMessage({
+              channel: "wecom",
+              accountId: message.accountId,
+              peerId: message.peerId,
+              title: message.title,
+              text: message.text,
+              attachmentPaths: message.attachmentPaths,
+              replyText: async (reply) => {
+                await message.replyText(reply);
+                this.noteOutbound("wecom");
+              },
+            });
+          },
+          onError: (error) => {
+            this.noteError("wecom", error);
+          },
+          onRunningChange: (running) => {
+            this.runtimes.wecom.running = running;
+          },
+        },
+      });
+      this.wecomMonitorKey = nextKey;
+    } catch (error) {
+      this.noteError("wecom", error);
+      this.runtimes.wecom.running = false;
+      this.wecomMonitor = null;
+      this.wecomMonitorKey = "";
+    }
+  }
+
+  private async stopDingtalkMonitor() {
+    if (!this.dingtalkMonitor) {
+      this.runtimes.dingtalk.running = false;
+      this.dingtalkMonitorKey = "";
+      return;
+    }
+    await this.dingtalkMonitor.stop().catch(() => undefined);
+    this.dingtalkMonitor = null;
+    this.dingtalkMonitorKey = "";
+    this.runtimes.dingtalk.running = false;
+  }
+
+  private async stopFeishuMonitor() {
+    if (!this.feishuMonitor) {
+      this.runtimes.feishu.running = false;
+      this.feishuMonitorKey = "";
+      return;
+    }
+    await this.feishuMonitor.stop().catch(() => undefined);
+    this.feishuMonitor = null;
+    this.feishuMonitorKey = "";
+    this.runtimes.feishu.running = false;
+  }
+
+  private async stopWechatMonitor() {
+    if (this.wechatMonitorAbort) {
+      this.wechatMonitorAbort.abort();
+      this.wechatMonitorAbort = null;
+    }
+    if (this.wechatMonitorPromise) {
+      await this.wechatMonitorPromise.catch(() => undefined);
+      this.wechatMonitorPromise = null;
+    }
+    this.runtimes.wechat.running = false;
+  }
+
+  private async stopWecomMonitor() {
+    if (!this.wecomMonitor) {
+      this.runtimes.wecom.running = false;
+      this.wecomMonitorKey = "";
+      return;
+    }
+    await this.wecomMonitor.stop().catch(() => undefined);
+    this.wecomMonitor = null;
+    this.wecomMonitorKey = "";
+    this.runtimes.wecom.running = false;
+  }
+
   private async ensureWechatMonitor(profile: WechatAccountProfile) {
     if (
-      this.monitorAbort &&
-      !this.monitorAbort.signal.aborted &&
-      this.wechatRuntime.running &&
+      this.wechatMonitorAbort &&
+      !this.wechatMonitorAbort.signal.aborted &&
+      this.runtimes.wechat.running &&
       this.config?.remoteControl.wechat.accountId === profile.accountId
     ) {
       return;
@@ -178,34 +517,21 @@ export class RemoteControlService {
     await this.stopWechatMonitor();
 
     const abortController = new AbortController();
-    this.monitorAbort = abortController;
-    this.wechatRuntime.running = true;
-    this.wechatRuntime.lastError = "";
-    this.monitorPromise = this.runWechatMonitor(profile, abortController.signal)
+    this.wechatMonitorAbort = abortController;
+    this.runtimes.wechat.running = true;
+    this.runtimes.wechat.lastError = "";
+    this.wechatMonitorPromise = this.runWechatMonitor(profile, abortController.signal)
       .catch((error) => {
         if (!abortController.signal.aborted) {
-          this.wechatRuntime.lastError =
-            error instanceof Error ? error.message : String(error);
+          this.noteError("wechat", error);
         }
       })
       .finally(() => {
-        if (this.monitorAbort === abortController) {
-          this.monitorAbort = null;
+        if (this.wechatMonitorAbort === abortController) {
+          this.wechatMonitorAbort = null;
         }
-        this.wechatRuntime.running = false;
+        this.runtimes.wechat.running = false;
       });
-  }
-
-  private async stopWechatMonitor() {
-    if (this.monitorAbort) {
-      this.monitorAbort.abort();
-      this.monitorAbort = null;
-    }
-    if (this.monitorPromise) {
-      await this.monitorPromise.catch(() => undefined);
-      this.monitorPromise = null;
-    }
-    this.wechatRuntime.running = false;
   }
 
   private async runWechatMonitor(profile: WechatAccountProfile, signal: AbortSignal) {
@@ -229,7 +555,7 @@ export class RemoteControlService {
       }
 
       if ((response.ret ?? 0) !== 0 || (response.errcode ?? 0) !== 0) {
-        this.wechatRuntime.lastError =
+        this.runtimes.wechat.lastError =
           response.errmsg || `微信轮询失败: ret=${response.ret} errcode=${response.errcode}`;
         await this.delay(2_000, signal);
         continue;
@@ -239,7 +565,7 @@ export class RemoteControlService {
         if (!isWechatUserMessage(message)) {
           continue;
         }
-        this.wechatRuntime.lastInboundAt = Date.now();
+        this.noteInbound("wechat");
         this.enqueueWechatMessage(profile, message);
       }
     }
@@ -250,13 +576,56 @@ export class RemoteControlService {
     if (!peerId) {
       return;
     }
-    const queueKey = `${profile.accountId}:${peerId}`;
+
+    this.enqueueInboundMessage({
+      channel: "wechat",
+      accountId: profile.accountId,
+      peerId,
+      title: describeWechatPeer(peerId),
+      text: extractWechatText(message),
+      attachmentPathsPromise: async () =>
+        await downloadWechatAttachments({
+          message,
+          directory: path.join(this.mediaRootDir, "wechat", profile.accountId, peerId),
+          cdnBaseUrl: profile.cdnBaseUrl,
+        }).catch(() => []),
+      contextToken: message.context_token?.trim() || undefined,
+      replyText: async (reply, binding) => {
+        await sendWechatTextMessage({
+          baseUrl: profile.baseUrl,
+          botToken: profile.botToken,
+          toUserId: peerId,
+          text: reply,
+          contextToken: binding.contextToken,
+        });
+        this.noteOutbound("wechat");
+      },
+    });
+  }
+
+  private enqueueInboundMessage(
+    input:
+      | InboundBridgeMessage
+      | (Omit<InboundBridgeMessage, "attachmentPaths"> & {
+          attachmentPathsPromise?: () => Promise<string[]>;
+        }),
+  ) {
+    const queueKey = `${input.channel}:${input.accountId}:${input.peerId}`;
     const previous = this.processingQueues.get(queueKey) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
-      .then(() => this.handleWechatMessage(profile, message))
+      .then(async () => {
+        const attachmentPaths =
+          "attachmentPathsPromise" in input && input.attachmentPathsPromise
+            ? await input.attachmentPathsPromise()
+            : input.attachmentPaths;
+        await this.handleInboundMessage({
+          ...input,
+          attachmentPaths,
+        } as InboundBridgeMessage);
+      })
       .catch((error) => {
-        this.wechatRuntime.lastError = error instanceof Error ? error.message : String(error);
+        this.noteError(input.channel, error);
       })
       .finally(() => {
         if (this.processingQueues.get(queueKey) === next) {
@@ -266,39 +635,30 @@ export class RemoteControlService {
     this.processingQueues.set(queueKey, next);
   }
 
-  private async handleWechatMessage(profile: WechatAccountProfile, message: WechatProtocolMessage) {
-    const peerId = message.from_user_id?.trim() || "";
-    if (!peerId) {
-      return;
-    }
+  private async handleInboundMessage(message: InboundBridgeMessage) {
+    let binding = await this.ensureBinding(
+      message.channel,
+      message.accountId,
+      message.peerId,
+      message.title,
+    );
 
-    let binding = await this.ensureWechatBinding(profile, peerId);
-    if (message.context_token?.trim()) {
-      binding = await this.upsertWechatBinding({
+    if (message.contextToken) {
+      binding = await this.upsertBinding({
         ...binding,
-        contextToken: message.context_token.trim(),
+        title: message.title,
+        contextToken: message.contextToken,
         updatedAt: Date.now(),
       });
     }
 
-    const attachmentDirectory = path.join(
-      path.dirname(this.statePath),
-      "remote-control-media",
-      "wechat",
-      sanitizePathSegment(profile.accountId),
-      sanitizePathSegment(peerId),
-    );
-    const attachmentPaths = await downloadWechatAttachments({
-      message,
-      directory: attachmentDirectory,
-      cdnBaseUrl: profile.cdnBaseUrl,
-    }).catch(() => []);
     const attachments =
-      attachmentPaths.length > 0
-        ? await this.workspace.prepareAttachments(attachmentPaths)
+      message.attachmentPaths.length > 0
+        ? await this.workspace.prepareAttachments(message.attachmentPaths)
         : [];
-    const text = extractWechatText(message);
-    const prompt = text || (attachments.length > 0 ? "请查看我刚刚发来的附件并继续处理。" : "");
+    const prompt =
+      message.text.trim() ||
+      (attachments.length > 0 ? "请查看我刚刚发来的附件并继续处理。" : "");
 
     if (!prompt.trim() && attachments.length === 0) {
       return;
@@ -306,7 +666,13 @@ export class RemoteControlService {
 
     let thread = await this.workspace.getThread(binding.threadId).catch(() => null);
     if (!thread) {
-      binding = await this.createWechatBinding(profile, peerId);
+      binding = await this.createBinding(
+        message.channel,
+        message.accountId,
+        message.peerId,
+        message.title,
+        message.contextToken,
+      );
       thread = await this.workspace.getThread(binding.threadId).catch(() => null);
     }
 
@@ -321,78 +687,106 @@ export class RemoteControlService {
 
     const outcome = await this.waitForThreadOutcome(binding.threadId, 15 * 60_000);
     if (outcome === "question") {
-      await sendWechatTextMessage({
-        baseUrl: profile.baseUrl,
-        botToken: profile.botToken,
-        toUserId: peerId,
-        text: "这个请求需要在桌面端确认，我已经挂起到 super-agents 中，请到应用里继续处理。",
-        contextToken: binding.contextToken,
-      });
-      this.wechatRuntime.lastOutboundAt = Date.now();
+      await message.replyText(
+        "这个请求需要你到 super-agents 桌面端里继续确认，我已经把待处理事项挂起在当前会话中了。",
+        binding,
+      );
       return;
     }
 
     if (outcome === "timeout") {
-      await sendWechatTextMessage({
-        baseUrl: profile.baseUrl,
-        botToken: profile.botToken,
-        toUserId: peerId,
-        text: "任务还在处理中，我先继续执行。你也可以到 super-agents 桌面端查看当前进度。",
-        contextToken: binding.contextToken,
-      });
-      this.wechatRuntime.lastOutboundAt = Date.now();
+      await message.replyText(
+        "任务还在处理中，我会继续执行。你也可以到 super-agents 桌面端查看当前进度。",
+        binding,
+      );
       return;
     }
 
     const completedThread = await this.workspace.getThread(binding.threadId);
     const replyText = this.collectAssistantReply(completedThread.messages, previousMessageIds);
 
-    await sendWechatTextMessage({
-      baseUrl: profile.baseUrl,
-      botToken: profile.botToken,
-      toUserId: peerId,
-      text:
-        replyText ||
-        "请求已经处理完成，但这次没有生成可发送的文本回复。请到 super-agents 桌面端查看详情。",
-      contextToken: binding.contextToken,
-    });
-    this.wechatRuntime.lastOutboundAt = Date.now();
+    await message.replyText(
+      replyText ||
+        "请求已经处理完成，不过这次没有生成适合直接回发的文本结果。请到 super-agents 桌面端查看详情。",
+      binding,
+    );
     await this.options.onWorkspaceChanged?.();
   }
 
-  private async ensureWechatBinding(profile: WechatAccountProfile, peerId: string) {
-    const existing = this.state.wechat.bindings.find(
-      (item) => item.accountId === profile.accountId && item.peerId === peerId,
+  private async ensureBinding(
+    channel: RemoteChannelId,
+    accountId: string,
+    peerId: string,
+    title: string,
+  ) {
+    const existing = this.state.bindings.find(
+      (item) =>
+        item.channel === channel && item.accountId === accountId && item.peerId === peerId,
     );
     if (existing) {
+      if (existing.title !== title) {
+        return await this.upsertBinding({
+          ...existing,
+          title,
+          updatedAt: Date.now(),
+        });
+      }
       return existing;
     }
-    return await this.createWechatBinding(profile, peerId);
+    return await this.createBinding(channel, accountId, peerId, title);
   }
 
-  private async createWechatBinding(profile: WechatAccountProfile, peerId: string) {
-    const title = describeWechatPeer(peerId);
+  private async createBinding(
+    channel: RemoteChannelId,
+    accountId: string,
+    peerId: string,
+    title: string,
+    contextToken?: string,
+  ) {
     const thread = await this.workspace.createBackgroundThread(title);
-    return await this.upsertWechatBinding({
-      accountId: profile.accountId,
+    return await this.upsertBinding({
+      channel,
+      accountId,
       peerId,
       threadId: thread.id,
       title,
+      contextToken,
       updatedAt: Date.now(),
     });
   }
 
-  private async upsertWechatBinding(binding: WechatThreadBinding) {
-    const existingIndex = this.state.wechat.bindings.findIndex(
-      (item) => item.accountId === binding.accountId && item.peerId === binding.peerId,
+  private async upsertBinding(binding: RemoteThreadBinding) {
+    const existingIndex = this.state.bindings.findIndex(
+      (item) =>
+        item.channel === binding.channel &&
+        item.accountId === binding.accountId &&
+        item.peerId === binding.peerId,
     );
     if (existingIndex >= 0) {
-      this.state.wechat.bindings[existingIndex] = binding;
+      this.state.bindings[existingIndex] = binding;
     } else {
-      this.state.wechat.bindings.push(binding);
+      this.state.bindings.push(binding);
     }
     await this.saveState();
     return binding;
+  }
+
+  private countBindings(channel: RemoteChannelId, accountId: string) {
+    return this.state.bindings.filter(
+      (item) => item.channel === channel && item.accountId === accountId,
+    ).length;
+  }
+
+  private noteInbound(channel: RemoteChannelId) {
+    this.runtimes[channel].lastInboundAt = Date.now();
+  }
+
+  private noteOutbound(channel: RemoteChannelId) {
+    this.runtimes[channel].lastOutboundAt = Date.now();
+  }
+
+  private noteError(channel: RemoteChannelId, error: unknown) {
+    this.runtimes[channel].lastError = error instanceof Error ? error.message : String(error);
   }
 
   private async waitForThreadOutcome(threadId: string, timeoutMs: number) {

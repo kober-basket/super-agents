@@ -10,6 +10,7 @@ export type AppearanceThemeId =
   | "aubergine";
 export type ContextTier = "low" | "medium" | "high";
 export type EnvironmentMode = "local" | "cloud";
+export type DefaultAgentMode = "general" | "build";
 export type MessageRole = "user" | "assistant" | "tool";
 export type PreviewKind = "text" | "code" | "markdown" | "image" | "pdf" | "html" | "web" | "binary";
 export type McpTransport = "local" | "remote";
@@ -294,8 +295,20 @@ export interface AppearanceConfig {
   theme: AppearanceThemeId;
 }
 
-export interface RemoteControlPlaceholderConfig {
+export type RemoteChannelId = "dingtalk" | "feishu" | "wechat" | "wecom";
+export type FeishuDomain = "feishu" | "lark";
+
+export interface DingtalkRemoteControlConfig {
   enabled: boolean;
+  clientId: string;
+  clientSecret: string;
+}
+
+export interface FeishuRemoteControlConfig {
+  enabled: boolean;
+  appId: string;
+  appSecret: string;
+  domain: FeishuDomain;
 }
 
 export interface WechatRemoteControlConfig {
@@ -308,17 +321,25 @@ export interface WechatRemoteControlConfig {
   connectedAt: number | null;
 }
 
+export interface WecomRemoteControlConfig {
+  enabled: boolean;
+  botId: string;
+  secret: string;
+  websocketUrl: string;
+}
+
 export interface RemoteControlConfig {
-  dingtalk: RemoteControlPlaceholderConfig;
-  feishu: RemoteControlPlaceholderConfig;
+  dingtalk: DingtalkRemoteControlConfig;
+  feishu: FeishuRemoteControlConfig;
   wechat: WechatRemoteControlConfig;
-  wecom: RemoteControlPlaceholderConfig;
+  wecom: WecomRemoteControlConfig;
 }
 
 export interface AppConfig {
   opencodeRoot: string;
   bridgeUrl: string;
   environment: EnvironmentMode;
+  defaultAgentMode: DefaultAgentMode;
   activeModelId: string;
   contextTier: ContextTier;
   appearance: AppearanceConfig;
@@ -344,22 +365,35 @@ export interface WechatLoginWaitResult {
   userId?: string;
 }
 
-export interface WechatRemoteRuntimeStatus {
+export interface RemoteChannelRuntimeStatus {
   enabled: boolean;
+  configured: boolean;
   connected: boolean;
   running: boolean;
-  pendingLogin: boolean;
-  pendingLoginQrCodeUrl?: string;
-  accountId: string;
-  userId: string;
   lastError?: string;
   lastInboundAt?: number;
   lastOutboundAt?: number;
   activePeerCount: number;
 }
 
+export interface DingtalkRemoteRuntimeStatus extends RemoteChannelRuntimeStatus {}
+
+export interface FeishuRemoteRuntimeStatus extends RemoteChannelRuntimeStatus {}
+
+export interface WechatRemoteRuntimeStatus extends RemoteChannelRuntimeStatus {
+  pendingLogin: boolean;
+  pendingLoginQrCodeUrl?: string;
+  accountId: string;
+  userId: string;
+}
+
+export interface WecomRemoteRuntimeStatus extends RemoteChannelRuntimeStatus {}
+
 export interface RemoteControlStatus {
+  dingtalk: DingtalkRemoteRuntimeStatus;
+  feishu: FeishuRemoteRuntimeStatus;
   wechat: WechatRemoteRuntimeStatus;
+  wecom: WecomRemoteRuntimeStatus;
 }
 
 export interface DesktopWindowState {

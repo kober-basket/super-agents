@@ -31,7 +31,7 @@ import {
   type OpencodePart,
   type OpencodeSessionMessage,
   type OpencodeToolPart,
-} from "./opencode-runtime";
+} from "./opencode-runtime-acp";
 import type {
   AppConfig,
   BootstrapPayload,
@@ -136,6 +136,7 @@ const DEFAULT_CONFIG: AppConfig = {
   opencodeRoot: path.resolve(process.cwd(), "..", "opencode"),
   bridgeUrl: "",
   environment: "local",
+  defaultAgentMode: "general",
   activeModelId: createRuntimeModelId("iflyrpa", "azure/gpt-5-mini"),
   contextTier: "high",
   appearance: {
@@ -318,6 +319,7 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
     config: {
       ...DEFAULT_CONFIG,
       ...rawConfig,
+      defaultAgentMode: rawConfig.defaultAgentMode === "build" ? "build" : "general",
       activeModelId,
       appearance: {
         ...DEFAULT_CONFIG.appearance,
@@ -910,6 +912,13 @@ async function toolMessageFromPart(
 }
 
 function baseMessageText(parts: OpencodePart[]) {
+  const sanitizeMessageText = (value: string) =>
+    value
+      .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, " ")
+      .replace(/<\/?system-reminder>/gi, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   const textParts = parts.filter(
     (part): part is Extract<OpencodePart, { type: "text" }> => part.type === "text" && !part.synthetic,
   );
@@ -922,7 +931,13 @@ function baseMessageText(parts: OpencodePart[]) {
   const blocks: string[] = [];
 
   if (textParts.length > 0) {
-    blocks.push(textParts.map((part) => part.text).join("\n\n").trim());
+    blocks.push(
+      textParts
+        .map((part) => sanitizeMessageText(part.text))
+        .filter(Boolean)
+        .join("\n\n")
+        .trim(),
+    );
   }
 
   if (agentParts.length > 0) {
@@ -938,7 +953,7 @@ function baseMessageText(parts: OpencodePart[]) {
     );
   }
 
-  return blocks.filter(Boolean).join("\n\n").trim();
+  return sanitizeMessageText(blocks.filter(Boolean).join("\n\n").trim());
 }
 
 function messageTimestamp(message: OpencodeSessionMessage) {

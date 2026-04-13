@@ -309,6 +309,11 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     bumpThreadRunVersion(threadId);
   }
 
+  function beginThreadRun(threadId: string) {
+    clearThreadStopping(threadId);
+    return bumpThreadRunVersion(threadId);
+  }
+
   function normalizeThreadForDisplay(thread: ThreadRecord, threadId = thread.id) {
     if (!isThreadStopping(threadId)) {
       return thread;
@@ -677,13 +682,18 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   ) {
     if (!hasAvailableModel) { onToast("当前没有可用模型，请先在设置里配置并启用模型。"); return; }
     if (skill.enabled === false) { onToast("Enable this skill first"); return; }
+    const existingThreadId = stateRef.current.activeThreadId;
+    const runVersion = existingThreadId ? beginThreadRun(existingThreadId) : null;
     try {
       const result = await workspaceClient.runSkill({
-        threadId: state.activeThreadId || undefined,
-        workspaceRoot: !state.activeThreadId ? state.config.opencodeRoot || undefined : undefined,
+        threadId: existingThreadId || undefined,
+        workspaceRoot: !existingThreadId ? state.config.opencodeRoot || undefined : undefined,
         skillId: skill.id,
         prompt: promptOverride?.trim() || state.composer.trim() || skill.description,
       });
+      if (existingThreadId && runVersion !== null && !isLatestThreadRun(existingThreadId, runVersion)) {
+        return;
+      }
       onOpenChat();
       onToast(`Ran ${skill.name}`);
       if (result?.thread) {
@@ -691,6 +701,9 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
         await refreshThreadList();
       }
     } catch (error) {
+      if (existingThreadId && isThreadStopping(existingThreadId)) {
+        return;
+      }
       onToast(formatErrorMessage(error, "Run skill failed"));
     }
   }
@@ -879,7 +892,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
       try {
         const ensured = await ensureBackendThread();
         const threadId = ensured.threadId;
-        const runVersion = bumpThreadRunVersion(threadId);
+        const runVersion = beginThreadRun(threadId);
         const currentThread = ensured.thread;
         const currentMessages = currentThread?.messages ?? [];
         const userMsg: ChatMessage = {
@@ -951,7 +964,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
         try {
           const ensured = await ensureBackendThread();
           const threadId = ensured.threadId;
-          const runVersion = bumpThreadRunVersion(threadId);
+          const runVersion = beginThreadRun(threadId);
           const result = await workspaceClient.sendMessage({
             threadId,
             message: promptText,
@@ -996,7 +1009,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
       try {
         const ensured = await ensureBackendThread();
         const threadId = ensured.threadId;
-        const runVersion = bumpThreadRunVersion(threadId);
+        const runVersion = beginThreadRun(threadId);
         const promptText = composerSkill ? nextMessage : slashCommand?.prompt ?? "";
         const result = await workspaceClient.sendMessage({
           threadId,
