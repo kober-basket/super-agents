@@ -11,7 +11,7 @@ export type AppearanceThemeId =
 export type ContextTier = "low" | "medium" | "high";
 export type EnvironmentMode = "local" | "cloud";
 export type MessageRole = "user" | "assistant" | "tool";
-export type PreviewKind = "text" | "code" | "markdown" | "image" | "html" | "web" | "binary";
+export type PreviewKind = "text" | "code" | "markdown" | "image" | "pdf" | "html" | "web" | "binary";
 export type McpTransport = "local" | "remote";
 export type McpConnectionStatus = "connected" | "disabled" | "failed" | "needs_auth" | "needs_client_registration";
 export type McpInspectorTransport = "stdio" | "streamable-http" | "sse";
@@ -383,6 +383,7 @@ export interface FilePreviewPayload {
   mimeType: string;
   content: string;
   url?: string;
+  loading?: boolean;
 }
 
 export interface FileDropEntry {

@@ -65,6 +65,7 @@ declare global {
       selectWorkspaceFolder: () => Promise<string>;
       setThreadWorkspace: (threadId: string, workspaceRoot: string) => Promise<BootstrapPayload>;
       readPreview: (payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) => Promise<FilePreviewPayload>;
+      openPreviewTarget: (payload: { path?: string; url?: string }) => Promise<void>;
       openWorkspaceFolder: (threadId?: string) => Promise<void>;
       getWindowState: () => Promise<DesktopWindowState>;
       minimizeWindow: () => Promise<DesktopWindowState>;

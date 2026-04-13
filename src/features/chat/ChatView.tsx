@@ -3,6 +3,7 @@ import clsx from "clsx";
 import {
   ArrowUp,
   BookOpen,
+  Boxes,
   Check,
   ChevronDown,
   FolderOpen,
@@ -158,7 +159,7 @@ export function ChatView({
       return !callId || !messageIds.has(callId);
     });
   }, [activePendingQuestions, activeThread?.messages]);
-  const knowledgeSummary = selectedKnowledgeBases.length > 0 ? `已选 ${selectedKnowledgeBases.length} 个` : "未选知识库";
+  const knowledgeSummary = selectedKnowledgeBases.length > 0 ? String(selectedKnowledgeBases.length) : "0";
 
   useEffect(() => {
     if (!knowledgePickerOpen) return undefined;
@@ -189,6 +190,7 @@ export function ChatView({
             className="folder-button workspace-folder-button"
             onClick={() => void onChooseWorkspace()}
             title="切换当前会话工作目录"
+            type="button"
           >
             <FolderOpen size={16} />
             <span>{currentWorkspaceLabel}</span>
@@ -199,6 +201,7 @@ export function ChatView({
             onClick={onTogglePreviewPane}
             title="切换右侧预览"
             disabled={!previewAvailable}
+            type="button"
           >
             {previewOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
           </button>
@@ -268,12 +271,17 @@ export function ChatView({
         <div className="chat-column">
           <div className="composer-card">
             {selectedSkillName ? (
-              <div className="composer-skill-chip">
-                <span>技能</span>
-                <strong>{selectedSkillName}</strong>
-                <button onClick={onRemoveSelectedSkill} title="取消技能">
-                  <X size={11} />
-                </button>
+              <div className="composer-skill-chip-row">
+                <div className="composer-skill-chip">
+                  <span>技能</span>
+                  <span className="composer-skill-chip-icon" aria-hidden="true">
+                    <Boxes size={12} />
+                  </span>
+                  <strong>{selectedSkillName}</strong>
+                  <button onClick={onRemoveSelectedSkill} title="取消技能" type="button">
+                    <X size={11} />
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -282,7 +290,7 @@ export function ChatView({
                 {attachments.map((file) => (
                   <span key={file.id} className="composer-file-chip">
                     {file.name}
-                    <button onClick={() => onRemoveAttachment(file.id)}>
+                    <button onClick={() => onRemoveAttachment(file.id)} type="button">
                       <X size={11} />
                     </button>
                   </span>
@@ -297,14 +305,14 @@ export function ChatView({
                 onCompositionStart={() => onCompositionChange?.(true)}
                 onCompositionEnd={() => onCompositionChange?.(false)}
                 placeholder="输入消息"
-                rows={5}
+                rows={4}
                 className={clsx(dragActive && "drag-active")}
                 onKeyDown={(event) => {
                   if (event.nativeEvent.isComposing) {
                     return;
                   }
 
-                  if (event.key === "Enter" && !event.shiftKey && hasAvailableModel && !threadBusy) {
+                  if (event.key === "Enter" && !event.shiftKey && hasAvailableModel && !threadBusy && !sending) {
                     event.preventDefault();
                     void onSend();
                   }
@@ -326,10 +334,25 @@ export function ChatView({
 
               {slashSkillSuggestions.length > 0 ? (
                 <div className="slash-skill-panel" role="listbox" aria-label="技能选择">
+                  <div className="slash-skill-panel-head">
+                    <strong>Skills</strong>
+                    <span>{slashSkillSuggestions.length}</span>
+                  </div>
                   {slashSkillSuggestions.map((skill) => (
-                    <button key={skill.id} className="slash-skill-option" onClick={() => onSelectSlashSkill(skill.id)}>
+                    <button
+                      key={skill.id}
+                      className="slash-skill-option"
+                      onClick={() => onSelectSlashSkill(skill.id)}
+                      type="button"
+                    >
+                      <span className="slash-skill-glyph" aria-hidden="true">
+                        /
+                      </span>
                       <div className="slash-skill-copy">
-                        <strong>{skill.name}</strong>
+                        <div className="slash-skill-copy-head">
+                          <strong>{skill.name}</strong>
+                          <small>{skill.source === "installed" ? "Installed" : "Discovered"}</small>
+                        </div>
                         <span>{skill.description || "技能"}</span>
                       </div>
                       <small>{skill.source === "installed" ? "已安装" : "已发现"}</small>
@@ -341,16 +364,25 @@ export function ChatView({
 
             <div className="composer-toolbar">
               <div className="toolbar-left">
+                <button
+                  className="toolbar-icon toolbar-resource-button"
+                  onClick={() => void onPickFiles()}
+                  title="选择资源"
+                  type="button"
+                >
+                  <Paperclip size={16} />
+                </button>
+
                 <div className="knowledge-picker" ref={knowledgePickerRef}>
                   <button
                     type="button"
                     className={clsx("toolbar-chip", "knowledge-toolbar-trigger", selectedKnowledgeBases.length > 0 && "active")}
                     onClick={() => setKnowledgePickerOpen((value) => !value)}
-                    title="选择对话里要检索的知识库"
+                    title="选择当前对话使用的知识库"
                   >
                     <BookOpen size={14} />
                     <span>知识库</span>
-                    <em>{knowledgeSummary}</em>
+                    <strong>{knowledgeSummary}</strong>
                     <ChevronDown size={13} className={clsx("knowledge-trigger-arrow", knowledgePickerOpen && "open")} />
                   </button>
 
@@ -359,7 +391,7 @@ export function ChatView({
                       <div className="knowledge-picker-head">
                         <div className="knowledge-picker-head-copy">
                           <strong>对话知识库</strong>
-                          <span>选中某个知识库后，会在当前聊天里自动启用检索。</span>
+                          <span>选中后会在当前对话中自动启用检索。</span>
                         </div>
                       </div>
 
@@ -388,7 +420,7 @@ export function ChatView({
                       ) : (
                         <div className="knowledge-picker-empty">
                           <strong>还没有知识库</strong>
-                          <span>先去知识库页创建一个，再回来这里选择。</span>
+                          <span>先去知识库页面创建一个，再回到这里选择。</span>
                         </div>
                       )}
 
@@ -400,11 +432,12 @@ export function ChatView({
                           onOpenKnowledge();
                         }}
                       >
-                        管理知识库内容
+                        管理知识库
                       </button>
                     </div>
                   ) : null}
                 </div>
+
                 <label className="select-shell toolbar-select" title="选择模型">
                   <select value={composerModelId} onChange={(event) => onModelChange(event.target.value)}>
                     {selectableModels.length > 0 ? (
@@ -422,9 +455,6 @@ export function ChatView({
               </div>
 
               <div className="toolbar-right">
-                <button className="toolbar-icon" onClick={() => void onPickFiles()} title="选择附件">
-                  <Paperclip size={16} />
-                </button>
                 <button
                   className="send-button"
                   onClick={() => void (threadBusy ? onStop() : onSend())}
@@ -438,6 +468,7 @@ export function ChatView({
                           ? "请先确认输入法候选词"
                           : "发送"
                   }
+                  type="button"
                 >
                   {sending ? <LoaderCircle size={16} className="spin" /> : threadBusy ? <Square size={16} /> : <ArrowUp size={16} />}
                 </button>

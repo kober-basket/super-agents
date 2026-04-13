@@ -20,8 +20,11 @@ import { KnowledgeService } from "./knowledge-service";
 import { readJsonFile, writeJsonFile } from "./store";
 import {
   OpencodeRuntime,
+  type OpencodeFilePart,
+  type OpencodePart,
+  type OpencodeSessionMessage,
+  type OpencodeToolPart,
 } from "./opencode-runtime";
-import type { OpencodeTextPart } from "./opencode-runtime";
 import type {
   AppConfig,
   BootstrapPayload,
@@ -681,6 +684,7 @@ async function syncManagedCodexSkills(statePath: string, state: PersistedWorkspa
 function detectKind(filePath: string, mimeType?: string): PreviewKind {
   const extension = path.extname(filePath).toLowerCase();
   if (mimeType?.startsWith("image/")) return "image";
+  if (mimeType === "application/pdf" || extension === ".pdf") return "pdf";
   if (mimeType?.includes("text/html")) return "html";
   if ([".md", ".mdx"].includes(extension)) return "markdown";
   if ([".html", ".htm"].includes(extension)) return "html";
@@ -714,6 +718,154 @@ function makeFileAttachment(filePath: string, content: string, mimeType: string,
     mimeType,
     dataUrl,
   };
+}
+
+function attachmentFromFilePart(part: OpencodeFilePart): FileDropEntry {
+  const localPath =
+    part.source?.type === "file" ? part.source.path ?? filePathFromUrl(part.url) : filePathFromUrl(part.url);
+  const displayPath = localPath ?? part.filename ?? part.url;
+  return {
+    id: part.id,
+    name: part.filename ?? path.basename(displayPath) ?? "attachment",
+    path: displayPath,
+    size: 0,
+    mimeType: part.mime,
+    kind: detectKind(displayPath, part.mime),
+    url: part.url,
+  };
+}
+
+function formatToolInput(input: Record<string, unknown>) {
+  if (!input || Object.keys(input).length === 0) return "";
+  return JSON.stringify(input, null, 2);
+}
+
+function toolMessageFromPart(part: OpencodeToolPart): ChatMessage {
+  const input = formatToolInput(part.state.input);
+  const lines: string[] = [];
+  const attachments =
+    part.state.status === "completed" ? (part.state.attachments ?? []).map(attachmentFromFilePart) : [];
+
+  if (input) {
+    lines.push("Input:");
+    lines.push(input);
+  }
+
+  if (part.state.status === "completed") {
+    if (part.state.output?.trim()) {
+      if (lines.length > 0) lines.push("");
+      lines.push(part.state.output.trim());
+    }
+  } else if (part.state.status === "error") {
+    if (lines.length > 0) lines.push("");
+    lines.push(part.state.error.trim());
+  } else if (part.state.status === "running") {
+    if (part.state.title?.trim()) {
+      if (lines.length > 0) lines.push("");
+      lines.push(part.state.title.trim());
+    } else if (lines.length === 0) {
+      lines.push("Tool is running...");
+    }
+  } else if (lines.length === 0) {
+    lines.push("Tool call queued.");
+  }
+
+  const createdAt =
+    part.state.status === "pending"
+      ? Date.now()
+      : part.state.status === "running"
+        ? part.state.time.start
+        : part.state.time.start;
+
+  return {
+    id: part.callID,
+    role: "tool",
+    toolName: part.tool,
+    text: lines.join("\n"),
+    createdAt,
+    status:
+      part.state.status === "completed"
+        ? "done"
+        : part.state.status === "error"
+          ? "error"
+          : "loading",
+    attachments,
+  };
+}
+
+function baseMessageText(parts: OpencodePart[]) {
+  const textParts = parts.filter(
+    (part): part is Extract<OpencodePart, { type: "text" }> => part.type === "text" && !part.synthetic,
+  );
+  const agentParts = parts.filter(
+    (part): part is Extract<OpencodePart, { type: "agent" }> => part.type === "agent",
+  );
+  const subtaskParts = parts.filter(
+    (part): part is Extract<OpencodePart, { type: "subtask" }> => part.type === "subtask",
+  );
+  const blocks: string[] = [];
+
+  if (textParts.length > 0) {
+    blocks.push(textParts.map((part) => part.text).join("\n\n").trim());
+  }
+
+  if (agentParts.length > 0) {
+    blocks.push(agentParts.map((part) => `@${part.name}`).join("\n"));
+  }
+
+  if (subtaskParts.length > 0) {
+    blocks.push(
+      subtaskParts
+        .map((part) => `${part.description}\n${part.prompt}`.replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .join("\n\n"),
+    );
+  }
+
+  return blocks.filter(Boolean).join("\n\n").trim();
+}
+
+function messageTimestamp(message: OpencodeSessionMessage) {
+  if (message.info.role === "assistant") {
+    return message.info.time.completed ?? message.info.time.created;
+  }
+  return message.info.time.created;
+}
+
+function convertMessages(messages: OpencodeSessionMessage[]): ChatMessage[] {
+  const result: ChatMessage[] = [];
+
+  for (const message of messages) {
+    const isPendingAssistant =
+      message.info.role === "assistant" &&
+      !message.info.error &&
+      message.info.time.completed === undefined;
+    const fileAttachments = message.parts
+      .filter((part): part is OpencodeFilePart => part.type === "file")
+      .map(attachmentFromFilePart);
+
+    for (const part of message.parts) {
+      if (part.type === "tool") {
+        result.push(toolMessageFromPart(part));
+      }
+    }
+
+    const text = baseMessageText(message.parts) || message.info.error?.data?.message || "";
+    if (!text && fileAttachments.length === 0 && message.info.role === "assistant" && !isPendingAssistant) {
+      continue;
+    }
+
+    result.push({
+      id: message.info.id,
+      role: message.info.role,
+      text,
+      createdAt: messageTimestamp(message),
+      attachments: fileAttachments,
+      status: message.info.error ? "error" : isPendingAssistant ? "loading" : "done",
+    });
+  }
+
+  return result.sort((left, right) => left.createdAt - right.createdAt);
 }
 
 export class WorkspaceService {
@@ -908,15 +1060,29 @@ export class WorkspaceService {
       const response = await fetch(payload.url);
       const contentType = response.headers.get("content-type") || "text/html";
       const mimeType = contentType.split(";")[0]?.trim() || "text/html";
-      const body = await response.text();
       const kind =
-        mimeType.startsWith("text/html")
+        mimeType === "application/pdf"
+          ? "pdf"
+          : mimeType.startsWith("text/html")
           ? "web"
           : mimeType.startsWith("text/markdown")
             ? "markdown"
             : mimeType.startsWith("text/")
               ? "text"
               : "binary";
+
+      if (kind === "pdf") {
+        return {
+          title: payload.title ?? payload.url,
+          path: payload.url,
+          kind,
+          mimeType,
+          content: "",
+          url: payload.url,
+        };
+      }
+
+      const body = await response.text();
 
       return {
         title: payload.title ?? payload.url,
@@ -931,13 +1097,18 @@ export class WorkspaceService {
     if (payload.url?.startsWith("data:")) {
       const [header, content] = payload.url.split(",", 2);
       const mimeType = header.match(/^data:(.+?);base64$/)?.[1] ?? "text/plain";
-      const kind = (payload.kind as FilePreviewPayload["kind"]) ?? (mimeType.startsWith("image/") ? "image" : "text");
+      const kind =
+        (payload.kind as FilePreviewPayload["kind"]) ??
+        (mimeType.startsWith("image/") ? "image" : mimeType === "application/pdf" ? "pdf" : "text");
       return {
         title: payload.title ?? "Preview",
         path: payload.path ?? null,
         kind,
         mimeType,
-        content: kind === "image" ? payload.url : Buffer.from(content ?? "", "base64").toString("utf8"),
+        content:
+          kind === "image" || kind === "pdf"
+            ? payload.url
+            : Buffer.from(content ?? "", "base64").toString("utf8"),
         url: kind === "html" ? payload.url : undefined,
       };
     }
@@ -955,7 +1126,7 @@ export class WorkspaceService {
     const mimeType = String(mime.lookup(resolvedPath) || "application/octet-stream");
     const kind = detectKind(resolvedPath, mimeType);
 
-    if (kind === "image") {
+    if (kind === "image" || kind === "pdf") {
       const buffer = await readFile(resolvedPath);
       return {
         title: payload.title ?? fileName,
@@ -963,6 +1134,17 @@ export class WorkspaceService {
         kind,
         mimeType,
         content: `data:${mimeType};base64,${buffer.toString("base64")}`,
+        url: kind === "pdf" ? pathToFileURL(resolvedPath).href : undefined,
+      };
+    }
+
+    if (kind === "binary") {
+      return {
+        title: payload.title ?? fileName,
+        path: resolvedPath,
+        kind,
+        mimeType,
+        content: "",
       };
     }
 
@@ -1018,18 +1200,7 @@ export class WorkspaceService {
       this.runtime.listMessages(state.config, sessionId),
     ]);
 
-    const chatMessages: ChatMessage[] = messages.map((msg) => {
-      const textParts = msg.parts.filter((p) => p.type === "text") as OpencodeTextPart[];
-      const text = textParts.map((p) => p.text).join("\n");
-
-      return {
-        id: msg.info.id,
-        role: msg.info.role === "user" ? "user" : "assistant",
-        text,
-        createdAt: msg.info.time.created,
-        status: msg.info.time.completed ? "done" : msg.info.error ? "error" : "loading",
-      };
-    });
+    const chatMessages = convertMessages(messages);
 
     return {
       id: session.id,

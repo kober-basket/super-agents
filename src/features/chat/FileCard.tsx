@@ -1,9 +1,8 @@
 import clsx from "clsx";
-import { FolderOpen } from "lucide-react";
 
 import { formatBytes } from "../../lib/format";
 import type { FileDropEntry } from "../../types";
-import { fileKind } from "../shared/utils";
+import { describePreviewItem, fileKind } from "../shared/utils";
 
 interface FileCardProps {
   file: FileDropEntry;
@@ -11,15 +10,26 @@ interface FileCardProps {
 }
 
 export function FileCard({ file, onOpen }: FileCardProps) {
+  const kind = file.kind ?? fileKind(file);
+  const presentation = describePreviewItem({
+    kind,
+    path: file.path,
+    name: file.name,
+    mimeType: file.mimeType,
+  });
+
   return (
     <button className="file-tile" onClick={() => onOpen(file)}>
-      <div className={clsx("file-tile-icon", file.kind ?? fileKind(file))}>
-        <FolderOpen size={14} />
+      <div className={clsx("file-tile-icon", `tone-${presentation.tone}`)}>
+        <span>{presentation.badge}</span>
       </div>
       <div className="file-tile-copy">
-        <strong>{file.name}</strong>
+        <div className="file-tile-title">
+          <strong>{file.name}</strong>
+          <em>{presentation.label}</em>
+        </div>
         <span>
-          {formatBytes(file.size)} · {file.path}
+          {formatBytes(file.size)} 路 {file.path}
         </span>
       </div>
     </button>

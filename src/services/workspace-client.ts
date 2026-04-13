@@ -51,6 +51,8 @@ export const workspaceClient = {
     window.desktopAgent.setThreadWorkspace(threadId, workspaceRoot),
   readPreview: (payload: Parameters<typeof window.desktopAgent.readPreview>[0]) =>
     window.desktopAgent.readPreview(payload),
+  openPreviewTarget: (payload: Parameters<typeof window.desktopAgent.openPreviewTarget>[0]) =>
+    window.desktopAgent.openPreviewTarget(payload),
   openWorkspaceFolder: (threadId?: string) => window.desktopAgent.openWorkspaceFolder(threadId),
   getWindowState: () => window.desktopAgent.getWindowState(),
   minimizeWindow: () => window.desktopAgent.minimizeWindow(),

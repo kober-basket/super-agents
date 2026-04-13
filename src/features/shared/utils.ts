@@ -1,5 +1,16 @@
 import type { FileDropEntry, McpServerStatus, PreviewKind } from "../../types";
 
+const OFFICE_EXTENSIONS = new Set([
+  "doc",
+  "docx",
+  "ppt",
+  "pptx",
+  "xls",
+  "xlsx",
+  "pps",
+  "ppsx",
+]);
+
 function createUid() {
   return Math.random().toString(36).slice(2);
 }
@@ -21,12 +32,65 @@ export function fileKind(file: FileDropEntry): PreviewKind {
   if (file.dataUrl || file.url?.startsWith("data:image/") || file.mimeType.startsWith("image/")) {
     return "image";
   }
+  if (file.mimeType === "application/pdf" || file.name.match(/\.pdf$/i)) return "pdf";
   if (file.name.match(/\.(md|mdx)$/i)) return "markdown";
-  if (file.name.match(/\.(ts|tsx|js|jsx|json|css|html|yml|yaml|py|go|rs|java|sh|ps1)$/i)) {
+  if (file.name.match(/\.(html|htm)$/i)) return "html";
+  if (file.name.match(/\.(ts|tsx|js|jsx|json|css|yml|yaml|py|go|rs|java|sh|ps1)$/i)) {
     return "code";
   }
   if (file.name.match(/\.(txt|log|out|err)$/i)) return "text";
   return "binary";
+}
+
+export function getFileExtension(value?: string | null) {
+  const normalized = value?.split("?")[0]?.split("#")[0] ?? "";
+  const extension = normalized.split(".").pop()?.toLowerCase() ?? "";
+  return extension && extension !== normalized.toLowerCase() ? extension : "";
+}
+
+export function isOfficeDocument(value?: string | null, mimeType?: string) {
+  const extension = getFileExtension(value);
+  if (OFFICE_EXTENSIONS.has(extension)) return true;
+  return (
+    mimeType?.startsWith("application/vnd.openxmlformats-officedocument") === true ||
+    mimeType?.startsWith("application/vnd.ms-") === true
+  );
+}
+
+export function describePreviewItem(input: {
+  kind?: PreviewKind;
+  path?: string | null;
+  name?: string | null;
+  mimeType?: string;
+}) {
+  const extension = getFileExtension(input.path ?? input.name);
+  const uppercaseExtension = extension ? extension.toUpperCase().slice(0, 4) : "FILE";
+
+  if (input.kind === "pdf" || extension === "pdf" || input.mimeType === "application/pdf") {
+    return { badge: "PDF", label: "PDF document", tone: "rose" } as const;
+  }
+  if (input.kind === "image") {
+    return { badge: extension ? uppercaseExtension : "IMG", label: "Image asset", tone: "amber" } as const;
+  }
+  if (input.kind === "web") {
+    return { badge: "WEB", label: "Web page", tone: "blue" } as const;
+  }
+  if (input.kind === "html") {
+    return { badge: "HTML", label: "HTML preview", tone: "orange" } as const;
+  }
+  if (input.kind === "markdown") {
+    return { badge: extension ? uppercaseExtension : "MD", label: "Markdown note", tone: "green" } as const;
+  }
+  if (input.kind === "code") {
+    return { badge: extension ? uppercaseExtension : "CODE", label: "Source file", tone: "violet" } as const;
+  }
+  if (input.kind === "text") {
+    return { badge: extension ? uppercaseExtension : "TXT", label: "Text document", tone: "ink" } as const;
+  }
+  if (isOfficeDocument(input.path ?? input.name, input.mimeType)) {
+    return { badge: uppercaseExtension, label: "Office document", tone: "blue" } as const;
+  }
+  return { badge: uppercaseExtension, label: "Binary file", tone: "slate" } as const;
 }
 
 export function sanitizeMcpName(value: string) {

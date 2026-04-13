@@ -248,6 +248,24 @@ app.whenReady().then(async () => {
     return await service!.readPreview(payload);
   });
 
+  ipcMain.handle("desktop:open-preview-target", async (_event, payload: { path?: string; url?: string }) => {
+    const externalUrl = payload.url?.trim();
+    if (externalUrl?.startsWith("http://") || externalUrl?.startsWith("https://")) {
+      await shell.openExternal(externalUrl);
+      return;
+    }
+
+    const targetPath = payload.path?.trim();
+    if (!targetPath) {
+      throw new Error("Missing preview target");
+    }
+
+    const error = await shell.openPath(targetPath);
+    if (error) {
+      throw new Error(error);
+    }
+  });
+
   ipcMain.handle("desktop:open-workspace-folder", async () => {
     const payload = await service!.bootstrap();
     const target = payload.config.opencodeRoot;

@@ -40,6 +40,35 @@ function uid() {
   return Math.random().toString(36).slice(2);
 }
 
+const SIDEBAR_WIDTH_STORAGE_KEY = "super-agents:sidebar-width";
+const SETTINGS_SIDEBAR_WIDTH_STORAGE_KEY = "super-agents:settings-sidebar-width";
+const PREVIEW_PANE_WIDTH_STORAGE_KEY = "super-agents:preview-pane-width";
+const SIDEBAR_DEFAULT_WIDTH = 236;
+const SETTINGS_SIDEBAR_DEFAULT_WIDTH = 344;
+const PREVIEW_PANE_DEFAULT_WIDTH = 380;
+const SIDEBAR_MIN_WIDTH = 188;
+const SIDEBAR_MAX_WIDTH = 360;
+const SETTINGS_SIDEBAR_MIN_WIDTH = 260;
+const SETTINGS_SIDEBAR_MAX_WIDTH = 460;
+const PREVIEW_PANE_MIN_WIDTH = 300;
+const PREVIEW_PANE_MAX_WIDTH = 640;
+
+type ResizeTarget = "sidebar" | "settings-sidebar" | "preview";
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function readStoredWidth(key: string, fallback: number) {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  const rawValue = window.localStorage.getItem(key);
+  const parsedValue = rawValue ? Number.parseInt(rawValue, 10) : Number.NaN;
+  return Number.isFinite(parsedValue) ? parsedValue : fallback;
+}
+
 export default function App() {
   const [view, setView] = useState<AppSection>("chat");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("assistant");
@@ -57,6 +86,20 @@ export default function App() {
   const [providerRefreshingId, setProviderRefreshingId] = useState<string | null>(null);
   const [selectedModelProviderId, setSelectedModelProviderId] = useState("");
   const [windowState, setWindowState] = useState<DesktopWindowState | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    readStoredWidth(SIDEBAR_WIDTH_STORAGE_KEY, SIDEBAR_DEFAULT_WIDTH),
+  );
+  const [settingsSidebarWidth, setSettingsSidebarWidth] = useState(() =>
+    readStoredWidth(SETTINGS_SIDEBAR_WIDTH_STORAGE_KEY, SETTINGS_SIDEBAR_DEFAULT_WIDTH),
+  );
+  const [previewPaneWidth, setPreviewPaneWidth] = useState(() =>
+    readStoredWidth(PREVIEW_PANE_WIDTH_STORAGE_KEY, PREVIEW_PANE_DEFAULT_WIDTH),
+  );
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? 1440 : window.innerWidth,
+  );
+  const [resizeTarget, setResizeTarget] = useState<ResizeTarget | null>(null);
+  const resizeStateRef = useRef<{ startX: number; startWidth: number; target: ResizeTarget } | null>(null);
   const {
     activeModel,
     activeSummary,
@@ -177,6 +220,84 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const handleResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      SIDEBAR_WIDTH_STORAGE_KEY,
+      String(clamp(sidebarWidth, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)),
+    );
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      SETTINGS_SIDEBAR_WIDTH_STORAGE_KEY,
+      String(clamp(settingsSidebarWidth, SETTINGS_SIDEBAR_MIN_WIDTH, SETTINGS_SIDEBAR_MAX_WIDTH)),
+    );
+  }, [settingsSidebarWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      PREVIEW_PANE_WIDTH_STORAGE_KEY,
+      String(clamp(previewPaneWidth, PREVIEW_PANE_MIN_WIDTH, PREVIEW_PANE_MAX_WIDTH)),
+    );
+  }, [previewPaneWidth]);
+
+  useEffect(() => {
+    if (!resizeTarget) {
+      document.body.classList.remove("pane-resizing");
+      return undefined;
+    }
+
+    document.body.classList.add("pane-resizing");
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const state = resizeStateRef.current;
+      if (!state) {
+        return;
+      }
+
+      const deltaX = event.clientX - state.startX;
+      if (state.target === "sidebar") {
+        setSidebarWidth(clamp(state.startWidth + deltaX, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH));
+        return;
+      }
+
+      if (state.target === "settings-sidebar") {
+        setSettingsSidebarWidth(
+          clamp(state.startWidth + deltaX, SETTINGS_SIDEBAR_MIN_WIDTH, SETTINGS_SIDEBAR_MAX_WIDTH),
+        );
+        return;
+      }
+
+      setPreviewPaneWidth(clamp(state.startWidth - deltaX, PREVIEW_PANE_MIN_WIDTH, PREVIEW_PANE_MAX_WIDTH));
+    };
+
+    const stopResize = () => {
+      resizeStateRef.current = null;
+      setResizeTarget(null);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+
+    return () => {
+      document.body.classList.remove("pane-resizing");
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+  }, [resizeTarget]);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = config.appearance.theme;
     return () => {
       delete document.documentElement.dataset.theme;
@@ -265,6 +386,7 @@ export default function App() {
       kind: fileKind(file),
       mimeType: file.mimeType,
       content: file.content ?? file.dataUrl ?? "",
+      loading: !file.content && !file.dataUrl,
     });
 
     if (!file.content && !file.dataUrl) {
@@ -291,6 +413,7 @@ export default function App() {
       mimeType: "text/html",
       content: "",
       url,
+      loading: true,
     });
 
     try {
@@ -302,6 +425,14 @@ export default function App() {
       setPreview(payload);
     } catch {
       setToast("Open page preview failed");
+    }
+  }
+
+  async function openPreviewExternally(payload: { path?: string; url?: string }) {
+    try {
+      await workspaceClient.openPreviewTarget(payload);
+    } catch {
+      setToast("Open preview externally failed");
     }
   }
 
@@ -787,6 +918,17 @@ export default function App() {
   }
 
   const showPreviewPane = view === "chat" && preview && previewOpen;
+  const canResizePanels = viewportWidth > 840;
+  const showInlinePreviewPane = Boolean(showPreviewPane) && viewportWidth > 1400;
+  const activeSidebarWidth = view === "settings" ? settingsSidebarWidth : sidebarWidth;
+  const appShellStyle =
+    canResizePanels
+      ? {
+          gridTemplateColumns: showInlinePreviewPane
+            ? `${activeSidebarWidth}px minmax(0, 1fr) ${previewPaneWidth}px`
+            : `${activeSidebarWidth}px minmax(0, 1fr)`,
+        }
+      : undefined;
   const threadBusy = !drafting && (activeThread?.messages.some((message) => message.status === "loading") ?? false);
   const settingsStats = {
     threadCount: activeThreads.length + archivedThreads.length,
@@ -795,6 +937,35 @@ export default function App() {
   };
   const hasSkillResults =
     filteredInstalledSkills.length > 0 || filteredReferenceSkills.length > 0;
+
+  const beginResize =
+    (target: ResizeTarget, width: number) => (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      event.preventDefault();
+      resizeStateRef.current = {
+        startX: event.clientX,
+        startWidth: width,
+        target,
+      };
+      setResizeTarget(target);
+    };
+
+  const resetWidth = (target: ResizeTarget) => {
+    if (target === "sidebar") {
+      setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+      return;
+    }
+
+    if (target === "settings-sidebar") {
+      setSettingsSidebarWidth(SETTINGS_SIDEBAR_DEFAULT_WIDTH);
+      return;
+    }
+
+    setPreviewPaneWidth(PREVIEW_PANE_DEFAULT_WIDTH);
+  };
 
   function renderSettingsView() {
     if (settingsSection === "appearance") {
@@ -970,7 +1141,10 @@ export default function App() {
         onToggleMaximize={toggleMaximizeWindow}
       />
 
-      <div className={clsx("app-shell", showPreviewPane && "with-preview", view === "settings" && "settings-mode")}>
+      <div
+        className={clsx("app-shell", showPreviewPane && "with-preview", view === "settings" && "settings-mode")}
+        style={appShellStyle}
+      >
         {view === "settings" ? (
           <SettingsSidebar
             settingsSection={settingsSection}
@@ -994,9 +1168,41 @@ export default function App() {
           />
         )}
 
+        {canResizePanels ? (
+          <button
+            aria-label={view === "settings" ? "调整设置侧栏宽度" : "调整左侧栏宽度"}
+            className={clsx(
+              "pane-resizer",
+              "pane-resizer-left",
+              ((view === "settings" && resizeTarget === "settings-sidebar") ||
+                (view !== "settings" && resizeTarget === "sidebar")) &&
+                "active",
+            )}
+            onDoubleClick={() => resetWidth(view === "settings" ? "settings-sidebar" : "sidebar")}
+            onPointerDown={beginResize(view === "settings" ? "settings-sidebar" : "sidebar", activeSidebarWidth)}
+            style={{ left: `${activeSidebarWidth - 6}px` }}
+            type="button"
+          >
+            <span className="pane-resizer-rail" />
+          </button>
+        ) : null}
+
         <main className="workspace">
           {renderMainView()}
         </main>
+
+        {showInlinePreviewPane ? (
+          <button
+            aria-label="调整右侧预览宽度"
+            className={clsx("pane-resizer", "pane-resizer-right", resizeTarget === "preview" && "active")}
+            onDoubleClick={() => resetWidth("preview")}
+            onPointerDown={beginResize("preview", previewPaneWidth)}
+            style={{ right: `${previewPaneWidth - 6}px` }}
+            type="button"
+          >
+            <span className="pane-resizer-rail" />
+          </button>
+        ) : null}
 
         {showPreviewPane && preview ? (
           <PreviewPane
@@ -1004,6 +1210,7 @@ export default function App() {
             onClearPreview={() => setPreview(null)}
             onClosePane={() => setPreviewOpen(false)}
             onOpenLink={openPreviewLink}
+            onOpenExternal={openPreviewExternally}
           />
         ) : null}
       </div>

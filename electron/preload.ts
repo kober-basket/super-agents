@@ -93,6 +93,8 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:set-thread-workspace", { threadId, workspaceRoot }) as Promise<BootstrapPayload>,
   readPreview: (payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) =>
     ipcRenderer.invoke("desktop:read-preview", payload) as Promise<FilePreviewPayload>,
+  openPreviewTarget: (payload: { path?: string; url?: string }) =>
+    ipcRenderer.invoke("desktop:open-preview-target", payload) as Promise<void>,
   openWorkspaceFolder: (threadId?: string) => ipcRenderer.invoke("desktop:open-workspace-folder", threadId) as Promise<void>,
   getWindowState: () => ipcRenderer.invoke("desktop:get-window-state") as Promise<DesktopWindowState>,
   minimizeWindow: () => ipcRenderer.invoke("desktop:minimize-window") as Promise<DesktopWindowState>,
