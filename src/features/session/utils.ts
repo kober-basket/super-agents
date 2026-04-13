@@ -308,6 +308,14 @@ export function shouldKeepLocalThreadOverride(localThread: ThreadRecord, incomin
     return false
   }
 
+  // If the incoming thread already has a completed assistant reply, yield to it
+  const incomingHasCompletedReply = incomingThread.messages.some(
+    (message) => message.role === "assistant" && message.status === "done" && message.text.trim().length > 0,
+  )
+  if (incomingHasCompletedReply) {
+    return false
+  }
+
   return threadProgressScore(localThread) > threadProgressScore(incomingThread)
 }
 

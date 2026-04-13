@@ -4,7 +4,7 @@ import { getActiveModelOption, getSelectableModels } from "../../lib/model-confi
 import { workspaceClient } from "../../services/workspace-client";
 import type {
   AppConfig,
-  BootstrapPayload,
+  ChatMessage,
   FileDropEntry,
   McpServerStatus,
   PendingQuestion,
@@ -13,66 +13,52 @@ import type {
   ThreadRecord,
   ThreadSummary,
 } from "../../types";
-import { displayThreadTitle } from "../shared/utils";
 import type {
   ComposerSkill,
-  DraftThreadState,
   SessionStatus,
   SkillMessageMarker,
-  SkillPromptMeta,
-  WorkspaceSnapshot,
 } from "./types";
 import {
-  LEGACY_SKILL_MESSAGE_MARKER_KEYS,
-  LEGACY_WORKSPACE_SNAPSHOT_KEYS,
-  SKILL_MESSAGE_MARKERS_KEY,
-  WORKSPACE_SNAPSHOT_KEY,
   buildSkillPrompt,
   cloneConfig,
-  createSessionId,
-  createOptimisticThread,
   formatErrorMessage,
-  markThreadRequestFailed,
   normalizeConfig,
   normalizeSkillToken,
   parseSlashSkillCommand,
   readJsonStorageFromKeys,
-  shouldKeepLocalThreadOverride,
-  sortThreadSummaries,
-  summarizeThreadRecord,
-  wait,
+  LEGACY_SKILL_MESSAGE_MARKER_KEYS,
+  LEGACY_WORKSPACE_SNAPSHOT_KEYS,
+  SKILL_MESSAGE_MARKERS_KEY,
+  WORKSPACE_SNAPSHOT_KEY,
   workspaceLabel,
   writeJsonStorage,
 } from "./utils";
+import type { WorkspaceSnapshot } from "./types";
+
+// ── state ────────────────────────────────────────────────────────────────────
 
 type SessionState = {
   config: AppConfig;
-  threads: ThreadSummary[];
-  activeThreadId: string;
-  threadCache: Record<string, ThreadRecord>;
-  draft: DraftThreadState | null;
   composer: string;
   attachments: FileDropEntry[];
   composerComposing: boolean;
   dragActive: boolean;
-  workspaceIssue: string | null;
   availableSkills: RuntimeSkill[];
   mcpStatuses: McpServerStatus[];
   selectedComposerSkill: ComposerSkill | null;
   skillMessageMarkers: Record<string, SkillMessageMarker>;
+  // ── session (stub — to be implemented) ───────────────────────────────────
+  threads: ThreadSummary[];
+  activeThreadId: string;
+  activeThread: ThreadRecord | null;
   pendingQuestions: PendingQuestion[];
+  drafting: boolean;
+  workspaceIssue: string | null;
   status: SessionStatus;
 };
 
 type SessionAction =
-  | { type: "workspace/hydrate"; payload: BootstrapPayload & { currentThread: ThreadRecord | null; threads: ThreadSummary[] } }
-  | { type: "workspace/issue"; payload: string | null }
   | { type: "config/set"; payload: AppConfig }
-  | { type: "thread/remember"; payload: ThreadRecord }
-  | { type: "thread/activate"; payload: string }
-  | { type: "threads/set"; payload: ThreadSummary[] }
-  | { type: "thread/remove"; payload: string }
-  | { type: "draft/set"; payload: DraftThreadState | null }
   | { type: "composer/set"; payload: string }
   | { type: "composer/clear" }
   | { type: "attachments/set"; payload: FileDropEntry[] }
@@ -82,20 +68,23 @@ type SessionAction =
   | { type: "drag/set"; payload: boolean }
   | { type: "composerSkill/set"; payload: ComposerSkill | null }
   | { type: "skillMarkers/set"; payload: Record<string, SkillMessageMarker> }
-  | { type: "status/merge"; payload: Partial<SessionStatus> };
+  | { type: "skills/set"; payload: RuntimeSkill[] }
+  | { type: "mcpStatuses/set"; payload: McpServerStatus[] }
+  | { type: "threads/set"; payload: ThreadSummary[] }
+  | { type: "thread/create"; payload: ThreadSummary }
+  | { type: "thread/open"; payload: { threadId: string; thread: ThreadRecord } }
+  | { type: "thread/archive"; payload: { threadId: string; archived: boolean } }
+  | { type: "thread/delete"; payload: string }
+  | { type: "pendingQuestions/set"; payload: PendingQuestion[] }
+  | { type: "status/set"; payload: Partial<SessionStatus> };
 
 function createInitialState(snapshot: WorkspaceSnapshot | null): SessionState {
   return {
     config: normalizeConfig(snapshot?.config),
-    threads: snapshot?.threads ?? [],
-    activeThreadId: snapshot?.activeThreadId ?? "",
-    threadCache: snapshot?.currentThread ? { [snapshot.currentThread.id]: snapshot.currentThread } : {},
-    draft: null,
     composer: "",
     attachments: [],
     composerComposing: false,
     dragActive: false,
-    workspaceIssue: null,
     availableSkills: snapshot?.availableSkills ?? [],
     mcpStatuses: snapshot?.mcpStatuses ?? [],
     selectedComposerSkill: null,
@@ -104,9 +93,14 @@ function createInitialState(snapshot: WorkspaceSnapshot | null): SessionState {
         SKILL_MESSAGE_MARKERS_KEY,
         ...LEGACY_SKILL_MESSAGE_MARKER_KEYS,
       ]) ?? {},
+    threads: snapshot?.threads ?? [],
+    activeThreadId: snapshot?.activeThreadId ?? "",
+    activeThread: snapshot?.currentThread ?? null,
     pendingQuestions: snapshot?.pendingQuestions ?? [],
+    drafting: false,
+    workspaceIssue: null,
     status: {
-      bootstrapping: true,
+      bootstrapping: false,
       creatingThread: false,
       refreshingThreads: false,
       openingThreadId: null,
@@ -116,70 +110,10 @@ function createInitialState(snapshot: WorkspaceSnapshot | null): SessionState {
   };
 }
 
-function upsertThread(threadCache: Record<string, ThreadRecord>, threads: ThreadSummary[], thread: ThreadRecord) {
-  const summary = summarizeThreadRecord(thread);
-  const nextThreads = threads.filter((item) => item.id !== summary.id);
-  nextThreads.push(summary);
-
-  return {
-    threadCache: {
-      ...threadCache,
-      [thread.id]: thread,
-    },
-    threads: sortThreadSummaries(nextThreads),
-  };
-}
-
 function sessionReducer(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
-    case "workspace/hydrate":
-      return {
-        ...state,
-        config: normalizeConfig(action.payload.config),
-        threads: action.payload.threads,
-        activeThreadId: action.payload.activeThreadId,
-        threadCache: action.payload.currentThread
-          ? {
-              ...state.threadCache,
-              [action.payload.currentThread.id]: action.payload.currentThread,
-            }
-          : state.threadCache,
-        availableSkills: action.payload.availableSkills,
-        mcpStatuses: action.payload.mcpStatuses,
-        pendingQuestions: action.payload.pendingQuestions,
-        workspaceIssue: null,
-        status: {
-          ...state.status,
-          bootstrapping: false,
-          creatingThread: false,
-          refreshingThreads: false,
-          openingThreadId: null,
-          mutatingThreadId: null,
-        },
-      };
-    case "workspace/issue":
-      return { ...state, workspaceIssue: action.payload };
     case "config/set":
       return { ...state, config: action.payload };
-    case "thread/remember": {
-      const next = upsertThread(state.threadCache, state.threads, action.payload);
-      return { ...state, threadCache: next.threadCache, threads: next.threads };
-    }
-    case "thread/activate":
-      return { ...state, activeThreadId: action.payload };
-    case "threads/set":
-      return { ...state, threads: sortThreadSummaries(action.payload) };
-    case "thread/remove": {
-      const nextCache = { ...state.threadCache };
-      delete nextCache[action.payload];
-      return {
-        ...state,
-        threadCache: nextCache,
-        threads: state.threads.filter((thread) => thread.id !== action.payload),
-      };
-    }
-    case "draft/set":
-      return { ...state, draft: action.payload };
     case "composer/set":
       return { ...state, composer: action.payload };
     case "composer/clear":
@@ -198,12 +132,77 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
       return { ...state, selectedComposerSkill: action.payload };
     case "skillMarkers/set":
       return { ...state, skillMessageMarkers: action.payload };
-    case "status/merge":
+    case "skills/set":
+      return { ...state, availableSkills: action.payload };
+    case "mcpStatuses/set":
+      return { ...state, mcpStatuses: action.payload };
+    case "threads/set":
+      return { ...state, threads: action.payload };
+    case "thread/create":
+      return {
+        ...state,
+        threads: [action.payload, ...state.threads],
+        activeThreadId: action.payload.id,
+        activeThread: { ...action.payload, messages: [] },
+        status: { ...state.status, creatingThread: false },
+      };
+    case "thread/open": {
+      const openedThread = action.payload.thread;
+      // Draft thread (empty id) — just set active state, don't touch threads list
+      if (!openedThread.id) {
+        return {
+          ...state,
+          activeThreadId: "",
+          activeThread: openedThread,
+          status: { ...state.status, openingThreadId: null },
+        };
+      }
+      const updatedSummary: ThreadSummary = {
+        id: openedThread.id,
+        title: openedThread.title,
+        updatedAt: openedThread.updatedAt,
+        lastMessage: openedThread.lastMessage,
+        messageCount: openedThread.messageCount,
+        archived: openedThread.archived,
+        workspaceRoot: openedThread.workspaceRoot,
+      };
+      const hasThread = state.threads.some((t) => t.id === openedThread.id);
+      return {
+        ...state,
+        activeThreadId: action.payload.threadId,
+        activeThread: openedThread,
+        threads: hasThread
+          ? state.threads.map((t) => (t.id === openedThread.id ? updatedSummary : t))
+          : [updatedSummary, ...state.threads],
+        status: { ...state.status, openingThreadId: null },
+      };
+    }
+    case "thread/archive":
+      return {
+        ...state,
+        threads: state.threads.map((t) =>
+          t.id === action.payload.threadId ? { ...t, archived: action.payload.archived } : t,
+        ),
+        status: { ...state.status, mutatingThreadId: null },
+      };
+    case "thread/delete":
+      return {
+        ...state,
+        threads: state.threads.filter((t) => t.id !== action.payload),
+        activeThreadId: state.activeThreadId === action.payload ? "" : state.activeThreadId,
+        activeThread: state.activeThreadId === action.payload ? null : state.activeThread,
+        status: { ...state.status, mutatingThreadId: null },
+      };
+    case "pendingQuestions/set":
+      return { ...state, pendingQuestions: action.payload };
+    case "status/set":
       return { ...state, status: { ...state.status, ...action.payload } };
     default:
       return state;
   }
 }
+
+// ── hook ─────────────────────────────────────────────────────────────────────
 
 type UseSessionControllerOptions = {
   onOpenChat: () => void;
@@ -219,15 +218,11 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   const pendingConfigSaveRef = useRef<number | null>(null);
   const configSaveVersionRef = useRef(0);
   const skillMessageMarkersRef = useRef(state.skillMessageMarkers);
-  const localThreadOverridesRef = useRef<Record<string, ThreadRecord>>({});
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
-  const activeThread = state.draft ? state.draft.thread : state.threadCache[state.activeThreadId] ?? null;
-  const activeSummary = useMemo(
-    () => (state.draft ? null : state.threads.find((thread) => thread.id === state.activeThreadId) ?? null),
-    [state.activeThreadId, state.draft, state.threads],
-  );
-  const activeThreads = useMemo(() => state.threads.filter((thread) => !thread.archived), [state.threads]);
-  const archivedThreads = useMemo(() => state.threads.filter((thread) => thread.archived), [state.threads]);
+  // ── derived ────────────────────────────────────────────────────────────────
+
   const activeModel = useMemo(
     () => getActiveModelOption(state.config.modelProviders, state.config.activeModelId),
     [state.config.activeModelId, state.config.modelProviders],
@@ -241,50 +236,43 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     () => Object.fromEntries(state.mcpStatuses.map((item) => [item.name, item])) as Record<string, McpServerStatus>,
     [state.mcpStatuses],
   );
-  const currentWorkspacePath =
-    state.draft?.workspaceRoot || activeThread?.workspaceRoot || activeSummary?.workspaceRoot || state.config.opencodeRoot || "";
-  const currentWorkspaceLabel = workspaceLabel(currentWorkspacePath);
-  const title = displayThreadTitle(
-    state.draft ? state.draft.thread?.title || "New Thread" : activeSummary?.title || activeThread?.title || "New Thread",
+  const activeThreads = useMemo(() => state.threads.filter((t) => !t.archived), [state.threads]);
+  const archivedThreads = useMemo(() => state.threads.filter((t) => t.archived), [state.threads]);
+  const activeSummary = useMemo(
+    () => state.threads.find((t) => t.id === state.activeThreadId) ?? null,
+    [state.activeThreadId, state.threads],
   );
+  const currentWorkspacePath =
+    state.activeThread?.workspaceRoot || activeSummary?.workspaceRoot || state.config.opencodeRoot || "";
+  const currentWorkspaceLabel = workspaceLabel(currentWorkspacePath);
+  const title = activeSummary?.title || state.activeThread?.title || "新会话";
 
-  const composerSkillOptions = useMemo(() => {
+  const composerSkillOptionsById = useMemo(() => {
     const installed = state.config.skills
       .filter((skill) => skill.enabled !== false)
-      .map(
-        (skill) =>
-          ({
-            id: skill.id,
-            name: skill.name,
-            description: skill.description,
-            kind: skill.kind,
-            source: "installed",
-            enabled: skill.enabled !== false,
-          }) satisfies ComposerSkill,
-      );
+      .map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        kind: skill.kind,
+        source: "installed" as const,
+        enabled: true,
+      } satisfies ComposerSkill));
 
-    const knownNames = new Set(installed.map((skill) => normalizeSkillToken(skill.name || skill.id)));
+    const knownNames = new Set(installed.map((s) => normalizeSkillToken(s.name || s.id)));
     const discovered = state.availableSkills
-      .filter((skill) => !knownNames.has(normalizeSkillToken(skill.name || skill.id)))
-      .map(
-        (skill) =>
-          ({
-            id: skill.id,
-            name: skill.name,
-            description: skill.description,
-            kind: "reference",
-            source: "reference",
-            enabled: true,
-          }) satisfies ComposerSkill,
-      );
+      .filter((s) => !knownNames.has(normalizeSkillToken(s.name || s.id)))
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        kind: "reference" as const,
+        source: "reference" as const,
+        enabled: true,
+      } satisfies ComposerSkill));
 
-    return [...installed, ...discovered];
+    return new Map([...installed, ...discovered].map((s) => [s.id, s] as const));
   }, [state.availableSkills, state.config.skills]);
-
-  const composerSkillOptionsById = useMemo(
-    () => new Map(composerSkillOptions.map((skill) => [skill.id, skill] as const)),
-    [composerSkillOptions],
-  );
 
   const installedSkillMap = useMemo(
     () =>
@@ -318,158 +306,32 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
 
   const slashSkillSuggestions = useMemo(() => {
     if (state.selectedComposerSkill) return [];
-
     const match = state.composer.match(/^\/([^\s]*)$/);
     if (!match) return [];
-
     const query = normalizeSkillToken(match[1] ?? "");
     const merged = new Map<string, ComposerSkill>();
-
     for (const skill of state.config.skills) {
       if (skill.enabled === false) continue;
       merged.set(normalizeSkillToken(skill.name || skill.id), {
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        kind: skill.kind,
-        source: "installed",
-        enabled: true,
+        id: skill.id, name: skill.name, description: skill.description,
+        kind: skill.kind, source: "installed", enabled: true,
       });
     }
-
     for (const skill of state.availableSkills) {
       const key = normalizeSkillToken(skill.name || skill.id);
       if (!merged.has(key)) {
         merged.set(key, {
-          id: skill.id,
-          name: skill.name,
-          description: skill.description,
-          kind: "reference",
-          source: "reference",
-          enabled: true,
+          id: skill.id, name: skill.name, description: skill.description,
+          kind: "reference", source: "reference", enabled: true,
         });
       }
     }
-
     return Array.from(merged.values())
-      .filter((skill) => {
-        if (!query) return true;
-        return [skill.name, skill.id, skill.description].some((value) =>
-          normalizeSkillToken(value ?? "").includes(query),
-        );
-      })
+      .filter((s) => !query || [s.name, s.id, s.description].some((v) => normalizeSkillToken(v ?? "").includes(query)))
       .slice(0, 8);
   }, [state.availableSkills, state.composer, state.config.skills, state.selectedComposerSkill]);
 
-  function decorateThread(thread: ThreadRecord): ThreadRecord {
-    return {
-      ...thread,
-      messages: thread.messages.map((message) => {
-        const marker = skillMessageMarkersRef.current[message.id];
-        if (!marker) return message;
-        return { ...message, text: marker.displayText, skillName: marker.skillName };
-      }),
-    };
-  }
-
-  function saveWorkspaceSnapshot(payload: BootstrapPayload) {
-    writeJsonStorage(WORKSPACE_SNAPSHOT_KEY, {
-      config: payload.config,
-      threads: payload.threads,
-      activeThreadId: payload.activeThreadId,
-      currentThread: payload.currentThread,
-      availableSkills: payload.availableSkills,
-      mcpStatuses: payload.mcpStatuses,
-      pendingQuestions: payload.pendingQuestions,
-    } satisfies WorkspaceSnapshot);
-  }
-
-  function setSkillMessageMarker(messageId: string, marker: SkillMessageMarker) {
-    const nextMarkers = { ...skillMessageMarkersRef.current, [messageId]: marker };
-    skillMessageMarkersRef.current = nextMarkers;
-    dispatch({ type: "skillMarkers/set", payload: nextMarkers });
-  }
-
-  function registerSkillMessage(thread: ThreadRecord, transportText: string, displayText: string, skillName: string) {
-    const target = [...thread.messages]
-      .reverse()
-      .find((message) => message.role === "user" && message.text === transportText);
-
-    if (!target) return decorateThread(thread);
-
-    setSkillMessageMarker(target.id, { displayText, skillName });
-    return decorateThread({
-      ...thread,
-      messages: thread.messages.map((message) =>
-        message.id === target.id ? { ...message, text: displayText, skillName } : message,
-      ),
-    });
-  }
-
-  function rememberThread(thread: ThreadRecord) {
-    dispatch({ type: "thread/remember", payload: decorateThread(thread) });
-  }
-
-  function clearLocalThreadOverride(threadId: string) {
-    delete localThreadOverridesRef.current[threadId];
-  }
-
-  function rememberLocalThreadOverride(thread: ThreadRecord) {
-    const decorated = decorateThread(thread);
-    localThreadOverridesRef.current[thread.id] = decorated;
-    dispatch({ type: "thread/remember", payload: decorated });
-  }
-
-  function preferLocalThreadState(thread: ThreadRecord) {
-    const localThread = localThreadOverridesRef.current[thread.id];
-    if (!localThread) return decorateThread(thread);
-
-    const incoming = decorateThread(thread);
-    if (shouldKeepLocalThreadOverride(localThread, incoming)) {
-      return localThread;
-    }
-
-    clearLocalThreadOverride(thread.id);
-    return incoming;
-  }
-
-  function mergeThreadSummariesWithLocalOverrides(items: ThreadSummary[]) {
-    const merged = [...items];
-    for (const localThread of Object.values(localThreadOverridesRef.current)) {
-      const summary = summarizeThreadRecord(localThread);
-      const index = merged.findIndex((item) => item.id === summary.id);
-      if (index >= 0) merged[index] = summary;
-      else merged.push(summary);
-    }
-    return sortThreadSummaries(merged);
-  }
-
-  function applyWorkspacePayload(payload: BootstrapPayload) {
-    const currentThread = payload.currentThread ? preferLocalThreadState(payload.currentThread) : null;
-    const mergedThreads = mergeThreadSummariesWithLocalOverrides(
-      currentThread
-        ? [...payload.threads.filter((thread) => thread.id !== currentThread.id), summarizeThreadRecord(currentThread)]
-        : payload.threads,
-    );
-    const nextPayload = { ...payload, currentThread, threads: mergedThreads } satisfies BootstrapPayload;
-    saveWorkspaceSnapshot(nextPayload);
-    dispatch({ type: "workspace/hydrate", payload: nextPayload });
-  }
-
-  async function bootstrapWorkspace(maxAttempts = 3) {
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        return await workspaceClient.bootstrap();
-      } catch (error) {
-        lastError = error;
-        if (attempt < maxAttempts) {
-          await wait(350 * attempt);
-        }
-      }
-    }
-    throw lastError;
-  }
+  // ── effects ────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     skillMessageMarkersRef.current = state.skillMessageMarkers;
@@ -484,14 +346,6 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   }, [state.composer, state.selectedComposerSkill]);
 
   useEffect(() => {
-    if (!messageListRef.current) return;
-    messageListRef.current.scrollTo({
-      top: messageListRef.current.scrollHeight,
-      behavior: "smooth",
-    });
-  }, [activeThread?.messages.length, state.activeThreadId]);
-
-  useEffect(() => {
     return () => {
       if (pendingConfigSaveRef.current) {
         window.clearTimeout(pendingConfigSaveRef.current);
@@ -499,448 +353,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     };
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
-    const unsubscribe = workspaceClient.onWorkspaceChanged((payload) => {
-      if (mounted) applyWorkspacePayload(payload);
-    });
-
-    void bootstrapWorkspace()
-      .then((payload) => {
-        if (mounted) applyWorkspacePayload(payload);
-      })
-      .catch((error) => {
-        if (!mounted) return;
-        const message = formatErrorMessage(error, "Workspace bootstrap failed");
-        dispatch({ type: "workspace/issue", payload: message });
-        dispatch({ type: "status/merge", payload: { bootstrapping: false } });
-        onToast(message);
-      });
-
-    return () => {
-      mounted = false;
-      unsubscribe();
-    };
-  }, []);
-
-  async function refreshWorkspaceSnapshot(message?: string) {
-    try {
-      const payload = await workspaceClient.bootstrap();
-      applyWorkspacePayload(payload);
-      if (message) onToast(message);
-    } catch (error) {
-      const nextMessage = formatErrorMessage(error, "Refresh failed");
-      dispatch({ type: "workspace/issue", payload: nextMessage });
-      onToast(nextMessage);
-    }
-  }
-
-  async function refreshThreadList() {
-    dispatch({ type: "status/merge", payload: { refreshingThreads: true } });
-    try {
-      dispatch({
-        type: "threads/set",
-        payload: mergeThreadSummariesWithLocalOverrides(await workspaceClient.listThreads()),
-      });
-      dispatch({ type: "workspace/issue", payload: null });
-    } catch (error) {
-      const message = formatErrorMessage(error, "Refresh thread list failed");
-      dispatch({ type: "workspace/issue", payload: message });
-      onToast(message);
-    } finally {
-      dispatch({ type: "status/merge", payload: { refreshingThreads: false } });
-    }
-  }
-
-  async function createThread() {
-    dispatch({
-      type: "draft/set",
-      payload: {
-        workspaceRoot: state.config.opencodeRoot || "",
-        thread: null,
-      },
-    });
-    dispatch({ type: "composer/clear" });
-    onOpenChat();
-  }
-
-  async function openThread(threadId: string) {
-    dispatch({ type: "status/merge", payload: { openingThreadId: threadId } });
-    try {
-      const thread = decorateThread(await workspaceClient.setActiveThread(threadId));
-      dispatch({ type: "thread/remember", payload: thread });
-      dispatch({
-        type: "workspace/hydrate",
-        payload: {
-          config: state.config,
-          threads: state.threads,
-          activeThreadId: thread.id,
-          currentThread: thread,
-          availableSkills: state.availableSkills,
-          availableAgents: [],
-          mcpStatuses: state.mcpStatuses,
-          pendingQuestions: state.pendingQuestions,
-        },
-      });
-      dispatch({ type: "draft/set", payload: null });
-      await refreshThreadList();
-      dispatch({ type: "workspace/issue", payload: null });
-      onOpenChat();
-    } catch (error) {
-      const message = formatErrorMessage(error, "Open thread failed");
-      dispatch({ type: "workspace/issue", payload: message });
-      onToast(message);
-    } finally {
-      dispatch({ type: "status/merge", payload: { openingThreadId: null } });
-    }
-  }
-
-  async function archiveThread(thread: ThreadSummary, archived: boolean) {
-    dispatch({ type: "status/merge", payload: { mutatingThreadId: thread.id } });
-    try {
-      const payload = await workspaceClient.archiveThread(thread.id, archived);
-      applyWorkspacePayload(payload);
-      if (thread.id === state.activeThreadId && archived && !state.draft) {
-        dispatch({ type: "composer/clear" });
-      }
-      onToast(archived ? `Archived ${displayThreadTitle(thread.title)}` : `Restored ${displayThreadTitle(thread.title)}`);
-    } catch (error) {
-      onToast(formatErrorMessage(error, archived ? "Archive thread failed" : "Restore thread failed"));
-    } finally {
-      dispatch({ type: "status/merge", payload: { mutatingThreadId: null } });
-    }
-  }
-
-  async function deleteThread(thread: ThreadSummary) {
-    dispatch({ type: "status/merge", payload: { mutatingThreadId: thread.id } });
-    try {
-      const payload = await workspaceClient.deleteThread(thread.id);
-      applyWorkspacePayload(payload);
-      dispatch({ type: "thread/remove", payload: thread.id });
-      if (thread.id === state.activeThreadId && !state.draft) {
-        dispatch({ type: "composer/clear" });
-      }
-      onToast(`Deleted ${displayThreadTitle(thread.title)}`);
-    } catch (error) {
-      onToast(formatErrorMessage(error, "Delete thread failed"));
-    } finally {
-      dispatch({ type: "status/merge", payload: { mutatingThreadId: null } });
-    }
-  }
-
-  async function sendPlainMessage(message: string, nextAttachments: FileDropEntry[], skillMeta?: SkillPromptMeta) {
-    if (state.draft || !state.activeThreadId) {
-      const draftWorkspaceRoot = state.draft?.workspaceRoot || state.config.opencodeRoot || "";
-      const optimisticThread = createOptimisticThread({
-        activeThread: state.draft?.thread ?? null,
-        activeThreadId: state.draft?.thread?.id ?? createSessionId(),
-        activeSummary: null,
-        message,
-        attachments: nextAttachments,
-        skillMeta,
-      });
-
-      dispatch({
-        type: "draft/set",
-        payload: {
-          workspaceRoot: draftWorkspaceRoot,
-          thread: optimisticThread,
-        },
-      });
-      dispatch({ type: "composer/clear" });
-      dispatch({ type: "status/merge", payload: { sending: true } });
-
-      try {
-        const result = await workspaceClient.sendMessage({
-          workspaceRoot: draftWorkspaceRoot || undefined,
-          message,
-          attachments: nextAttachments,
-        });
-        const nextThread = skillMeta
-          ? registerSkillMessage(result.thread, message, skillMeta.displayText, skillMeta.skillName)
-          : decorateThread(result.thread);
-
-        dispatch({ type: "draft/set", payload: null });
-        rememberThread(nextThread);
-        dispatch({ type: "thread/activate", payload: nextThread.id });
-        await refreshThreadList();
-        if (result.knowledge?.warnings?.length) {
-          onToast(result.knowledge.warnings[0]);
-        } else if (result.knowledge?.injected) {
-          onToast(`Injected ${result.knowledge.resultCount} knowledge snippets`);
-        }
-      } catch (error) {
-        const nextMessage = formatErrorMessage(error, "Send message failed");
-        dispatch({
-          type: "draft/set",
-          payload: {
-            workspaceRoot: draftWorkspaceRoot,
-            thread: markThreadRequestFailed(optimisticThread, nextMessage),
-          },
-        });
-        onToast(nextMessage);
-      } finally {
-        dispatch({ type: "status/merge", payload: { sending: false } });
-      }
-
-      return;
-    }
-
-    const optimisticThread = createOptimisticThread({
-      activeThread,
-      activeThreadId: state.activeThreadId,
-      activeSummary,
-      message,
-      attachments: nextAttachments,
-      skillMeta,
-    });
-
-    rememberLocalThreadOverride(optimisticThread);
-    dispatch({ type: "composer/clear" });
-    dispatch({ type: "status/merge", payload: { sending: true } });
-
-    try {
-      const result = await workspaceClient.sendMessage({
-        threadId: state.activeThreadId,
-        message,
-        attachments: nextAttachments,
-      });
-      const nextThread = skillMeta
-        ? registerSkillMessage(result.thread, message, skillMeta.displayText, skillMeta.skillName)
-        : decorateThread(result.thread);
-      const localOverride = localThreadOverridesRef.current[result.thread.id];
-
-      if (localOverride && shouldKeepLocalThreadOverride(localOverride, nextThread)) {
-        rememberLocalThreadOverride(localOverride);
-      } else {
-        clearLocalThreadOverride(result.thread.id);
-        rememberThread(nextThread);
-      }
-      await refreshThreadList();
-      if (result.knowledge?.warnings?.length) {
-        onToast(result.knowledge.warnings[0]);
-      } else if (result.knowledge?.injected) {
-        onToast(`Injected ${result.knowledge.resultCount} knowledge snippets`);
-      }
-    } catch (error) {
-      const nextMessage = formatErrorMessage(error, "Send message failed");
-      rememberLocalThreadOverride(markThreadRequestFailed(optimisticThread, nextMessage));
-      onToast(nextMessage);
-    } finally {
-      dispatch({ type: "status/merge", payload: { sending: false } });
-    }
-  }
-
-  async function executeCommandSkill(
-    skill: Pick<SkillConfig, "id" | "name" | "description" | "kind" | "enabled">,
-    promptOverride?: string,
-  ) {
-    if (!hasAvailableModel) {
-      onToast("当前没有可用模型，请先在设置里配置并启用模型。");
-      return;
-    }
-    if (skill.enabled === false) {
-      onToast("Enable this skill first");
-      return;
-    }
-
-    try {
-      const draftWorkspaceRoot = state.draft?.workspaceRoot || state.config.opencodeRoot || "";
-      const result = await workspaceClient.runSkill({
-        threadId: state.draft ? undefined : state.activeThreadId || undefined,
-        workspaceRoot: state.draft || !state.activeThreadId ? draftWorkspaceRoot || undefined : undefined,
-        skillId: skill.id,
-        prompt: promptOverride?.trim() || state.composer.trim() || skill.description,
-      });
-      dispatch({ type: "draft/set", payload: null });
-      rememberThread(result.thread);
-      dispatch({ type: "thread/activate", payload: result.thread.id });
-      await refreshThreadList();
-      onOpenChat();
-      onToast(`Ran ${skill.name}`);
-    } catch (error) {
-      onToast(formatErrorMessage(error, "Run skill failed"));
-    }
-  }
-
-  async function sendMessageWithSkills() {
-    if (
-      state.status.sending ||
-      state.composerComposing ||
-      (!state.composer.trim() && state.attachments.length === 0)
-    ) {
-      return;
-    }
-
-    if (!hasAvailableModel) {
-      onToast("当前没有可用模型，请先在设置里配置并启用模型。");
-      return;
-    }
-
-    const nextMessage = state.composer.trim();
-    const nextAttachments = state.attachments;
-    const composerSkill = state.selectedComposerSkill;
-    const slashCommand = parseSlashSkillCommand(nextMessage);
-
-    if (!composerSkill && !slashCommand?.skillToken) {
-      await sendPlainMessage(nextMessage, nextAttachments);
-      return;
-    }
-
-    const installedSkill =
-      composerSkill?.source === "installed"
-        ? state.config.skills.find((skill) => skill.id === composerSkill.id) ?? null
-        : slashCommand?.skillToken
-          ? installedSkillMap.get(slashCommand.skillToken) ?? null
-          : null;
-
-    if (installedSkill) {
-      const promptText = composerSkill ? nextMessage : slashCommand?.prompt ?? "";
-
-      if (installedSkill.kind === "codex") {
-        dispatch({ type: "composerSkill/set", payload: null });
-        await sendPlainMessage(
-          buildSkillPrompt(installedSkill.name, installedSkill.description, promptText),
-          nextAttachments,
-          {
-            displayText: promptText || installedSkill.description || "",
-            skillName: installedSkill.name,
-          },
-        );
-        onToast(`Sent with /${installedSkill.name}`);
-        return;
-      }
-
-      if (nextAttachments.length > 0) {
-        onToast("Command skills do not support attachments yet");
-        return;
-      }
-
-      dispatch({ type: "composerSkill/set", payload: null });
-      dispatch({ type: "composer/set", payload: "" });
-      dispatch({ type: "attachments/set", payload: [] });
-      await executeCommandSkill(installedSkill, promptText);
-      return;
-    }
-
-    const referenceSkill =
-      composerSkill?.source === "reference"
-        ? state.availableSkills.find((skill) => skill.id === composerSkill.id) ?? null
-        : slashCommand?.skillToken
-          ? referenceSkillMap.get(slashCommand.skillToken) ?? null
-          : null;
-
-    if (referenceSkill) {
-      const promptText = composerSkill ? nextMessage : slashCommand?.prompt ?? "";
-      dispatch({ type: "composerSkill/set", payload: null });
-      await sendPlainMessage(
-        buildSkillPrompt(referenceSkill.name, referenceSkill.description, promptText),
-        nextAttachments,
-        {
-          displayText: promptText || referenceSkill.description || "",
-          skillName: referenceSkill.name,
-        },
-      );
-      onToast(`Sent with /${referenceSkill.name}`);
-      return;
-    }
-
-    onToast(`Skill not found: /${slashCommand?.skillToken ?? ""}`);
-  }
-
-  function useConfiguredCodexSkill(skill: Pick<SkillConfig, "name" | "description">) {
-    dispatch({ type: "composer/set", payload: buildSkillPrompt(skill.name, skill.description, state.composer.trim()) });
-    onOpenChat();
-    onToast(`Loaded ${skill.name} into composer`);
-  }
-
-  async function runSkill(skill: Pick<SkillConfig, "id" | "name" | "description" | "kind" | "enabled">) {
-    if (skill.enabled === false) {
-      onToast("Enable this skill first");
-      return;
-    }
-
-    if (skill.kind === "codex") {
-      useConfiguredCodexSkill(skill);
-      return;
-    }
-
-    await executeCommandSkill(skill);
-  }
-
-  function prepareSkillDraft(name?: string, description?: string) {
-    const nextPrompt = [
-      name ? `Help me create a new skill named "${name}".` : "Help me create a new skill.",
-      description ? `Goal: ${description}` : "Goal: define the purpose, inputs, outputs, folder structure, and first implementation.",
-      "Please make it directly implementable.",
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    dispatch({ type: "composer/set", payload: nextPrompt });
-    onOpenChat();
-    onToast("Skill draft prepared");
-  }
-
-  function useReferenceSkill(skill: RuntimeSkill) {
-    dispatch({ type: "composer/set", payload: buildSkillPrompt(skill.name, skill.description, state.composer.trim()) });
-    onOpenChat();
-    onToast(`Loaded ${skill.name} into composer`);
-  }
-
-  async function uninstallSkill(skill: SkillConfig) {
-    try {
-      const payload = await workspaceClient.uninstallSkill(skill.id);
-      applyWorkspacePayload(payload);
-      onToast(`Removed ${skill.name}`);
-    } catch (error) {
-      onToast(formatErrorMessage(error, "Uninstall skill failed"));
-    }
-  }
-
-  async function pickFiles() {
-    try {
-      const files = await workspaceClient.selectFiles();
-      if (files.length > 0) {
-        dispatch({ type: "attachments/append", payload: files });
-      }
-    } catch {
-      onToast("Read files failed");
-    }
-  }
-
-  async function openWorkspaceFolder() {
-    try {
-      await workspaceClient.openWorkspaceFolder(state.activeThreadId || undefined);
-    } catch {
-      onToast("Open workspace failed");
-    }
-  }
-
-  async function chooseThreadWorkspace() {
-    try {
-      const selected = await workspaceClient.selectWorkspaceFolder();
-      if (!selected) return;
-
-      if (state.draft || !state.activeThreadId) {
-        dispatch({
-          type: "draft/set",
-          payload: {
-            workspaceRoot: selected,
-            thread: state.draft?.thread ? { ...state.draft.thread, workspaceRoot: selected } : null,
-          },
-        });
-        onToast(`Switched workspace to ${workspaceLabel(selected)}`);
-        return;
-      }
-
-      const payload = await workspaceClient.setThreadWorkspace(state.activeThreadId, selected);
-      applyWorkspacePayload(payload);
-      onToast(`Switched workspace to ${workspaceLabel(selected)}`);
-    } catch {
-      onToast("Switch workspace failed");
-    }
-  }
+  // ── config ─────────────────────────────────────────────────────────────────
 
   function clearPendingConfigSave() {
     if (!pendingConfigSaveRef.current) return;
@@ -952,7 +365,9 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     try {
       const payload = await workspaceClient.updateConfig(next);
       if (mutationVersion !== configSaveVersionRef.current) return;
-      applyWorkspacePayload(payload);
+      dispatch({ type: "config/set", payload: payload.config });
+      dispatch({ type: "skills/set", payload: payload.availableSkills });
+      dispatch({ type: "mcpStatuses/set", payload: payload.mcpStatuses });
       if (message) onToast(message);
     } catch {
       if (mutationVersion !== configSaveVersionRef.current) return;
@@ -981,21 +396,259 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     void commitConfig({ ...cloneConfig(state.config), [key]: value } as AppConfig);
   }
 
-  function appendAttachments(files: FileDropEntry[]) {
-    dispatch({ type: "attachments/append", payload: files });
+  // ── skills ─────────────────────────────────────────────────────────────────
+
+  async function refreshWorkspaceSnapshot(message?: string) {
+    try {
+      const payload = await workspaceClient.bootstrap();
+      dispatch({ type: "config/set", payload: payload.config });
+      dispatch({ type: "skills/set", payload: payload.availableSkills });
+      dispatch({ type: "mcpStatuses/set", payload: payload.mcpStatuses });
+      dispatch({ type: "threads/set", payload: payload.threads });
+      dispatch({ type: "pendingQuestions/set", payload: payload.pendingQuestions });
+      if (payload.currentThread) {
+        dispatch({ type: "thread/open", payload: { threadId: payload.activeThreadId, thread: payload.currentThread } });
+      }
+      if (message) onToast(message);
+    } catch (error) {
+      onToast(formatErrorMessage(error, "Refresh failed"));
+    }
   }
 
-  function setComposer(value: string) {
-    dispatch({ type: "composer/set", payload: value });
+  async function uninstallSkill(skill: SkillConfig) {
+    try {
+      const payload = await workspaceClient.uninstallSkill(skill.id);
+      dispatch({ type: "config/set", payload: payload.config });
+      dispatch({ type: "skills/set", payload: payload.availableSkills });
+      onToast(`Removed ${skill.name}`);
+    } catch (error) {
+      onToast(formatErrorMessage(error, "Uninstall skill failed"));
+    }
   }
 
-  function applySuggestion(prompt: string) {
-    dispatch({ type: "composer/set", payload: prompt });
+  function prepareSkillDraft(name?: string, description?: string) {
+    const nextPrompt = [
+      name ? `Help me create a new skill named "${name}".` : "Help me create a new skill.",
+      description ? `Goal: ${description}` : "Goal: define the purpose, inputs, outputs, folder structure, and first implementation.",
+      "Please make it directly implementable.",
+    ].filter(Boolean).join("\n");
+    dispatch({ type: "composer/set", payload: nextPrompt });
+    onOpenChat();
+    onToast("Skill draft prepared");
   }
 
-  function removeAttachment(id: string) {
-    dispatch({ type: "attachment/remove", payload: id });
+  function useReferenceSkill(skill: RuntimeSkill) {
+    dispatch({ type: "composer/set", payload: buildSkillPrompt(skill.name, skill.description, state.composer.trim()) });
+    onOpenChat();
+    onToast(`Loaded ${skill.name} into composer`);
   }
+
+  function useConfiguredCodexSkill(skill: Pick<SkillConfig, "name" | "description">) {
+    dispatch({ type: "composer/set", payload: buildSkillPrompt(skill.name, skill.description, state.composer.trim()) });
+    onOpenChat();
+    onToast(`Loaded ${skill.name} into composer`);
+  }
+
+  async function executeCommandSkill(
+    skill: Pick<SkillConfig, "id" | "name" | "description" | "kind" | "enabled">,
+    promptOverride?: string,
+  ) {
+    if (!hasAvailableModel) { onToast("当前没有可用模型，请先在设置里配置并启用模型。"); return; }
+    if (skill.enabled === false) { onToast("Enable this skill first"); return; }
+    try {
+      const result = await workspaceClient.runSkill({
+        threadId: state.activeThreadId || undefined,
+        workspaceRoot: !state.activeThreadId ? state.config.opencodeRoot || undefined : undefined,
+        skillId: skill.id,
+        prompt: promptOverride?.trim() || state.composer.trim() || skill.description,
+      });
+      onOpenChat();
+      onToast(`Ran ${skill.name}`);
+      if (result?.thread) {
+        dispatch({ type: "thread/open", payload: { threadId: result.thread.id, thread: result.thread } });
+        await refreshThreadList();
+      }
+    } catch (error) {
+      onToast(formatErrorMessage(error, "Run skill failed"));
+    }
+  }
+
+  async function runSkill(skill: Pick<SkillConfig, "id" | "name" | "description" | "kind" | "enabled">) {
+    if (skill.enabled === false) { onToast("Enable this skill first"); return; }
+    if (skill.kind === "codex") { useConfiguredCodexSkill(skill); return; }
+    await executeCommandSkill(skill);
+  }
+
+  // ── composer ───────────────────────────────────────────────────────────────
+
+  async function sendMessageWithSkills() {
+    if (stateRef.current.status.sending || state.composerComposing || (!state.composer.trim() && state.attachments.length === 0)) return;
+    if (!hasAvailableModel) { onToast("当前没有可用模型，请先在设置里配置并启用模型。"); return; }
+
+    const nextMessage = state.composer.trim();
+    const nextAttachments = state.attachments;
+    const composerSkill = state.selectedComposerSkill;
+    const slashCommand = parseSlashSkillCommand(nextMessage);
+
+    if (!composerSkill && !slashCommand?.skillToken) {
+      // Plain message send (no skill)
+      dispatch({ type: "status/set", payload: { sending: true } });
+      dispatch({ type: "composer/clear" });
+      try {
+        // Use ref for fresh state — React state may be stale in closure
+        const fresh = stateRef.current;
+        let threadId = fresh.activeThreadId;
+
+        // No active thread → create session on backend
+        if (!threadId) {
+          const bp = await workspaceClient.createThread();
+          threadId = bp.activeThreadId;
+          // Use thread/open which adds to list without overwriting
+          if (bp.currentThread) {
+            dispatch({ type: "thread/open", payload: { threadId, thread: bp.currentThread } });
+          }
+        }
+
+        // Show user message + loading assistant placeholder immediately
+        const userMsg: ChatMessage = {
+          id: `temp-user-${Date.now()}`,
+          role: "user",
+          text: nextMessage,
+          createdAt: Date.now(),
+          status: "done",
+        };
+        const assistantMsg: ChatMessage = {
+          id: `temp-assistant-${Date.now()}`,
+          role: "assistant",
+          text: "",
+          createdAt: Date.now(),
+          status: "loading",
+        };
+        const currentMessages = stateRef.current.activeThread?.messages ?? [];
+        dispatch({
+          type: "thread/open",
+          payload: {
+            threadId,
+            thread: {
+              id: threadId,
+              title: stateRef.current.activeThread?.title || "新会话",
+              updatedAt: Date.now(),
+              lastMessage: nextMessage,
+              messageCount: currentMessages.length + 2,
+              archived: false,
+              workspaceRoot: stateRef.current.activeThread?.workspaceRoot,
+              messages: [...currentMessages, userMsg, assistantMsg],
+            },
+          },
+        });
+
+        // Send message (async dispatch + poll for completion)
+        const result = await workspaceClient.sendMessage({
+          threadId,
+          message: nextMessage,
+          attachments: nextAttachments,
+        });
+        if (result?.thread) {
+          dispatch({ type: "thread/open", payload: { threadId, thread: result.thread } });
+        }
+        onOpenChat();
+      } catch (error) {
+        onToast(formatErrorMessage(error, "Send message failed"));
+      } finally {
+        dispatch({ type: "status/set", payload: { sending: false } });
+      }
+      return;
+    }
+
+    const installedSkill =
+      composerSkill?.source === "installed"
+        ? state.config.skills.find((s) => s.id === composerSkill.id) ?? null
+        : slashCommand?.skillToken ? installedSkillMap.get(slashCommand.skillToken) ?? null : null;
+
+    if (installedSkill) {
+      const promptText = composerSkill ? nextMessage : slashCommand?.prompt ?? "";
+      if (installedSkill.kind === "codex") {
+        dispatch({ type: "composerSkill/set", payload: null });
+        dispatch({ type: "status/set", payload: { sending: true } });
+        dispatch({ type: "composer/clear" });
+        try {
+          let threadId = stateRef.current.activeThreadId;
+          if (!threadId) {
+            const bp = await workspaceClient.createThread();
+            threadId = bp.activeThreadId;
+            if (bp.currentThread) {
+              dispatch({ type: "thread/open", payload: { threadId, thread: bp.currentThread } });
+            }
+          }
+          const result = await workspaceClient.sendMessage({
+            threadId,
+            message: promptText,
+            attachments: nextAttachments,
+          });
+          if (result?.thread) {
+            dispatch({ type: "thread/open", payload: { threadId, thread: result.thread } });
+          }
+          onOpenChat();
+          onToast(`Sent with /${installedSkill.name}`);
+        } catch (error) {
+          onToast(formatErrorMessage(error, "Send message failed"));
+        } finally {
+          dispatch({ type: "status/set", payload: { sending: false } });
+        }
+        return;
+      }
+      if (nextAttachments.length > 0) { onToast("Command skills do not support attachments yet"); return; }
+      dispatch({ type: "composerSkill/set", payload: null });
+      dispatch({ type: "composer/set", payload: "" });
+      dispatch({ type: "attachments/set", payload: [] });
+      await executeCommandSkill(installedSkill, promptText);
+      return;
+    }
+
+    const referenceSkill =
+      composerSkill?.source === "reference"
+        ? state.availableSkills.find((s) => s.id === composerSkill.id) ?? null
+        : slashCommand?.skillToken ? referenceSkillMap.get(slashCommand.skillToken) ?? null : null;
+
+    if (referenceSkill) {
+      dispatch({ type: "composerSkill/set", payload: null });
+      dispatch({ type: "status/set", payload: { sending: true } });
+      dispatch({ type: "composer/clear" });
+      try {
+        let threadId = stateRef.current.activeThreadId;
+        if (!threadId) {
+          const bp = await workspaceClient.createThread();
+          threadId = bp.activeThreadId;
+          if (bp.currentThread) {
+            dispatch({ type: "thread/open", payload: { threadId, thread: bp.currentThread } });
+          }
+        }
+        const promptText = composerSkill ? nextMessage : slashCommand?.prompt ?? "";
+        const result = await workspaceClient.sendMessage({
+          threadId,
+          message: buildSkillPrompt(referenceSkill.name, referenceSkill.description, promptText),
+          attachments: nextAttachments,
+        });
+        if (result?.thread) {
+          dispatch({ type: "thread/open", payload: { threadId, thread: result.thread } });
+        }
+        onOpenChat();
+        onToast(`Sent with /${referenceSkill.name}`);
+      } catch (error) {
+        onToast(formatErrorMessage(error, "Send message failed"));
+      } finally {
+        dispatch({ type: "status/set", payload: { sending: false } });
+      }
+      return;
+    }
+
+    onToast(`Skill not found: /${slashCommand?.skillToken ?? ""}`);
+  }
+
+  function appendAttachments(files: FileDropEntry[]) { dispatch({ type: "attachments/append", payload: files }); }
+  function setComposer(value: string) { dispatch({ type: "composer/set", payload: value }); }
+  function applySuggestion(prompt: string) { dispatch({ type: "composer/set", payload: prompt }); }
+  function removeAttachment(id: string) { dispatch({ type: "attachment/remove", payload: id }); }
 
   function selectComposerSkill(skillId: string) {
     const skill = composerSkillOptionsById.get(skillId);
@@ -1005,55 +658,146 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     onToast(`Selected ${skill.name}`);
   }
 
-  function clearSelectedComposerSkill() {
-    dispatch({ type: "composerSkill/set", payload: null });
+  function clearSelectedComposerSkill() { dispatch({ type: "composerSkill/set", payload: null }); }
+
+  // ── files / workspace ──────────────────────────────────────────────────────
+
+  async function pickFiles() {
+    try {
+      const files = await workspaceClient.selectFiles();
+      if (files.length > 0) dispatch({ type: "attachments/append", payload: files });
+    } catch { onToast("Read files failed"); }
+  }
+
+  async function openWorkspaceFolder() {
+    try { await workspaceClient.openWorkspaceFolder(state.activeThreadId || undefined); }
+    catch { onToast("Open workspace failed"); }
+  }
+
+  async function chooseThreadWorkspace() {
+    try {
+      const selected = await workspaceClient.selectWorkspaceFolder();
+      if (!selected) return;
+      if (!state.activeThreadId) { onToast(`Switched workspace to ${workspaceLabel(selected)}`); return; }
+      const payload = await workspaceClient.setThreadWorkspace(state.activeThreadId, selected);
+      dispatch({ type: "config/set", payload: payload.config });
+      onToast(`Switched workspace to ${workspaceLabel(selected)}`);
+    } catch { onToast("Switch workspace failed"); }
+  }
+
+  // ── session functions ─────────────────────────────────────────────────────
+
+  async function createThread() {
+    // Pure frontend — just reset to empty chat page, no backend call
+    dispatch({ type: "status/set", payload: { sending: false } });
+    dispatch({ type: "composer/clear" });
+    dispatch({
+      type: "thread/open",
+      payload: {
+        threadId: "",
+        thread: { id: "", title: "新会话", updatedAt: Date.now(), lastMessage: "", messageCount: 0, archived: false, messages: [] },
+      },
+    });
+    onOpenChat();
+  }
+
+  async function openThread(threadId: string) {
+    try {
+      dispatch({ type: "status/set", payload: { openingThreadId: threadId } });
+      const thread = await workspaceClient.setActiveThread(threadId);
+      dispatch({ type: "thread/open", payload: { threadId, thread } });
+      onOpenChat();
+    } catch (error) {
+      onToast(formatErrorMessage(error, "Failed to open thread"));
+      dispatch({ type: "status/set", payload: { openingThreadId: null } });
+    }
+  }
+
+  async function archiveThread(thread: ThreadSummary, archived: boolean) {
+    try {
+      dispatch({ type: "status/set", payload: { mutatingThreadId: thread.id } });
+      const payload = await workspaceClient.archiveThread(thread.id, archived);
+      dispatch({ type: "threads/set", payload: payload.threads });
+      dispatch({ type: "status/set", payload: { mutatingThreadId: null } });
+    } catch (error) {
+      onToast(formatErrorMessage(error, "Failed to archive thread"));
+      dispatch({ type: "status/set", payload: { mutatingThreadId: null } });
+    }
+  }
+
+  async function deleteThread(thread: ThreadSummary) {
+    try {
+      dispatch({ type: "status/set", payload: { mutatingThreadId: thread.id } });
+      const payload = await workspaceClient.deleteThread(thread.id);
+      dispatch({ type: "threads/set", payload: payload.threads });
+      if (payload.activeThreadId !== state.activeThreadId) {
+        dispatch({
+          type: "thread/open",
+          payload: { threadId: payload.activeThreadId, thread: payload.currentThread! },
+        });
+      }
+      dispatch({ type: "status/set", payload: { mutatingThreadId: null } });
+    } catch (error) {
+      onToast(formatErrorMessage(error, "Failed to delete thread"));
+      dispatch({ type: "status/set", payload: { mutatingThreadId: null } });
+    }
+  }
+
+  async function abortThread(threadId?: string) {
+    try {
+      const target = threadId || stateRef.current.activeThreadId;
+      if (!target) return;
+      const payload = await workspaceClient.abortThread(target);
+      dispatch({ type: "status/set", payload: { sending: false } });
+      dispatch({ type: "pendingQuestions/set", payload: payload.pendingQuestions });
+      // Refresh thread to show partial response
+      const thread = await workspaceClient.getThread(target).catch(() => null);
+      if (thread) {
+        dispatch({ type: "thread/open", payload: { threadId: target, thread } });
+      }
+    } catch (error) {
+      dispatch({ type: "status/set", payload: { sending: false } });
+      onToast(formatErrorMessage(error, "Failed to abort thread"));
+    }
+  }
+
+  async function refreshThreadList() {
+    try {
+      dispatch({ type: "status/set", payload: { refreshingThreads: true } });
+      const threads = await workspaceClient.listThreads();
+      dispatch({ type: "threads/set", payload: threads });
+      dispatch({ type: "status/set", payload: { refreshingThreads: false } });
+    } catch (error) {
+      onToast(formatErrorMessage(error, "Failed to refresh threads"));
+      dispatch({ type: "status/set", payload: { refreshingThreads: false } });
+    }
   }
 
   async function replyQuestion(requestId: string, sessionId: string, answers: string[][]) {
     try {
       const payload = await workspaceClient.replyQuestion({ requestId, sessionId, answers });
-      applyWorkspacePayload(payload);
-      onToast("Answer submitted");
+      dispatch({ type: "pendingQuestions/set", payload: payload.pendingQuestions });
     } catch (error) {
-      const message = formatErrorMessage(error, "Reply question failed");
-      onToast(message);
-      throw error;
+      onToast(formatErrorMessage(error, "Failed to reply to question"));
     }
   }
 
   async function rejectQuestion(requestId: string, sessionId: string) {
     try {
       const payload = await workspaceClient.rejectQuestion({ requestId, sessionId });
-      applyWorkspacePayload(payload);
-      onToast("Question rejected");
+      dispatch({ type: "pendingQuestions/set", payload: payload.pendingQuestions });
     } catch (error) {
-      const message = formatErrorMessage(error, "Reject question failed");
-      onToast(message);
-      throw error;
+      onToast(formatErrorMessage(error, "Failed to reject question"));
     }
   }
 
-  async function abortThread(threadId = state.activeThreadId) {
-    if (!threadId) return;
-
-    clearLocalThreadOverride(threadId);
-
-    try {
-      const payload = await workspaceClient.abortThread(threadId);
-      applyWorkspacePayload(payload);
-      onToast("Current run stopped");
-    } catch (error) {
-      const message = formatErrorMessage(error, "Stop thread failed");
-      onToast(message);
-      throw error;
-    }
-  }
+  // ── return ─────────────────────────────────────────────────────────────────
 
   return {
     activeModel,
     activeSummary,
-    activeThread,
-    activeThreadId: state.draft ? "" : state.activeThreadId,
+    activeThread: state.activeThread,
+    activeThreadId: state.activeThreadId,
     activeThreads,
     applySuggestion,
     appendAttachments,
@@ -1073,14 +817,14 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     currentWorkspaceLabel,
     currentWorkspacePath,
     deleteThread,
-    drafting: Boolean(state.draft),
+    drafting: state.drafting,
     dragActive: state.dragActive,
     mcpStatuses: state.mcpStatuses,
     mcpStatusMap,
     messageListRef,
     openThread,
     openWorkspaceFolder,
-    pendingQuestions: state.draft ? [] : state.pendingQuestions,
+    pendingQuestions: state.pendingQuestions,
     pickFiles,
     prepareSkillDraft,
     refreshThreadList,

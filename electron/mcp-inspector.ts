@@ -18,7 +18,7 @@ import type {
   McpToolInfo,
   McpToolParameter,
 } from "../src/types";
-import { resolveGeneratedConfigDir } from "./app-identity";
+import { resolveOpencodeConfigDir } from "./app-identity";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_STDERR_LENGTH = 20_000;
@@ -327,7 +327,7 @@ async function runInstaller(command: string, args: string[], cwd: string) {
 
 function getGeneratedConfigDir() {
   const appDataRoot = process.env.APPDATA || path.join(os.homedir(), ".config");
-  return resolveGeneratedConfigDir(appDataRoot);
+  return resolveOpencodeConfigDir(appDataRoot);
 }
 
 async function ensurePlaywrightMcpCli() {

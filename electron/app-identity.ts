@@ -6,6 +6,7 @@ export const APP_DATA_DIR = "super-agents";
 export const APP_WINDOW_TITLE = APP_NAME;
 
 const LEGACY_APP_DATA_DIRS = ["kober", "openclaw-desktop-workbench"];
+const LEGACY_OPENCODE_CONFIG_DIRS = ["opencode-config"];
 
 async function pathExists(targetPath: string) {
   try {
@@ -36,6 +37,26 @@ export async function migrateLegacyAppData(appDataRoot: string) {
   return targetDir;
 }
 
-export function resolveGeneratedConfigDir(appDataRoot: string) {
-  return path.join(appDataRoot, APP_DATA_DIR, "opencode-config");
+export function resolveOpencodeConfigDir(appDataRoot: string) {
+  return path.join(appDataRoot, APP_DATA_DIR, "opencode");
+}
+
+export async function migrateLegacyOpencodeConfig(appDataRoot: string) {
+  const appDataDir = path.join(appDataRoot, APP_DATA_DIR);
+  const targetDir = resolveOpencodeConfigDir(appDataRoot);
+  if (await pathExists(targetDir)) {
+    return targetDir;
+  }
+
+  for (const legacyDirName of LEGACY_OPENCODE_CONFIG_DIRS) {
+    const legacyDir = path.join(appDataDir, legacyDirName);
+    if (!(await pathExists(legacyDir))) {
+      continue;
+    }
+
+    await cp(legacyDir, targetDir, { recursive: true, force: false });
+    return targetDir;
+  }
+
+  return targetDir;
 }

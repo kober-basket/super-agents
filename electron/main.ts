@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 
-import { APP_DATA_DIR, APP_NAME, APP_WINDOW_TITLE, migrateLegacyAppData } from "./app-identity";
+import { APP_DATA_DIR, APP_NAME, APP_WINDOW_TITLE, migrateLegacyAppData, migrateLegacyOpencodeConfig } from "./app-identity";
 import { McpInspector } from "./mcp-inspector";
 import { WorkspaceService } from "./workspace-service";
 import type { AppConfig, DesktopWindowState, WorkspaceTool } from "../src/types";
@@ -12,7 +12,6 @@ app.setPath("userData", path.join(app.getPath("appData"), APP_DATA_DIR));
 let mainWindow: BrowserWindow | null = null;
 let service: WorkspaceService | null = null;
 const mcpInspector = new McpInspector();
-const threadMonitors = new Map<string, { cancelled: boolean; promise: Promise<void> }>();
 
 function createWindow() {
   const isMac = process.platform === "darwin";
@@ -78,139 +77,22 @@ function getWindowState(): DesktopWindowState {
   };
 }
 
-async function broadcastState() {
-  if (!service || !mainWindow) return;
-  const payload = await service.bootstrap();
-  mainWindow.webContents.send("desktop:workspace-changed", payload);
-}
-
-async function stopThreadMonitor(threadId: string) {
-  const monitor = threadMonitors.get(threadId);
-  if (!monitor) return;
-  monitor.cancelled = true;
-  await monitor.promise.catch(() => undefined);
-}
-
-function monitorThreadProgress(threadId: string, intervalMs = 350) {
-  void stopThreadMonitor(threadId);
-
-  const monitor = {
-    cancelled: false,
-    promise: Promise.resolve(),
-  };
-
-  monitor.promise = (async () => {
-    while (!monitor.cancelled) {
-      await broadcastState().catch(() => undefined);
-      if (monitor.cancelled || !service) break;
-
-      const progress = await service.getThreadProgress(threadId).catch(() => ({
-        busy: false,
-        blockedOnQuestion: false,
-      }));
-
-      if (monitor.cancelled || !progress.busy || progress.blockedOnQuestion) {
-        break;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    }
-
-    await broadcastState().catch(() => undefined);
-    if (threadMonitors.get(threadId) === monitor) {
-      threadMonitors.delete(threadId);
-    }
-  })();
-
-  threadMonitors.set(threadId, monitor);
-}
-
 app.whenReady().then(async () => {
   await migrateLegacyAppData(app.getPath("appData"));
+  await migrateLegacyOpencodeConfig(app.getPath("appData"));
   const statePath = path.join(app.getPath("userData"), "workspace.json");
   service = new WorkspaceService(statePath);
 
   createWindow();
 
+  async function broadcastState() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const payload = await service!.bootstrap();
+    mainWindow.webContents.send("desktop:workspace-changed", payload);
+  }
+
   ipcMain.handle("desktop:bootstrap", async () => {
     return await service!.bootstrap();
-  });
-
-  ipcMain.handle("desktop:list-threads", async () => {
-    return await service!.listThreads();
-  });
-
-  ipcMain.handle("desktop:get-thread", async (_event, threadId: string) => {
-    return await service!.getCurrentThread(threadId);
-  });
-
-  ipcMain.handle("desktop:create-thread", async (_event, title?: string) => {
-    const payload = await service!.createThread(title);
-    await broadcastState();
-    return payload;
-  });
-
-  ipcMain.handle("desktop:set-active-thread", async (_event, threadId: string) => {
-    const thread = await service!.setActiveThread(threadId);
-    await broadcastState();
-    return thread;
-  });
-
-  ipcMain.handle("desktop:reset-thread", async (_event, threadId: string) => {
-    const thread = await service!.resetThread(threadId);
-    await broadcastState();
-    return thread;
-  });
-
-  ipcMain.handle("desktop:archive-thread", async (_event, payload: { threadId: string; archived: boolean }) => {
-    const next = await service!.archiveThread(payload.threadId, payload.archived);
-    await broadcastState();
-    return next;
-  });
-
-  ipcMain.handle("desktop:delete-thread", async (_event, threadId: string) => {
-    const next = await service!.deleteThread(threadId);
-    await broadcastState();
-    return next;
-  });
-
-  ipcMain.handle(
-    "desktop:send-message",
-    async (
-      _event,
-      payload: { threadId?: string; workspaceRoot?: string; message: string; attachments: unknown[] },
-    ) => {
-    const result = await service!.sendMessage({
-      threadId: payload.threadId,
-      workspaceRoot: payload.workspaceRoot,
-      message: payload.message,
-      attachments: Array.isArray(payload.attachments) ? (payload.attachments as any[]) : [],
-    });
-    monitorThreadProgress(result.thread.id);
-    return result;
-    },
-  );
-
-  ipcMain.handle("desktop:abort-thread", async (_event, threadId: string) => {
-    await stopThreadMonitor(threadId);
-    const payload = await service!.abortThread(threadId);
-    await broadcastState();
-    return payload;
-  });
-
-  ipcMain.handle("desktop:reply-question", async (_event, payload: { requestId: string; sessionId: string; answers: string[][] }) => {
-    const next = await service!.replyQuestion(
-      payload.requestId,
-      Array.isArray(payload.answers) ? payload.answers : [],
-    );
-    monitorThreadProgress(payload.sessionId);
-    return next;
-  });
-
-  ipcMain.handle("desktop:reject-question", async (_event, payload: { requestId: string; sessionId: string }) => {
-    const next = await service!.rejectQuestion(payload.requestId);
-    monitorThreadProgress(payload.sessionId);
-    return next;
   });
 
   ipcMain.handle("desktop:list-knowledge-bases", async () => {
@@ -265,9 +147,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     "desktop:run-skill",
     async (_event, payload: { threadId?: string; workspaceRoot?: string; skillId: string; prompt: string }) => {
-    const result = await service!.runSkill(payload);
-    monitorThreadProgress(result.thread.id);
-    return result;
+      return await service!.runSkill(payload);
     },
   );
 
@@ -364,21 +244,13 @@ app.whenReady().then(async () => {
     return result.filePaths[0] ?? "";
   });
 
-  ipcMain.handle("desktop:set-thread-workspace", async (_event, payload: { threadId: string; workspaceRoot: string }) => {
-    const next = await service!.setThreadWorkspace(payload.threadId, payload.workspaceRoot);
-    await broadcastState();
-    return next;
-  });
-
   ipcMain.handle("desktop:read-preview", async (_event, payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) => {
     return await service!.readPreview(payload);
   });
 
-  ipcMain.handle("desktop:open-workspace-folder", async (_event, threadId?: string) => {
+  ipcMain.handle("desktop:open-workspace-folder", async () => {
     const payload = await service!.bootstrap();
-    const threadRoot =
-      threadId && payload.threads.find((thread) => thread.id === threadId)?.workspaceRoot;
-    const target = threadRoot || payload.config.opencodeRoot;
+    const target = payload.config.opencodeRoot;
     if (target) {
       await shell.openPath(target);
     }
@@ -407,6 +279,54 @@ app.whenReady().then(async () => {
     mainWindow?.close();
   });
 
+  ipcMain.handle("desktop:list-threads", async () => {
+    return await service!.listThreads();
+  });
+
+  ipcMain.handle("desktop:get-thread", async (_event, threadId: string) => {
+    return await service!.getThread(threadId);
+  });
+
+  ipcMain.handle("desktop:create-thread", async (_event, title?: string) => {
+    return await service!.createThread(title);
+  });
+
+  ipcMain.handle("desktop:set-active-thread", async (_event, threadId: string) => {
+    return await service!.setActiveThread(threadId);
+  });
+
+  ipcMain.handle("desktop:reset-thread", async (_event, threadId: string) => {
+    return await service!.resetThread(threadId);
+  });
+
+  ipcMain.handle("desktop:archive-thread", async (_event, payload: { threadId: string; archived: boolean }) => {
+    return await service!.archiveThread(payload.threadId, payload.archived);
+  });
+
+  ipcMain.handle("desktop:delete-thread", async (_event, threadId: string) => {
+    return await service!.deleteThread(threadId);
+  });
+
+  ipcMain.handle("desktop:send-message", async (_event, payload: any) => {
+    return await service!.sendMessage(payload);
+  });
+
+  ipcMain.handle("desktop:abort-thread", async (_event, threadId?: string) => {
+    return await service!.abortThread(threadId);
+  });
+
+  ipcMain.handle("desktop:reply-question", async (_event, payload: { requestId: string; sessionId: string; answers: string[][] }) => {
+    return await service!.replyQuestion(payload.requestId, payload.sessionId, payload.answers);
+  });
+
+  ipcMain.handle("desktop:reject-question", async (_event, payload: { requestId: string; sessionId: string }) => {
+    return await service!.rejectQuestion(payload.requestId, payload.sessionId);
+  });
+
+  ipcMain.handle("desktop:set-thread-workspace", async (_event, payload: { threadId: string; workspaceRoot: string }) => {
+    return await service!.setThreadWorkspace(payload.threadId, payload.workspaceRoot);
+  });
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -421,7 +341,5 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", async () => {
-  const threadIds = Array.from(threadMonitors.keys());
-  await Promise.all(threadIds.map((threadId) => stopThreadMonitor(threadId)));
   await service?.shutdown();
 });

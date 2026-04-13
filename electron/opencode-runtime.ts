@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { resolveGeneratedConfigDir } from "./app-identity";
+import { resolveOpencodeConfigDir } from "./app-identity";
 import { getActiveModelOption } from "../src/lib/model-config";
 import type { AppConfig, FileDropEntry, McpServerConfig, McpServerStatus, RuntimeAgent, RuntimeSkill } from "../src/types";
 
@@ -613,10 +613,12 @@ function parseJsonRecord(input: string) {
 }
 
 function makeSpawnEnv(config: AppConfig, configDir: string, resolvedMcpServers: McpServerConfig[]) {
+  const appDataDir = path.dirname(configDir);
   return {
     ...process.env,
     OPENCODE_CONFIG_CONTENT: JSON.stringify(buildRuntimeConfig(config, resolvedMcpServers)),
     OPENCODE_CONFIG_DIR: configDir,
+    XDG_CONFIG_HOME: appDataDir,
     HTTP_PROXY: config.proxy.http || process.env.HTTP_PROXY,
     HTTPS_PROXY: config.proxy.https || process.env.HTTPS_PROXY,
     NO_PROXY: config.proxy.bypass || process.env.NO_PROXY,
@@ -628,7 +630,7 @@ function makeSpawnEnv(config: AppConfig, configDir: string, resolvedMcpServers: 
 
 function getGeneratedConfigDir() {
   const appDataRoot = process.env.APPDATA || path.join(os.homedir(), ".config");
-  return resolveGeneratedConfigDir(appDataRoot);
+  return resolveOpencodeConfigDir(appDataRoot);
 }
 
 function buildGeneratedCommand(skill: AppConfig["skills"][number]) {
@@ -1068,7 +1070,7 @@ export class OpencodeRuntime {
     if (!active) {
       throw new Error("No available model configured. Configure and enable a model before running skills.");
     }
-    return await this.request<unknown>(config, `/session/${sessionID}/command`, {
+    return await this.request<unknown>(config, `/session/${sessionID}/command_async`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1079,7 +1081,20 @@ export class OpencodeRuntime {
         model: `${active.providerID}/${active.modelID}`,
         parts: attachments.map(makeFilePart).filter(Boolean),
       }),
-    });
+    }).catch(() =>
+      this.request<unknown>(config, `/session/${sessionID}/command`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          command,
+          arguments: argumentsText,
+          model: `${active.providerID}/${active.modelID}`,
+          parts: attachments.map(makeFilePart).filter(Boolean),
+        }),
+      }),
+    );
   }
 
   abortSession(config: AppConfig, sessionID: string) {
