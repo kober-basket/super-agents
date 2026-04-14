@@ -341,6 +341,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   const stateRef = useRef(state);
   const threadRunVersionRef = useRef(new Map<string, number>());
   const stoppingThreadsRef = useRef(new Map<string, number>());
+  const awaitingResponseThreadsRef = useRef(new Map<string, number>());
   stateRef.current = state;
 
   function bumpThreadRunVersion(threadId: string) {
@@ -356,6 +357,27 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   function clearThreadStopping(threadId?: string) {
     if (!threadId) return;
     stoppingThreadsRef.current.delete(threadId);
+  }
+
+  function markThreadAwaitingResponse(threadId?: string) {
+    if (!threadId) return;
+    awaitingResponseThreadsRef.current.set(threadId, Date.now());
+  }
+
+  function clearThreadAwaitingResponse(threadId?: string) {
+    if (!threadId) return;
+    awaitingResponseThreadsRef.current.delete(threadId);
+  }
+
+  function isThreadAwaitingResponse(threadId?: string) {
+    if (!threadId) return false;
+    const startedAt = awaitingResponseThreadsRef.current.get(threadId);
+    if (!startedAt) return false;
+    if (Date.now() - startedAt > 15_000) {
+      awaitingResponseThreadsRef.current.delete(threadId);
+      return false;
+    }
+    return true;
   }
 
   function isThreadStopping(threadId?: string) {
@@ -376,6 +398,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
 
   function beginThreadRun(threadId: string) {
     clearThreadStopping(threadId);
+    markThreadAwaitingResponse(threadId);
     return bumpThreadRunVersion(threadId);
   }
 
@@ -455,6 +478,8 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
       return;
     }
 
+    clearThreadAwaitingResponse(threadId ?? undefined);
+
     const errorMessage = formatErrorMessage(error, fallback);
     const activeThread = threadId && stateRef.current.activeThread?.id === threadId
       ? stateRef.current.activeThread
@@ -493,8 +518,13 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
 
     dispatch({ type: "thread/open", payload: { threadId, thread: effectiveThread } });
     syncThreadStateRef(threadId, effectiveThread);
+    if (effectiveThread.messages.some((item) => item.role === "assistant" && item.text.trim())) {
+      clearThreadAwaitingResponse(threadId);
+    }
     if (!effectiveThread.messages.some((item) => item.status === "loading")) {
-      dispatch({ type: "status/set", payload: { sending: false } });
+      if (!isThreadAwaitingResponse(threadId)) {
+        dispatch({ type: "status/set", payload: { sending: false } });
+      }
       if (!hadLoadingBeforeNormalize) {
         clearThreadStopping(threadId);
       }
@@ -706,7 +736,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
 
   useEffect(() => {
     const threadId = state.activeThreadId;
-    if (!threadId || (!state.status.sending && !activeThreadHasLoading)) {
+    if (!threadId || (!state.status.sending && !activeThreadHasLoading && !isThreadAwaitingResponse(threadId))) {
       return;
     }
 
@@ -730,7 +760,9 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
       }
 
       const shouldContinue =
-        stateRef.current.status.sending || hasLoadingAssistantMessage(stateRef.current.activeThread);
+        stateRef.current.status.sending ||
+        hasLoadingAssistantMessage(stateRef.current.activeThread) ||
+        isThreadAwaitingResponse(threadId);
       if (!shouldContinue) {
         return;
       }

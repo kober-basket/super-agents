@@ -677,6 +677,37 @@ export class OpencodeRuntime {
     }
   }
 
+  private hasRenderableAssistantOutput(message: OpencodeSessionMessage) {
+    if (message.info.role !== "assistant") {
+      return false;
+    }
+    if (message.info.error?.data?.message?.trim()) {
+      return true;
+    }
+    return message.parts.some((part) => {
+      if (part.type === "text") {
+        return part.text.trim().length > 0;
+      }
+      return part.type !== "reasoning";
+    });
+  }
+
+  private hasRenderableAssistantOutputSince(session: SessionCache, startIndex: number) {
+    return session.messages.slice(startIndex).some((message) => this.hasRenderableAssistantOutput(message));
+  }
+
+  private recordEmptyPromptResult(session: SessionCache, stopReason: acp.StopReason) {
+    const now = Date.now();
+    const message = this.ensureMessage(session, `empty:${now}:${randomUUID()}`, "assistant", now);
+    message.info.error = {
+      data: {
+        message: `Agent 未返回任何内容（${stopReason}）。请重试。`,
+      },
+    };
+    message.info.time.completed = now;
+    session.info.time.updated = now;
+  }
+
   private recordPromptError(session: SessionCache, error: unknown) {
     const now = Date.now();
     const message = this.ensureMessage(session, `error:${now}:${randomUUID()}`, "assistant", now);
@@ -1079,6 +1110,7 @@ export class OpencodeRuntime {
         (item): item is acp.ContentBlock => Boolean(item),
       ),
     ];
+    const visibleOutputStartIndex = session.messages.length;
 
     session.status = { type: "busy" };
 
@@ -1091,6 +1123,9 @@ export class OpencodeRuntime {
       .then((result) => {
         session.status = { type: "idle" };
         if (result.stopReason !== "cancelled") {
+          if (!this.hasRenderableAssistantOutputSince(session, visibleOutputStartIndex)) {
+            this.recordEmptyPromptResult(session, result.stopReason);
+          }
           this.finalizeAssistantMessages(session);
         }
       })

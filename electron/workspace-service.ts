@@ -1008,6 +1008,17 @@ async function convertMessages(
     });
   }
 
+  if (executionState.busy && !result.some((message) => message.status === "loading")) {
+    const anchorMessage = [...messages].reverse().find((message) => message.info.role === "user") ?? messages.at(-1);
+    result.push({
+      id: `pending:${anchorMessage?.info.id ?? "assistant"}`,
+      role: "assistant",
+      text: "",
+      createdAt: anchorMessage ? messageTimestamp(anchorMessage) + 1 : Date.now(),
+      status: "loading",
+    });
+  }
+
   return result.sort((left, right) => left.createdAt - right.createdAt);
 }
 
