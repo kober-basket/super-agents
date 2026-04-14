@@ -159,6 +159,34 @@ function summarizeThreadForDisplay(thread: ThreadRecord, previous?: ThreadSummar
   };
 }
 
+function shouldPreserveLocalThread(localThread: ThreadRecord, incomingThread: ThreadRecord) {
+  if (shouldKeepLocalThreadOverride(localThread, incomingThread)) {
+    return true;
+  }
+
+  if (incomingThread.messages.length < localThread.messages.length) {
+    return true;
+  }
+
+  const localStableText = latestStableThreadText(localThread);
+  const incomingStableText = latestStableThreadText(incomingThread);
+
+  if (localStableText && !incomingStableText) {
+    return true;
+  }
+
+  if (
+    localStableText &&
+    incomingStableText &&
+    localThread.updatedAt > incomingThread.updatedAt &&
+    incomingThread.messages.length <= localThread.messages.length
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function isAbsoluteAttachmentPath(value: string) {
   return /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(value);
 }
@@ -308,6 +336,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   const messageListRef = useRef<HTMLDivElement>(null);
   const pendingConfigSaveRef = useRef<number | null>(null);
   const configSaveVersionRef = useRef(0);
+  const latestBootstrapRef = useRef(0);
   const skillMessageMarkersRef = useRef(state.skillMessageMarkers);
   const stateRef = useRef(state);
   const threadRunVersionRef = useRef(new Map<string, number>());
@@ -452,7 +481,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     const localActiveThread =
       stateRef.current.activeThread?.id === threadId ? stateRef.current.activeThread : null;
     const effectiveThread =
-      localActiveThread && shouldKeepLocalThreadOverride(localActiveThread, normalizedThread)
+      localActiveThread && shouldPreserveLocalThread(localActiveThread, normalizedThread)
         ? {
             ...normalizedThread,
             updatedAt: Math.max(normalizedThread.updatedAt, localActiveThread.updatedAt),
@@ -731,10 +760,26 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   }, []);
 
   function applyBootstrapPayload(payload: BootstrapPayload, message?: string) {
+    if (payload.snapshotAt < latestBootstrapRef.current) {
+      return;
+    }
+    latestBootstrapRef.current = payload.snapshotAt;
+
+    const stabilizedThreads = payload.currentThread
+      ? payload.threads.map((thread) =>
+          thread.id === payload.currentThread!.id
+            ? summarizeThreadForDisplay(
+                payload.currentThread!,
+                stateRef.current.threads.find((item) => item.id === thread.id) ?? thread,
+              )
+            : thread,
+        )
+      : payload.threads;
+
     dispatch({ type: "config/set", payload: payload.config });
     dispatch({ type: "skills/set", payload: payload.availableSkills });
     dispatch({ type: "mcpStatuses/set", payload: payload.mcpStatuses });
-    dispatch({ type: "threads/set", payload: payload.threads });
+    dispatch({ type: "threads/set", payload: stabilizedThreads });
     dispatch({ type: "pendingQuestions/set", payload: payload.pendingQuestions });
 
     if (payload.currentThread) {

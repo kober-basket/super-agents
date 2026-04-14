@@ -486,6 +486,7 @@ export interface FileDropEntry {
 }
 
 export interface BootstrapPayload {
+  snapshotAt: number;
   config: AppConfig;
   threads: ThreadSummary[];
   activeThreadId: string;

@@ -1035,6 +1035,7 @@ export class WorkspaceService {
     const pendingQuestions = await this.runtime.listQuestions(state.config).catch(() => []);
 
     return {
+      snapshotAt: Date.now(),
       config: state.config,
       threads,
       activeThreadId: this.activeThreadId,
