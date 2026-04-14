@@ -1019,7 +1019,50 @@ async function convertMessages(
     });
   }
 
-  return result.sort((left, right) => left.createdAt - right.createdAt);
+  const sorted = result.sort((left, right) => left.createdAt - right.createdAt);
+  const deduped: ChatMessage[] = [];
+
+  for (const message of sorted) {
+    const duplicateUserIndex = deduped.findLastIndex(
+      (candidate) =>
+        candidate.role === "user" &&
+        candidate.status === "done" &&
+        message.role === "user" &&
+        message.status === "done" &&
+        candidate.text.trim() &&
+        candidate.text.trim() === message.text.trim() &&
+        Math.abs(message.createdAt - candidate.createdAt) <= 15_000,
+    );
+    const retryPlaceholders =
+      duplicateUserIndex >= 0
+        ? deduped.slice(duplicateUserIndex + 1)
+        : [];
+    const isRetryDuplicate =
+      duplicateUserIndex >= 0 &&
+      retryPlaceholders.length > 0 &&
+      retryPlaceholders.every(
+        (candidate) =>
+          candidate.role === "assistant" &&
+          !candidate.text.trim() &&
+          (candidate.status === "loading" || candidate.status === "paused"),
+      );
+
+    if (isRetryDuplicate) {
+      const placeholder = deduped[duplicateUserIndex + 1];
+      if (
+        placeholder?.role === "assistant" &&
+        !placeholder.text.trim() &&
+        (placeholder.status === "loading" || placeholder.status === "paused")
+      ) {
+        deduped.splice(duplicateUserIndex + 1, 1);
+      }
+      continue;
+    }
+
+    deduped.push(message);
+  }
+
+  return deduped;
 }
 
 export class WorkspaceService {

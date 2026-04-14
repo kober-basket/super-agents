@@ -520,6 +520,7 @@ export class OpencodeRuntime {
   private readonly sessions = new Map<string, SessionCache>();
   private readonly pendingPermissionRequests = new Map<string, PendingPermissionRequest>();
   private availableSkills: RuntimeSkill[] = [];
+  private readonly legacyFallbackSignatures = new Set<string>();
 
   private resetSessionRuntimeState() {
     for (const session of this.sessions.values()) {
@@ -534,8 +535,31 @@ export class OpencodeRuntime {
     this.availableSkills = [];
   }
 
-  async dispose() {
-    await this.legacyRuntime.dispose();
+  private shouldUseLegacyTransport(config: AppConfig) {
+    return shouldUseLegacyRuntime(config) || this.legacyFallbackSignatures.has(makeSignature(config));
+  }
+
+  private enableLegacyFallback(config: AppConfig) {
+    this.legacyFallbackSignatures.add(makeSignature(config));
+  }
+
+  private isRecoverableAcpTransportError(error: unknown) {
+    const text = error instanceof Error ? error.message : String(error);
+    const normalized = text.toLowerCase();
+    return [
+      "acp connection closed",
+      "connection closed",
+      "enotconn",
+      "socket is not connected",
+      "broken pipe",
+      "epipe",
+      "stream closed",
+      "write eof",
+      "read eof",
+    ].some((token) => normalized.includes(token));
+  }
+
+  private async resetAcpRuntime() {
     this.startupPromise = null;
     for (const request of this.pendingPermissionRequests.values()) {
       request.resolve({ outcome: { outcome: "cancelled" } });
@@ -544,6 +568,32 @@ export class OpencodeRuntime {
     this.resetSessionRuntimeState();
     await killRuntime(this.handle);
     this.handle = null;
+  }
+
+  private async withLegacyFallback<T>(
+    config: AppConfig,
+    action: () => Promise<T>,
+    fallback: () => Promise<T>,
+  ): Promise<T> {
+    if (this.shouldUseLegacyTransport(config)) {
+      return await fallback();
+    }
+
+    try {
+      return await action();
+    } catch (error) {
+      if (!this.isRecoverableAcpTransportError(error)) {
+        throw error;
+      }
+      this.enableLegacyFallback(config);
+      await this.resetAcpRuntime();
+      return await fallback();
+    }
+  }
+
+  async dispose() {
+    await this.legacyRuntime.dispose();
+    await this.resetAcpRuntime();
   }
 
   private ensureSession(sessionID: string, directory = "", title?: string) {
@@ -982,50 +1032,57 @@ export class OpencodeRuntime {
   }
 
   async listSessions(config: AppConfig) {
-    if (shouldUseLegacyRuntime(config)) {
-      return await this.legacyRuntime.listSessions(config);
-    }
-    const handle = await this.ensureStarted(config);
-    const result: OpencodeSessionInfo[] = [];
-    let cursor: string | null | undefined;
+    return await this.withLegacyFallback(
+      config,
+      async () => {
+        const handle = await this.ensureStarted(config);
+        const result: OpencodeSessionInfo[] = [];
+        let cursor: string | null | undefined;
 
-    do {
-      const page = await handle.connection.listSessions({
-        cwd: getSessionDirectory(config),
-        cursor,
-      });
-      cursor = page.nextCursor;
-      for (const item of page.sessions) {
-        const session = this.ensureSession(item.sessionId, item.cwd, item.title ?? undefined);
-        session.info.directory = item.cwd;
-        session.info.title = item.title?.trim() || session.info.title;
-        session.info.time.updated = timestampFromIso(item.updatedAt, session.info.time.updated);
-        result.push(session.info);
-      }
-    } while (cursor);
+        do {
+          const page = await handle.connection.listSessions({
+            cwd: getSessionDirectory(config),
+            cursor,
+          });
+          cursor = page.nextCursor;
+          for (const item of page.sessions) {
+            const session = this.ensureSession(item.sessionId, item.cwd, item.title ?? undefined);
+            session.info.directory = item.cwd;
+            session.info.title = item.title?.trim() || session.info.title;
+            session.info.time.updated = timestampFromIso(item.updatedAt, session.info.time.updated);
+            result.push(session.info);
+          }
+        } while (cursor);
 
-    return result.sort((left, right) => right.time.updated - left.time.updated);
+        return result.sort((left, right) => right.time.updated - left.time.updated);
+      },
+      async () => await this.legacyRuntime.listSessions(config),
+    );
   }
 
   async getSession(config: AppConfig, sessionID: string) {
-    if (shouldUseLegacyRuntime(config)) {
-      return await this.legacyRuntime.getSession(config, sessionID);
-    }
-    const listed = await this.listSessions(config);
-    const match = listed.find((session) => session.id === sessionID);
-    if (match) return match;
-    return (await this.ensureSessionLoaded(config, sessionID)).info;
+    return await this.withLegacyFallback(
+      config,
+      async () => {
+        const listed = await this.listSessions(config);
+        const match = listed.find((session) => session.id === sessionID);
+        if (match) return match;
+        return (await this.ensureSessionLoaded(config, sessionID)).info;
+      },
+      async () => await this.legacyRuntime.getSession(config, sessionID),
+    );
   }
 
   async listMessages(config: AppConfig, sessionID: string) {
-    if (shouldUseLegacyRuntime(config)) {
-      return await this.legacyRuntime.listMessages(config, sessionID);
-    }
-    return (await this.ensureSessionLoaded(config, sessionID)).messages;
+    return await this.withLegacyFallback(
+      config,
+      async () => (await this.ensureSessionLoaded(config, sessionID)).messages,
+      async () => await this.legacyRuntime.listMessages(config, sessionID),
+    );
   }
 
   async listSessionStatuses(_config: AppConfig) {
-    if (shouldUseLegacyRuntime(_config)) {
+    if (this.shouldUseLegacyTransport(_config)) {
       return await this.legacyRuntime.listSessionStatuses(_config);
     }
     return Object.fromEntries(
@@ -1034,73 +1091,90 @@ export class OpencodeRuntime {
   }
 
   async listQuestions(_config: AppConfig) {
-    if (shouldUseLegacyRuntime(_config)) {
+    if (this.shouldUseLegacyTransport(_config)) {
       return await this.legacyRuntime.listQuestions(_config);
     }
     return Array.from(this.pendingPermissionRequests.values()).map((item) => item.request);
   }
 
   async createSession(config: AppConfig, title?: string) {
-    if (shouldUseLegacyRuntime(config)) {
-      return await this.legacyRuntime.createSession(config, title);
-    }
-    const handle = await this.ensureStarted(config);
-    const directory = getSessionDirectory(config);
-    const response = await handle.connection.newSession({
-      cwd: directory,
-      mcpServers: [],
-    });
+    return await this.withLegacyFallback(
+      config,
+      async () => {
+        const handle = await this.ensureStarted(config);
+        const directory = getSessionDirectory(config);
+        const response = await handle.connection.newSession({
+          cwd: directory,
+          mcpServers: [],
+        });
 
-    const session = this.ensureSession(response.sessionId, directory, title);
-    session.loaded = true;
-    session.status = { type: "idle" };
-    session.modeState = response.modes ?? session.modeState;
-    session.configOptions = response.configOptions ?? session.configOptions;
-    await this.syncSessionRuntimeOptions(handle, config, response.sessionId, session);
-    session.info.title = title?.trim() || session.info.title;
-    session.info.time.created = Date.now();
-    session.info.time.updated = Date.now();
-    return session.info;
+        const session = this.ensureSession(response.sessionId, directory, title);
+        session.loaded = true;
+        session.status = { type: "idle" };
+        session.modeState = response.modes ?? session.modeState;
+        session.configOptions = response.configOptions ?? session.configOptions;
+        await this.syncSessionRuntimeOptions(handle, config, response.sessionId, session);
+        session.info.title = title?.trim() || session.info.title;
+        session.info.time.created = Date.now();
+        session.info.time.updated = Date.now();
+        return session.info;
+      },
+      async () => await this.legacyRuntime.createSession(config, title),
+    );
   }
 
   async deleteSession(config: AppConfig, sessionID: string) {
-    if (shouldUseLegacyRuntime(config)) {
-      return await this.legacyRuntime.deleteSession(config, sessionID);
-    }
-    const runtimeConfig = getAcpRuntimeConfig(config);
-    const configDir = await syncGeneratedCommands(runtimeConfig);
-    const resolvedMcpServers = await resolveMcpServers(getRuntimeMcpServers(runtimeConfig), configDir);
-    const env = makeSpawnEnv(runtimeConfig, configDir, resolvedMcpServers);
-    const command = await resolveOpencodeCommand();
+    return await this.withLegacyFallback(
+      config,
+      async () => {
+        const runtimeConfig = getAcpRuntimeConfig(config);
+        const configDir = await syncGeneratedCommands(runtimeConfig);
+        const resolvedMcpServers = await resolveMcpServers(getRuntimeMcpServers(runtimeConfig), configDir);
+        const env = makeSpawnEnv(runtimeConfig, configDir, resolvedMcpServers);
+        const command = await resolveOpencodeCommand();
 
-    await execFileAsync(command, ["session", "delete", sessionID], {
-      cwd: process.cwd(),
-      env,
-      windowsHide: true,
-    });
+        await execFileAsync(command, ["session", "delete", sessionID], {
+          cwd: process.cwd(),
+          env,
+          windowsHide: true,
+        });
 
-    this.sessions.delete(sessionID);
-    for (const [requestID, request] of this.pendingPermissionRequests.entries()) {
-      if (request.sessionID === sessionID) {
-        request.resolve({ outcome: { outcome: "cancelled" } });
-        this.pendingPermissionRequests.delete(requestID);
-      }
-    }
+        this.sessions.delete(sessionID);
+        for (const [requestID, request] of this.pendingPermissionRequests.entries()) {
+          if (request.sessionID === sessionID) {
+            request.resolve({ outcome: { outcome: "cancelled" } });
+            this.pendingPermissionRequests.delete(requestID);
+          }
+        }
 
-    return true;
+        return true;
+      },
+      async () => await this.legacyRuntime.deleteSession(config, sessionID),
+    );
   }
 
   async promptAsync(config: AppConfig, sessionID: string, message: string, attachments: FileDropEntry[]) {
-    if (shouldUseLegacyRuntime(config)) {
+    if (this.shouldUseLegacyTransport(config)) {
       return await this.legacyRuntime.promptAsync(config, sessionID, message, attachments);
     }
     if (!hasActiveModel(config)) {
       throw new Error("No available model configured. Configure and enable a model before sending messages.");
     }
 
-    const handle = await this.ensureStarted(config);
-    const session = await this.ensureSessionLoaded(config, sessionID);
-    await this.syncSessionRuntimeOptions(handle, config, sessionID, session);
+    let handle: RuntimeHandle;
+    let session: SessionCache;
+    try {
+      handle = await this.ensureStarted(config);
+      session = await this.ensureSessionLoaded(config, sessionID);
+      await this.syncSessionRuntimeOptions(handle, config, sessionID, session);
+    } catch (error) {
+      if (!this.isRecoverableAcpTransportError(error)) {
+        throw error;
+      }
+      this.enableLegacyFallback(config);
+      await this.resetAcpRuntime();
+      return await this.legacyRuntime.promptAsync(config, sessionID, message, attachments);
+    }
     const prompt = [
       {
         type: "text" as const,
@@ -1129,14 +1203,28 @@ export class OpencodeRuntime {
           this.finalizeAssistantMessages(session);
         }
       })
-      .catch((error) => {
+      .catch(async (error) => {
         session.status = { type: "idle" };
+        if (this.isRecoverableAcpTransportError(error)) {
+          try {
+            this.enableLegacyFallback(config);
+            await this.resetAcpRuntime();
+            await this.legacyRuntime.promptAsync(config, sessionID, message, attachments);
+            return;
+          } catch (legacyError) {
+            this.recordPromptError(
+              session,
+              `${error instanceof Error ? error.message : String(error)}\n${legacyError instanceof Error ? legacyError.message : String(legacyError)}`,
+            );
+            return;
+          }
+        }
         this.recordPromptError(session, error);
       });
   }
 
   async commandAsync(config: AppConfig, sessionID: string, command: string, argumentsText: string, attachments: FileDropEntry[]) {
-    if (shouldUseLegacyRuntime(config)) {
+    if (this.shouldUseLegacyTransport(config)) {
       return await this.legacyRuntime.commandAsync(config, sessionID, command, argumentsText, attachments);
     }
     const prompt = argumentsText.trim() ? `/${command} ${argumentsText.trim()}` : `/${command}`;
@@ -1144,7 +1232,7 @@ export class OpencodeRuntime {
   }
 
   async abortSession(config: AppConfig, sessionID: string) {
-    if (shouldUseLegacyRuntime(config)) {
+    if (this.shouldUseLegacyTransport(config)) {
       return await this.legacyRuntime.abortSession(config, sessionID);
     }
     const handle = await this.ensureStarted(config);
@@ -1163,7 +1251,7 @@ export class OpencodeRuntime {
   }
 
   async replyQuestion(_config: AppConfig, requestID: string, answers: string[][]) {
-    if (shouldUseLegacyRuntime(_config)) {
+    if (this.shouldUseLegacyTransport(_config)) {
       return await this.legacyRuntime.replyQuestion(_config, requestID, answers);
     }
     const pending = this.pendingPermissionRequests.get(requestID);
@@ -1192,7 +1280,7 @@ export class OpencodeRuntime {
   }
 
   async rejectQuestion(_config: AppConfig, requestID: string) {
-    if (shouldUseLegacyRuntime(_config)) {
+    if (this.shouldUseLegacyTransport(_config)) {
       return await this.legacyRuntime.rejectQuestion(_config, requestID);
     }
     const pending = this.pendingPermissionRequests.get(requestID);
@@ -1227,7 +1315,7 @@ export class OpencodeRuntime {
   }
 
   async listSkills(config: AppConfig): Promise<RuntimeSkill[]> {
-    if (shouldUseLegacyRuntime(config)) {
+    if (this.shouldUseLegacyTransport(config)) {
       return await this.legacyRuntime.listSkills(config);
     }
     await this.primeAvailableSkills(config);
@@ -1235,7 +1323,7 @@ export class OpencodeRuntime {
   }
 
   async listAgents(_config: AppConfig): Promise<RuntimeAgent[]> {
-    if (shouldUseLegacyRuntime(_config)) {
+    if (this.shouldUseLegacyTransport(_config)) {
       return await this.legacyRuntime.listAgents(_config);
     }
     const modes = new Map<string, RuntimeAgent>();
@@ -1253,7 +1341,7 @@ export class OpencodeRuntime {
   }
 
   async listMcpStatuses(config: AppConfig): Promise<McpServerStatus[]> {
-    if (shouldUseLegacyRuntime(config)) {
+    if (this.shouldUseLegacyTransport(config)) {
       return await this.legacyRuntime.listMcpStatuses(config);
     }
     return config.mcpServers.map((server) => ({
