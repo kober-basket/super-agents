@@ -23,7 +23,9 @@ import type {
 import {
   buildSkillPrompt,
   cloneConfig,
+  createOptimisticThread,
   formatErrorMessage,
+  markThreadRequestFailed,
   normalizeConfig,
   normalizeSkillToken,
   parseSlashSkillCommand,
@@ -31,6 +33,7 @@ import {
   LEGACY_SKILL_MESSAGE_MARKER_KEYS,
   LEGACY_WORKSPACE_SNAPSHOT_KEYS,
   SKILL_MESSAGE_MARKERS_KEY,
+  shouldKeepLocalThreadOverride,
   WORKSPACE_SNAPSHOT_KEY,
   workspaceLabel,
   writeJsonStorage,
@@ -339,17 +342,109 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     };
   }
 
+  function syncThreadStateRef(threadId: string, thread: ThreadRecord) {
+    const updatedSummary: ThreadSummary = {
+      id: thread.id,
+      title: thread.title,
+      updatedAt: thread.updatedAt,
+      lastMessage: thread.lastMessage,
+      messageCount: thread.messageCount,
+      archived: thread.archived,
+      workspaceRoot: thread.workspaceRoot,
+    };
+
+    stateRef.current = {
+      ...stateRef.current,
+      activeThreadId: threadId,
+      activeThread: thread,
+      threads: upsertThreadSummary(stateRef.current.threads, updatedSummary),
+    };
+  }
+
+  function openOptimisticThread(input: {
+    threadId: string;
+    baseThread?: ThreadRecord | null;
+    message: string;
+    attachments: FileDropEntry[];
+    skillName?: string;
+  }) {
+    const optimisticThread = createOptimisticThread({
+      activeThread:
+        input.baseThread ??
+        (stateRef.current.activeThread?.id === input.threadId ? stateRef.current.activeThread : null),
+      activeThreadId: input.threadId,
+      activeSummary: stateRef.current.threads.find((thread) => thread.id === input.threadId) ?? null,
+      message: input.message,
+      attachments: input.attachments,
+      skillMeta: input.skillName
+        ? {
+            displayText: input.message,
+            skillName: input.skillName,
+          }
+        : undefined,
+    });
+
+    dispatch({
+      type: "thread/open",
+      payload: {
+        threadId: input.threadId,
+        thread: optimisticThread,
+      },
+    });
+    syncThreadStateRef(input.threadId, optimisticThread);
+    return optimisticThread;
+  }
+
+  function handleSendFailure(threadId: string | null, error: unknown, fallback: string) {
+    if (threadId && isThreadStopping(threadId)) {
+      return;
+    }
+
+    const errorMessage = formatErrorMessage(error, fallback);
+    const activeThread = threadId && stateRef.current.activeThread?.id === threadId
+      ? stateRef.current.activeThread
+      : null;
+
+    if (threadId && activeThread) {
+      const failedThread = markThreadRequestFailed(activeThread, errorMessage);
+      dispatch({
+        type: "thread/open",
+        payload: {
+          threadId,
+          thread: failedThread,
+        },
+      });
+      syncThreadStateRef(threadId, failedThread);
+    }
+
+    onToast(errorMessage);
+  }
+
   function applyThreadSnapshot(threadId: string, thread: ThreadRecord) {
     const hadLoadingBeforeNormalize = thread.messages.some((item) => item.status === "loading");
     const normalizedThread = normalizeThreadForDisplay(thread, threadId);
-    dispatch({ type: "thread/open", payload: { threadId, thread: normalizedThread } });
-    if (!normalizedThread.messages.some((item) => item.status === "loading")) {
+    const localActiveThread =
+      stateRef.current.activeThread?.id === threadId ? stateRef.current.activeThread : null;
+    const effectiveThread =
+      localActiveThread && shouldKeepLocalThreadOverride(localActiveThread, normalizedThread)
+        ? {
+            ...normalizedThread,
+            updatedAt: Math.max(normalizedThread.updatedAt, localActiveThread.updatedAt),
+            lastMessage: localActiveThread.lastMessage || normalizedThread.lastMessage,
+            messageCount: Math.max(normalizedThread.messageCount, localActiveThread.messageCount),
+            messages: localActiveThread.messages,
+          }
+        : normalizedThread;
+
+    dispatch({ type: "thread/open", payload: { threadId, thread: effectiveThread } });
+    syncThreadStateRef(threadId, effectiveThread);
+    if (!effectiveThread.messages.some((item) => item.status === "loading")) {
       dispatch({ type: "status/set", payload: { sending: false } });
       if (!hadLoadingBeforeNormalize) {
         clearThreadStopping(threadId);
       }
     }
-    return normalizedThread;
+    return effectiveThread;
   }
 
   async function prepareComposerAttachments(files: FileDropEntry[]) {
@@ -889,42 +984,16 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     if (!composerSkill && !slashCommand?.skillToken) {
       dispatch({ type: "status/set", payload: { sending: true } });
       dispatch({ type: "composer/clear" });
+      let threadId: string | null = null;
       try {
         const ensured = await ensureBackendThread();
-        const threadId = ensured.threadId;
+        threadId = ensured.threadId;
         const runVersion = beginThreadRun(threadId);
-        const currentThread = ensured.thread;
-        const currentMessages = currentThread?.messages ?? [];
-        const userMsg: ChatMessage = {
-          id: `temp-user-${Date.now()}`,
-          role: "user",
-          text: nextMessage,
-          createdAt: Date.now(),
-          status: "done",
-        };
-        const assistantMsg: ChatMessage = {
-          id: `temp-assistant-${Date.now()}`,
-          role: "assistant",
-          text: "",
-          createdAt: Date.now(),
-          status: "loading",
-        };
-
-        dispatch({
-          type: "thread/open",
-          payload: {
-            threadId,
-            thread: {
-              id: threadId,
-              title: formatThreadTitle(currentThread?.title, nextMessage),
-              updatedAt: Date.now(),
-              lastMessage: nextMessage,
-              messageCount: currentMessages.length + 2,
-              archived: false,
-              workspaceRoot: currentThread?.workspaceRoot,
-              messages: [...currentMessages, userMsg, assistantMsg],
-            },
-          },
+        openOptimisticThread({
+          threadId,
+          baseThread: ensured.thread,
+          message: nextMessage,
+          attachments: nextAttachments,
         });
 
         const result = await workspaceClient.sendMessage({
@@ -940,10 +1009,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
         }
         onOpenChat();
       } catch (error) {
-        if (isThreadStopping(stateRef.current.activeThreadId)) {
-          return;
-        }
-        onToast(formatErrorMessage(error, "Send message failed"));
+        handleSendFailure(threadId, error, "Send message failed");
       } finally {
         dispatch({ type: "status/set", payload: { sending: false } });
       }
@@ -961,10 +1027,18 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
         dispatch({ type: "composerSkill/set", payload: null });
         dispatch({ type: "status/set", payload: { sending: true } });
         dispatch({ type: "composer/clear" });
+        let threadId: string | null = null;
         try {
           const ensured = await ensureBackendThread();
-          const threadId = ensured.threadId;
+          threadId = ensured.threadId;
           const runVersion = beginThreadRun(threadId);
+          openOptimisticThread({
+            threadId,
+            baseThread: ensured.thread,
+            message: promptText,
+            attachments: nextAttachments,
+            skillName: installedSkill.name,
+          });
           const result = await workspaceClient.sendMessage({
             threadId,
             message: promptText,
@@ -979,10 +1053,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
           onOpenChat();
           onToast(`Sent with /${installedSkill.name}`);
         } catch (error) {
-          if (isThreadStopping(stateRef.current.activeThreadId)) {
-            return;
-          }
-          onToast(formatErrorMessage(error, "Send message failed"));
+          handleSendFailure(threadId, error, "Send message failed");
         } finally {
           dispatch({ type: "status/set", payload: { sending: false } });
         }
@@ -1006,11 +1077,19 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
       dispatch({ type: "composerSkill/set", payload: null });
       dispatch({ type: "status/set", payload: { sending: true } });
       dispatch({ type: "composer/clear" });
+      let threadId: string | null = null;
       try {
         const ensured = await ensureBackendThread();
-        const threadId = ensured.threadId;
+        threadId = ensured.threadId;
         const runVersion = beginThreadRun(threadId);
         const promptText = composerSkill ? nextMessage : slashCommand?.prompt ?? "";
+        openOptimisticThread({
+          threadId,
+          baseThread: ensured.thread,
+          message: promptText,
+          attachments: nextAttachments,
+          skillName: referenceSkill.name,
+        });
         const result = await workspaceClient.sendMessage({
           threadId,
           message: buildSkillPrompt(referenceSkill.name, referenceSkill.description, promptText),
@@ -1025,10 +1104,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
         onOpenChat();
         onToast(`Sent with /${referenceSkill.name}`);
       } catch (error) {
-        if (isThreadStopping(stateRef.current.activeThreadId)) {
-          return;
-        }
-        onToast(formatErrorMessage(error, "Send message failed"));
+        handleSendFailure(threadId, error, "Send message failed");
       } finally {
         dispatch({ type: "status/set", payload: { sending: false } });
       }
