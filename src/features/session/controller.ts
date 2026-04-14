@@ -119,6 +119,46 @@ function upsertThreadSummary(threads: ThreadSummary[], nextThread: ThreadSummary
   );
 }
 
+function hasLoadingAssistantMessage(thread: Pick<ThreadRecord, "messages"> | null | undefined) {
+  return thread?.messages.some((message) => message.role === "assistant" && message.status === "loading") ?? false;
+}
+
+function latestStableThreadText(thread: ThreadRecord) {
+  return (
+    [...thread.messages]
+      .reverse()
+      .find((message) => message.text.trim() && message.status !== "loading")
+      ?.text.trim() ?? ""
+  );
+}
+
+function summarizeThreadForDisplay(thread: ThreadRecord, previous?: ThreadSummary | null): ThreadSummary {
+  const stableLastMessage = latestStableThreadText(thread);
+  const loading = hasLoadingAssistantMessage(thread);
+
+  if (loading) {
+    return {
+      id: thread.id,
+      title: previous?.title || formatThreadTitle(thread.title, stableLastMessage || thread.lastMessage),
+      updatedAt: previous?.updatedAt ?? thread.updatedAt,
+      lastMessage: previous?.lastMessage || stableLastMessage || thread.lastMessage,
+      messageCount: Math.max(previous?.messageCount ?? 0, thread.messageCount),
+      archived: thread.archived,
+      workspaceRoot: thread.workspaceRoot,
+    };
+  }
+
+  return {
+    id: thread.id,
+    title: formatThreadTitle(thread.title, stableLastMessage || thread.lastMessage),
+    updatedAt: thread.updatedAt,
+    lastMessage: stableLastMessage || thread.lastMessage,
+    messageCount: thread.messageCount,
+    archived: thread.archived,
+    workspaceRoot: thread.workspaceRoot,
+  };
+}
+
 function isAbsoluteAttachmentPath(value: string) {
   return /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(value);
 }
@@ -216,15 +256,8 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
           status: { ...state.status, openingThreadId: null },
         };
       }
-      const updatedSummary: ThreadSummary = {
-        id: openedThread.id,
-        title: openedThread.title,
-        updatedAt: openedThread.updatedAt,
-        lastMessage: openedThread.lastMessage,
-        messageCount: openedThread.messageCount,
-        archived: openedThread.archived,
-        workspaceRoot: openedThread.workspaceRoot,
-      };
+      const previousSummary = state.threads.find((thread) => thread.id === openedThread.id) ?? null;
+      const updatedSummary = summarizeThreadForDisplay(openedThread, previousSummary);
       return {
         ...state,
         activeThreadId: action.payload.threadId,
@@ -343,15 +376,8 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
   }
 
   function syncThreadStateRef(threadId: string, thread: ThreadRecord) {
-    const updatedSummary: ThreadSummary = {
-      id: thread.id,
-      title: thread.title,
-      updatedAt: thread.updatedAt,
-      lastMessage: thread.lastMessage,
-      messageCount: thread.messageCount,
-      archived: thread.archived,
-      workspaceRoot: thread.workspaceRoot,
-    };
+    const previousSummary = stateRef.current.threads.find((item) => item.id === thread.id) ?? null;
+    const updatedSummary = summarizeThreadForDisplay(thread, previousSummary);
 
     stateRef.current = {
       ...stateRef.current,
@@ -643,6 +669,59 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
       applyBootstrapPayload(payload);
     });
   }, []);
+
+  const activeThreadHasLoading = useMemo(
+    () => hasLoadingAssistantMessage(state.activeThread),
+    [state.activeThread],
+  );
+
+  useEffect(() => {
+    const threadId = state.activeThreadId;
+    if (!threadId || (!state.status.sending && !activeThreadHasLoading)) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const poll = async () => {
+      try {
+        const thread = await workspaceClient.getThread(threadId);
+        if (cancelled || stateRef.current.activeThreadId !== threadId) {
+          return;
+        }
+
+        applyThreadSnapshot(threadId, thread);
+      } catch {
+        // Keep the active thread responsive even if one poll fails.
+      }
+
+      if (cancelled || stateRef.current.activeThreadId !== threadId) {
+        return;
+      }
+
+      const shouldContinue =
+        stateRef.current.status.sending || hasLoadingAssistantMessage(stateRef.current.activeThread);
+      if (!shouldContinue) {
+        return;
+      }
+
+      timer = window.setTimeout(() => {
+        void poll();
+      }, 700);
+    };
+
+    timer = window.setTimeout(() => {
+      void poll();
+    }, state.status.sending && !activeThreadHasLoading ? 250 : 500);
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [activeThreadHasLoading, state.activeThreadId, state.status.sending]);
 
   useEffect(() => {
     dispatch({ type: "status/set", payload: { bootstrapping: true } });
@@ -1205,7 +1284,7 @@ export function useSessionController({ onOpenChat, onToast }: UseSessionControll
     try {
       onOpenChat();
       const thread = await workspaceClient.setActiveThread(threadId);
-      dispatch({ type: "thread/open", payload: { threadId, thread } });
+      applyThreadSnapshot(threadId, thread);
     } catch (error) {
       onToast(formatErrorMessage(error, "Failed to open thread"));
       dispatch({ type: "status/set", payload: { openingThreadId: null } });
