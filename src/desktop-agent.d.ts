@@ -1,6 +1,7 @@
 import type {
   AppConfig,
   BootstrapPayload,
+  DesktopWindowState,
   FileDropEntry,
   KnowledgeCatalogPayload,
   KnowledgeAddDirectoryInput,
@@ -8,6 +9,7 @@ import type {
   KnowledgeAddNoteInput,
   KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
+  KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
   FilePreviewPayload,
   McpInspectInput,
@@ -16,6 +18,10 @@ import type {
   McpToolDebugResult,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
+  EmergencyPlanInput,
+  EmergencyPlanResult,
+  ProjectReportInput,
+  ProjectReportResult,
   QuestionRejectInput,
   QuestionReplyInput,
   SendMessageInput,
@@ -50,6 +56,7 @@ declare global {
       addKnowledgeNote: (payload: KnowledgeAddNoteInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeUrl: (payload: KnowledgeAddUrlInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeWebsite: (payload: KnowledgeAddUrlInput) => Promise<KnowledgeCatalogPayload>;
+      deleteKnowledgeItem: (payload: KnowledgeDeleteItemInput) => Promise<KnowledgeCatalogPayload>;
       searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) => Promise<KnowledgeSearchPayload>;
       runSkill: (payload: SkillRunInput) => Promise<SkillRunResult>;
       uninstallSkill: (skillId: string) => Promise<BootstrapPayload>;
@@ -58,12 +65,19 @@ declare global {
       inspectMcpServer: (payload: McpInspectInput) => Promise<McpServerToolsResult>;
       debugMcpTool: (payload: McpToolDebugInput) => Promise<McpToolDebugResult>;
       listTools: () => Promise<WorkspaceToolCatalog>;
+      generateEmergencyPlan: (payload: EmergencyPlanInput) => Promise<EmergencyPlanResult>;
+      generateProjectReport: (payload: ProjectReportInput) => Promise<ProjectReportResult>;
       selectFiles: () => Promise<FileDropEntry[]>;
       selectWorkspaceFolder: () => Promise<string>;
       setThreadWorkspace: (threadId: string, workspaceRoot: string) => Promise<BootstrapPayload>;
       readPreview: (payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) => Promise<FilePreviewPayload>;
       openWorkspaceFolder: (threadId?: string) => Promise<void>;
+      getWindowState: () => Promise<DesktopWindowState>;
+      minimizeWindow: () => Promise<DesktopWindowState>;
+      toggleMaximizeWindow: () => Promise<DesktopWindowState>;
+      closeWindow: () => Promise<void>;
       onWorkspaceChanged: (listener: (payload: BootstrapPayload) => void) => () => void;
+      onWindowStateChanged: (listener: (payload: DesktopWindowState) => void) => () => void;
       onGatewayEvent: (listener: (payload: BootstrapPayload) => void) => () => void;
     };
   }

@@ -1,10 +1,12 @@
 import clsx from "clsx";
 import {
   Database,
+  FileText,
   Layers3,
   LoaderCircle,
   MessageSquarePlus,
   Settings2,
+  ShieldAlert,
   Wrench,
 } from "lucide-react";
 
@@ -59,9 +61,23 @@ export function PrimarySidebar({
           <Wrench size={18} />
           <span>工具</span>
         </button>
-        <button className={clsx("sidebar-link", view === "knowledge" && "active")} onClick={() => onSetView("knowledge")}>
+        <button
+          className={clsx("sidebar-link", view === "knowledge" && "active")}
+          onClick={() => onSetView("knowledge")}
+        >
           <Database size={18} />
           <span>知识库</span>
+        </button>
+        <button className={clsx("sidebar-link", view === "reports" && "active")} onClick={() => onSetView("reports")}>
+          <FileText size={18} />
+          <span>报告生成</span>
+        </button>
+        <button
+          className={clsx("sidebar-link", view === "emergency" && "active")}
+          onClick={() => onSetView("emergency")}
+        >
+          <ShieldAlert size={18} />
+          <span>应急预案</span>
         </button>
       </div>
 
@@ -77,7 +93,9 @@ export function PrimarySidebar({
           <div className="thread-pane-empty">
             <strong>{workspaceIssue ? "暂时无法刷新会话列表" : "还没有会话"}</strong>
             <span>
-              {workspaceIssue ? "当前已保留现有界面状态，你可以点击右上角继续重试。" : "点上面的“新聊天”就能开始。"}
+              {workspaceIssue
+                ? "当前已保留现有界面状态，你可以继续操作，稍后再重试。"
+                : "点上面的“新聊天”就能开始；归档后的会话会显示在下方“已归档”区域。"}
             </span>
           </div>
         ) : (
@@ -96,6 +114,7 @@ export function PrimarySidebar({
               busyThreadId={busyThreadId}
               items={archivedThreads}
               label="已归档"
+              emptyHint="归档后的会话会显示在这里"
               onArchiveThread={onArchiveThread}
               onDeleteThread={onDeleteThread}
               onOpenThread={onOpenThread}
@@ -104,10 +123,15 @@ export function PrimarySidebar({
         )}
       </div>
 
-      <button className={clsx("sidebar-link", "bottom", view === "settings" && "active")} onClick={() => onSetView("settings")}>
-        <Settings2 size={18} />
-        <span>设置</span>
-      </button>
+      <div className="sidebar-footer">
+        <button
+          className={clsx("sidebar-link", "bottom", view === "settings" && "active")}
+          onClick={() => onSetView("settings")}
+        >
+          <Settings2 size={18} />
+          <span>设置</span>
+        </button>
+      </div>
     </aside>
   );
 }

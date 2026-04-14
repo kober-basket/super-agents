@@ -19,12 +19,17 @@ export type ComposerSkill = {
 
 export type SkillMessageMarker = {
   displayText: string
-  skillName: string
+  skillName?: string
 }
 
 export type SkillPromptMeta = {
   displayText: string
   skillName: string
+}
+
+export type DraftThreadState = {
+  workspaceRoot: string
+  thread: ThreadRecord | null
 }
 
 export type SessionStatus = {

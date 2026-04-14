@@ -1,4 +1,13 @@
-export type AppSection = "chat" | "skills" | "tools" | "knowledge" | "settings";
+export type AppSection = "chat" | "skills" | "tools" | "knowledge" | "reports" | "emergency" | "settings";
+export type AppearanceThemeId =
+  | "linen"
+  | "ocean"
+  | "forest"
+  | "sunset"
+  | "graphite"
+  | "mist"
+  | "citrus"
+  | "aubergine";
 export type ContextTier = "low" | "medium" | "high";
 export type EnvironmentMode = "local" | "cloud";
 export type MessageRole = "user" | "assistant" | "tool";
@@ -241,6 +250,7 @@ export interface KnowledgeInjectionMeta {
   resultCount: number;
   searchedBaseIds: string[];
   warnings: string[];
+  results?: KnowledgeSearchResultItem[];
 }
 
 export interface KnowledgeBaseCreateInput {
@@ -269,10 +279,19 @@ export interface KnowledgeAddUrlInput {
   url: string;
 }
 
+export interface KnowledgeDeleteItemInput {
+  baseId: string;
+  itemId: string;
+}
+
 export interface ProxyConfig {
   http: string;
   https: string;
   bypass: string;
+}
+
+export interface AppearanceConfig {
+  theme: AppearanceThemeId;
 }
 
 export interface AppConfig {
@@ -281,12 +300,18 @@ export interface AppConfig {
   environment: EnvironmentMode;
   activeModelId: string;
   contextTier: ContextTier;
+  appearance: AppearanceConfig;
   proxy: ProxyConfig;
   modelProviders: ModelProviderConfig[];
   mcpServers: McpServerConfig[];
   skills: SkillConfig[];
   hiddenCodexSkillIds: string[];
   knowledgeBase: KnowledgeBaseConnectionConfig;
+}
+
+export interface DesktopWindowState {
+  platform: "darwin" | "win32" | "linux";
+  maximized: boolean;
 }
 
 export interface MessageAttachment {
@@ -305,11 +330,13 @@ export interface ChatMessage {
   id: string;
   role: MessageRole;
   text: string;
+  displayText?: string;
   createdAt: number;
   status?: "loading" | "done" | "error";
   attachments?: MessageAttachment[];
   toolName?: string;
   skillName?: string;
+  knowledge?: KnowledgeInjectionMeta;
 }
 
 export interface PendingQuestionOption {
@@ -374,7 +401,7 @@ export interface BootstrapPayload {
   config: AppConfig;
   threads: ThreadSummary[];
   activeThreadId: string;
-  currentThread: ThreadRecord;
+  currentThread: ThreadRecord | null;
   availableSkills: RuntimeSkill[];
   availableAgents: RuntimeAgent[];
   mcpStatuses: McpServerStatus[];
@@ -382,7 +409,8 @@ export interface BootstrapPayload {
 }
 
 export interface SendMessageInput {
-  threadId: string;
+  threadId?: string;
+  workspaceRoot?: string;
   message: string;
   attachments: FileDropEntry[];
 }
@@ -404,7 +432,8 @@ export interface QuestionRejectInput {
 }
 
 export interface SkillRunInput {
-  threadId: string;
+  threadId?: string;
+  workspaceRoot?: string;
   skillId: string;
   prompt: string;
 }
@@ -421,4 +450,60 @@ export interface SkillDeleteResult {
   availableSkills: RuntimeSkill[];
   availableAgents: RuntimeAgent[];
   mcpStatuses: McpServerStatus[];
+}
+
+export interface ProjectReportInput {
+  knowledgeBaseId: string;
+  projectName: string;
+  projectType?: string;
+  projectLocation?: string;
+  longitude?: string;
+  latitude?: string;
+  projectOverview?: string;
+  policyFocus?: string;
+  outputDirectory?: string;
+  outputFileName?: string;
+  workspaceRoot?: string;
+  preferredMapServerId?: string;
+  preferredMapToolName?: string;
+}
+
+export interface ProjectReportResult {
+  outputPath: string;
+  fileName: string;
+  generatedAt: number;
+  locationSummary?: string;
+  mapToolUsed?: string;
+  references: KnowledgeSearchResultItem[];
+  content: string;
+}
+
+export interface EmergencyPlanInput {
+  projectName: string;
+  projectType?: string;
+  projectLocation?: string;
+  companyName?: string;
+  industryCategory?: string;
+  riskSources?: string;
+  emergencyResources?: string;
+  projectOverview?: string;
+  specialRequirements?: string;
+  templateFiles: FileDropEntry[];
+  outputDirectory?: string;
+  outputFileName?: string;
+  workspaceRoot?: string;
+}
+
+export interface EmergencyPlanResult {
+  outputPath: string;
+  fileName: string;
+  generatedAt: number;
+  templateCount: number;
+  recognizedTemplates: Array<{
+    name: string;
+    path: string;
+    kind: string;
+    excerpt: string;
+  }>;
+  content: string;
 }

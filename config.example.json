@@ -4,6 +4,9 @@
   "environment": "local",
   "activeModelId": "iflyrpa::azure/gpt-5-mini",
   "contextTier": "high",
+  "appearance": {
+    "theme": "linen"
+  },
   "proxy": {
     "http": "",
     "https": "",

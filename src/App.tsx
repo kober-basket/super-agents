@@ -11,11 +11,16 @@ import {
 import type {
   AppConfig,
   AppSection,
+  DesktopWindowState,
+  EmergencyPlanInput,
+  EmergencyPlanResult,
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeBaseSummary,
   McpServerConfig,
   ModelProviderConfig,
+  ProjectReportInput,
+  ProjectReportResult,
   SkillConfig,
   WorkspaceTool,
 } from "./types";
@@ -24,15 +29,15 @@ import { ChatView } from "./features/chat/ChatView";
 import { PreviewPane } from "./features/chat/PreviewPane";
 import { PrimarySidebar } from "./features/navigation/PrimarySidebar";
 import { SkillsView } from "./features/skills/SkillsView";
-import { RECOMMENDED_SKILLS } from "./features/skills/constants";
 import { ToolsView } from "./features/tools/ToolsView";
 import { KnowledgeView } from "./features/knowledge/KnowledgeView";
+import { ReportsView } from "./features/reports/ReportsView";
+import { EmergencyPlanView } from "./features/emergency/EmergencyPlanView";
+import { AppTitleBar } from "./features/navigation/AppTitleBar";
 import { AssistantSettings } from "./features/settings/AssistantSettings";
-import { GeneralSettings } from "./features/settings/GeneralSettings";
-import { McpSettings } from "./features/settings/McpSettings";
+import { AppearanceSettings } from "./features/settings/AppearanceSettings";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
-import { WorkspaceSettings } from "./features/settings/WorkspaceSettings";
 import { useSessionController } from "./features/session/useSessionController";
 import { cloneConfig, matchQuery } from "./features/session/utils";
 import { fileKind, sanitizeMcpName } from "./features/shared/utils";
@@ -43,7 +48,7 @@ function uid() {
 
 export default function App() {
   const [view, setView] = useState<AppSection>("chat");
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("assistant");
   const [preview, setPreview] = useState<FilePreviewPayload | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -57,6 +62,39 @@ export default function App() {
   const [mcpAdvancedOpen, setMcpAdvancedOpen] = useState(false);
   const [providerRefreshingId, setProviderRefreshingId] = useState<string | null>(null);
   const [selectedModelProviderId, setSelectedModelProviderId] = useState("");
+  const [windowState, setWindowState] = useState<DesktopWindowState | null>(null);
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportResult, setReportResult] = useState<ProjectReportResult | null>(null);
+  const [emergencyGenerating, setEmergencyGenerating] = useState(false);
+  const [emergencyResult, setEmergencyResult] = useState<EmergencyPlanResult | null>(null);
+  const [reportForm, setReportForm] = useState<ProjectReportInput>({
+    knowledgeBaseId: "",
+    projectName: "",
+    projectType: "",
+    projectLocation: "",
+    longitude: "",
+    latitude: "",
+    projectOverview: "",
+    policyFocus: "",
+    outputDirectory: "",
+    outputFileName: "",
+    workspaceRoot: "",
+  });
+  const [emergencyForm, setEmergencyForm] = useState<EmergencyPlanInput>({
+    projectName: "",
+    companyName: "",
+    projectType: "",
+    industryCategory: "",
+    projectLocation: "",
+    projectOverview: "",
+    riskSources: "",
+    emergencyResources: "",
+    specialRequirements: "",
+    templateFiles: [],
+    outputDirectory: "",
+    outputFileName: "",
+    workspaceRoot: "",
+  });
   const {
     activeModel,
     activeSummary,
@@ -84,6 +122,7 @@ export default function App() {
     currentWorkspaceLabel,
     currentWorkspacePath,
     deleteThread: deleteThreadImmediately,
+    drafting,
     dragActive,
     mcpStatuses,
     mcpStatusMap,
@@ -146,12 +185,14 @@ export default function App() {
       ),
     [availableSkills, skillQuery],
   );
-  const filteredRecommendedSkills = useMemo(
+  const reportMapTools = useMemo(
     () =>
-      RECOMMENDED_SKILLS.filter((skill) =>
-        matchQuery(skillQuery, [skill.name, skill.description, skill.badge]),
+      tools.filter((tool) =>
+        /(map|geo|geocode|coordinate|location|amap|gaode|baidu|tencent|place|poi|reverse)/i.test(
+          [tool.name, tool.title, tool.description, tool.origin].filter(Boolean).join(" "),
+        ),
       ),
-    [skillQuery],
+    [tools],
   );
   useEffect(() => {
     if (!toast) return undefined;
@@ -160,7 +201,37 @@ export default function App() {
   }, [toast]);
 
   useEffect(() => {
-    if (view !== "tools" || toolsRefreshing || toolsLoadedRef.current) {
+    let mounted = true;
+    const unsubscribe = workspaceClient.onWindowStateChanged((payload) => {
+      if (mounted) {
+        setWindowState(payload);
+      }
+    });
+
+    void workspaceClient
+      .getWindowState()
+      .then((payload) => {
+        if (mounted) {
+          setWindowState(payload);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = config.appearance.theme;
+    return () => {
+      delete document.documentElement.dataset.theme;
+    };
+  }, [config.appearance.theme]);
+
+  useEffect(() => {
+    if ((view !== "tools" && view !== "reports") || toolsRefreshing || toolsLoadedRef.current) {
       return;
     }
 
@@ -168,12 +239,29 @@ export default function App() {
   }, [toolsRefreshing, view]);
 
   useEffect(() => {
-    if (view !== "knowledge" || knowledgeRefreshing || knowledgeLoadedRef.current) {
+    if ((view !== "knowledge" && view !== "reports") || knowledgeRefreshing || knowledgeLoadedRef.current) {
       return;
     }
 
     void refreshKnowledgeView({ silent: true });
   }, [knowledgeRefreshing, view]);
+
+  useEffect(() => {
+    if (reportForm.workspaceRoot) return;
+    setReportForm((current) => ({ ...current, workspaceRoot: config.opencodeRoot || "" }));
+  }, [config.opencodeRoot, reportForm.workspaceRoot]);
+
+  useEffect(() => {
+    if (emergencyForm.workspaceRoot) return;
+    setEmergencyForm((current) => ({ ...current, workspaceRoot: config.opencodeRoot || "" }));
+  }, [config.opencodeRoot, emergencyForm.workspaceRoot]);
+
+  useEffect(() => {
+    if (reportForm.knowledgeBaseId) return;
+    const fallbackId = config.knowledgeBase.selectedBaseIds[0] || knowledgeBases[0]?.id || "";
+    if (!fallbackId) return;
+    setReportForm((current) => ({ ...current, knowledgeBaseId: fallbackId }));
+  }, [config.knowledgeBase.selectedBaseIds, knowledgeBases, reportForm.knowledgeBaseId]);
 
   useEffect(() => {
     if (config.modelProviders.length === 0) {
@@ -413,7 +501,7 @@ export default function App() {
       const nextModels = normalizeProviderModels(
         payload.models.map((item) => ({
           ...item,
-          enabled: previousEnabled.get(item.id) ?? false,
+          enabled: previousEnabled.has(item.id) ? previousEnabled.get(item.id) : item.enabled !== false,
         })),
       );
       const modelProviders = config.modelProviders.map((item) =>
@@ -469,11 +557,17 @@ export default function App() {
     id: string;
     name: string;
     transport: "local" | "remote";
+    command?: string;
+    args?: string[];
+    url?: string;
+    headersJson?: string;
+    envJson?: string;
+    enabled?: boolean;
   }) {
     const normalized = sanitizeMcpName(server.name);
     if (config.mcpServers.some((item) => sanitizeMcpName(item.name) === normalized)) {
       setToast("This server draft already exists");
-      setSettingsSection("mcp");
+      setView("tools");
       return;
     }
 
@@ -483,18 +577,38 @@ export default function App() {
         id: `mcp-${uid()}`,
         name: server.name,
         transport: server.transport,
-        command: server.transport === "local" ? "node" : "",
-        args: [],
-        url: "",
-        headersJson: "{}",
-        envJson: "{}",
-        enabled: false,
+        command: server.command ?? (server.transport === "local" ? "node" : ""),
+        args: server.args ?? [],
+        url: server.url ?? "",
+        headersJson: server.headersJson ?? "{}",
+        envJson: server.envJson ?? "{}",
+        enabled: server.enabled ?? false,
         timeoutMs: 30000,
       },
     ];
 
     void commitConfig({ ...cloneConfig(config), mcpServers }, "Added recommended MCP server");
-    setSettingsSection("mcp");
+    setView("tools");
+  }
+
+  async function addRecommendedMapMcpServer() {
+    addRecommendedMcpServer({
+      id: "amap-maps",
+      name: "AMap Maps",
+      transport: "local",
+      command: "npx",
+      args: ["-y", "@amap/amap-maps-mcp-server"],
+      envJson: JSON.stringify(
+        {
+          AMAP_MAPS_API_KEY: "",
+        },
+        null,
+        2,
+      ),
+      enabled: true,
+    });
+    setToast("已添加高德地图 MCP，请在工具页填写 AMAP_MAPS_API_KEY");
+    await refreshToolsView({ silent: true });
   }
 
   async function refreshSkillsView() {
@@ -567,12 +681,114 @@ export default function App() {
       }
 
       if (!options?.silent) {
-        setToast("Knowledge bases refreshed");
+        setToast("知识库已刷新");
       }
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Refresh knowledge bases failed");
+      setToast(error instanceof Error ? error.message : "刷新知识库失败");
     } finally {
       setKnowledgeRefreshing(false);
+    }
+  }
+
+  function updateReportForm(patch: Partial<ProjectReportInput>) {
+    setReportForm((current) => ({ ...current, ...patch }));
+  }
+
+  async function chooseReportOutputDirectory() {
+    try {
+      const directory = await workspaceClient.selectWorkspaceFolder();
+      if (!directory) return;
+      updateReportForm({ outputDirectory: directory });
+    } catch {
+      setToast("选择输出目录失败");
+    }
+  }
+
+  function updateEmergencyForm(patch: Partial<EmergencyPlanInput>) {
+    setEmergencyForm((current) => ({ ...current, ...patch }));
+  }
+
+  async function pickEmergencyTemplates() {
+    try {
+      const files = await workspaceClient.selectFiles();
+      const nextFiles = files.filter((file) => /\.(pdf|doc|docx)$/i.test(file.name));
+      if (nextFiles.length === 0) {
+        setToast("请选择 PDF、DOC 或 DOCX 模板文件");
+        return;
+      }
+      setEmergencyForm((current) => {
+        const existing = new Map(current.templateFiles.map((file) => [file.path, file]));
+        for (const file of nextFiles) {
+          existing.set(file.path, file);
+        }
+        return { ...current, templateFiles: Array.from(existing.values()) };
+      });
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "选择模板文件失败");
+    }
+  }
+
+  function removeEmergencyTemplate(fileId: string) {
+    setEmergencyForm((current) => ({
+      ...current,
+      templateFiles: current.templateFiles.filter((file) => file.id !== fileId),
+    }));
+  }
+
+  async function chooseEmergencyOutputDirectory() {
+    try {
+      const directory = await workspaceClient.selectWorkspaceFolder();
+      if (!directory) return;
+      setEmergencyForm((current) => ({ ...current, outputDirectory: directory }));
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "选择输出目录失败");
+    }
+  }
+
+  async function generateProjectReport() {
+    if (!reportForm.knowledgeBaseId) {
+      setToast("请先选择知识库");
+      return;
+    }
+    if (!reportForm.projectName?.trim()) {
+      setToast("请先输入项目名称");
+      return;
+    }
+
+    setReportGenerating(true);
+    try {
+      const payload = await workspaceClient.generateProjectReport({
+        ...reportForm,
+        workspaceRoot: reportForm.workspaceRoot || config.opencodeRoot,
+      });
+      setReportResult(payload);
+      setToast(`报告已生成：${payload.fileName}`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "生成报告失败");
+    } finally {
+      setReportGenerating(false);
+    }
+  }
+
+  async function generateEmergencyPlan() {
+    if (!emergencyForm.projectName.trim()) {
+      setToast("请先填写项目名称");
+      return;
+    }
+    if (emergencyForm.templateFiles.length === 0) {
+      setToast("请先选择应急预案模板");
+      return;
+    }
+
+    setEmergencyGenerating(true);
+    try {
+      const result = await workspaceClient.generateEmergencyPlan(emergencyForm);
+      setEmergencyResult(result);
+      setToast(`应急预案已生成：${result.fileName}`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "生成应急预案失败");
+    } finally {
+      setEmergencyGenerating(false);
     }
   }
 
@@ -580,7 +796,7 @@ export default function App() {
     const trimmedName = name.trim();
     const trimmedDescription = description.trim();
     if (!trimmedName) {
-      setToast("Enter a knowledge base name first");
+      setToast("请先输入知识库名称");
       return null;
     }
 
@@ -593,7 +809,7 @@ export default function App() {
         description: trimmedDescription,
       });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast(`Created knowledge base ${trimmedName}`);
+      setToast(`已创建知识库「${trimmedName}」`);
       const createdBase =
         payload.knowledgeBases.find((item) => !previousBaseIds.has(item.id)) ??
         payload.knowledgeBases.find(
@@ -604,7 +820,7 @@ export default function App() {
         null;
       return createdBase?.id ?? null;
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Create knowledge base failed");
+      setToast(error instanceof Error ? error.message : "创建知识库失败");
       return null;
     } finally {
       setKnowledgeRefreshing(false);
@@ -620,9 +836,9 @@ export default function App() {
         enabled: config.knowledgeBase.selectedBaseIds.some((item) => item !== baseId),
         selectedBaseIds: config.knowledgeBase.selectedBaseIds.filter((item) => item !== baseId),
       });
-      setToast("Knowledge base deleted");
+      setToast("知识库已删除");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Delete knowledge base failed");
+      setToast(error instanceof Error ? error.message : "删除知识库失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -635,9 +851,9 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeFiles({ baseId, files });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast(`Imported ${files.length} file(s)`);
+      setToast(`已导入 ${files.length} 个文件`);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "鐎电厧鍙嗛惌銉ㄧ槕閺傚洣娆㈡径杈Е");
+      setToast(error instanceof Error ? error.message : "导入文件失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -645,7 +861,7 @@ export default function App() {
 
   async function addKnowledgeNote(baseId: string, title: string, content: string) {
     if (!title.trim() || !content.trim()) {
-      setToast("Enter both a note title and content");
+      setToast("请填写笔记标题和内容");
       return;
     }
 
@@ -657,9 +873,9 @@ export default function App() {
         content: content.trim(),
       });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("Knowledge note added");
+      setToast("笔记已添加");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "濞ｈ濮為惌銉ㄧ槕缁楁棁顔囨径杈Е");
+      setToast(error instanceof Error ? error.message : "添加笔记失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -672,9 +888,9 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeDirectory({ baseId, directoryPath });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("Knowledge directory added");
+      setToast("目录资料已添加");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Add knowledge directory failed");
+      setToast(error instanceof Error ? error.message : "添加目录失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -685,9 +901,9 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeUrl({ baseId, url });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("Knowledge URL added");
+      setToast("网址资料已添加");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Add knowledge URL failed");
+      setToast(error instanceof Error ? error.message : "添加网址失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -698,35 +914,86 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeWebsite({ baseId, url });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("Knowledge website added");
+      setToast("网站资料已添加");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Add knowledge website failed");
+      setToast(error instanceof Error ? error.message : "添加网站失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
   }
 
+  async function deleteKnowledgeItem(baseId: string, itemId: string) {
+    setKnowledgeRefreshing(true);
+    try {
+      const payload = await workspaceClient.deleteKnowledgeItem({ baseId, itemId });
+      setKnowledgeBases(payload.knowledgeBases);
+      setToast("资料已删除");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "删除资料失败");
+    } finally {
+      setKnowledgeRefreshing(false);
+    }
+  }
+
+  function updateAppearanceTheme(theme: AppConfig["appearance"]["theme"]) {
+    if (config.appearance.theme === theme) {
+      return;
+    }
+
+    void commitConfig(
+      {
+        ...cloneConfig(config),
+        appearance: {
+          ...cloneConfig(config).appearance,
+          theme,
+        },
+      },
+      "外观主题已更新",
+    );
+  }
+
+  async function minimizeWindow() {
+    try {
+      const payload = await workspaceClient.minimizeWindow();
+      setWindowState(payload);
+    } catch {
+      setToast("Minimize window failed");
+    }
+  }
+
+  async function toggleMaximizeWindow() {
+    try {
+      const payload = await workspaceClient.toggleMaximizeWindow();
+      setWindowState(payload);
+    } catch {
+      setToast("Resize window failed");
+    }
+  }
+
+  async function closeWindow() {
+    try {
+      await workspaceClient.closeWindow();
+    } catch {
+      setToast("Close window failed");
+    }
+  }
+
   const showPreviewPane = view === "chat" && preview && previewOpen;
-  const threadBusy = activeThread?.messages.some((message) => message.status === "loading") ?? false;
+  const threadBusy = !drafting && (activeThread?.messages.some((message) => message.status === "loading") ?? false);
   const settingsStats = {
     threadCount: activeThreads.length + archivedThreads.length,
     providerCount: config.modelProviders.length,
     mcpCount: config.mcpServers.length,
   };
   const hasSkillResults =
-    filteredInstalledSkills.length > 0 ||
-    filteredReferenceSkills.length > 0 ||
-    filteredRecommendedSkills.length > 0;
+    filteredInstalledSkills.length > 0 || filteredReferenceSkills.length > 0;
 
   function renderSettingsView() {
-    if (settingsSection === "general") {
+    if (settingsSection === "appearance") {
       return (
-        <GeneralSettings
-          activeModelLabel={activeModel?.label ?? null}
-          mcpCount={settingsStats.mcpCount}
-          providerCount={settingsStats.providerCount}
-          threadCount={settingsStats.threadCount}
-          onOpenWorkspaceFolder={openWorkspaceFolder}
+        <AppearanceSettings
+          appearance={config.appearance}
+          onThemeChange={updateAppearanceTheme}
         />
       );
     }
@@ -752,48 +1019,6 @@ export default function App() {
         />
       );
     }
-
-    if (settingsSection === "mcp") {
-      return (
-        <McpSettings
-          mcpAdvancedOpen={mcpAdvancedOpen}
-          mcpRefreshing={mcpRefreshing}
-          mcpServers={config.mcpServers}
-          mcpStatusMap={mcpStatusMap}
-          onAddMcpServer={addMcpServer}
-          onAddRecommendedMcpServer={addRecommendedMcpServer}
-          onRefresh={refreshMcpView}
-          onRemoveMcpServer={removeMcpServer}
-          onToggleAdvanced={() => setMcpAdvancedOpen((value) => !value)}
-          onUpdateMcp={updateMcp}
-          onInspectServer={(server) =>
-            workspaceClient.inspectMcpServer({
-              server,
-              workspaceRoot: config.opencodeRoot,
-            })
-          }
-          onDebugTool={(server, toolName, argumentsJson) =>
-            workspaceClient.debugMcpTool({
-              server,
-              workspaceRoot: config.opencodeRoot,
-              toolName,
-              argumentsJson,
-            })
-          }
-        />
-      );
-    }
-
-    return (
-      <WorkspaceSettings
-        bridgeUrl={config.bridgeUrl}
-        mcpCount={settingsStats.mcpCount}
-        opencodeRoot={config.opencodeRoot}
-        providerCount={settingsStats.providerCount}
-        threadCount={settingsStats.threadCount}
-        onOpenWorkspaceFolder={openWorkspaceFolder}
-      />
-    );
   }
 
   function renderMainView() {
@@ -801,14 +1026,12 @@ export default function App() {
       return (
         <SkillsView
           filteredInstalledSkills={filteredInstalledSkills}
-          filteredRecommendedSkills={filteredRecommendedSkills}
           filteredReferenceSkills={filteredReferenceSkills}
           hasResults={hasSkillResults}
           skillQuery={skillQuery}
           skillsRefreshing={skillsRefreshing}
           onPrepareSkillDraft={prepareSkillDraft}
           onRefresh={refreshSkillsView}
-          onRunSkill={runSkill}
           onSkillQueryChange={setSkillQuery}
           onUninstallSkill={uninstallSkill}
           onUpdateInstalledSkill={updateInstalledSkill}
@@ -820,9 +1043,32 @@ export default function App() {
     if (view === "tools") {
       return (
         <ToolsView
+          mcpAdvancedOpen={mcpAdvancedOpen}
+          mcpRefreshing={mcpRefreshing}
+          mcpServers={config.mcpServers}
+          mcpStatusMap={mcpStatusMap}
           tools={tools}
           toolsRefreshing={toolsRefreshing}
+          onAddMcpServer={addMcpServer}
+          onDebugTool={(server, toolName, argumentsJson) =>
+            workspaceClient.debugMcpTool({
+              server,
+              workspaceRoot: config.opencodeRoot,
+              toolName,
+              argumentsJson,
+            })
+          }
+          onInspectServer={(server) =>
+            workspaceClient.inspectMcpServer({
+              server,
+              workspaceRoot: config.opencodeRoot,
+            })
+          }
           onRefresh={refreshToolsView}
+          onRefreshMcp={refreshMcpView}
+          onRemoveMcpServer={removeMcpServer}
+          onToggleAdvanced={() => setMcpAdvancedOpen((value) => !value)}
+          onUpdateMcp={updateMcp}
         />
       );
     }
@@ -845,6 +1091,38 @@ export default function App() {
           onAddKnowledgeNote={addKnowledgeNote}
           onAddKnowledgeUrl={addKnowledgeUrl}
           onAddKnowledgeWebsite={addKnowledgeWebsite}
+          onDeleteKnowledgeItem={deleteKnowledgeItem}
+        />
+      );
+    }
+
+    if (view === "reports") {
+      return (
+        <ReportsView
+          form={reportForm}
+          generating={reportGenerating}
+          knowledgeBases={knowledgeBases}
+          mapTools={reportMapTools}
+          result={reportResult}
+          onAddMapTool={addRecommendedMapMcpServer}
+          onChange={updateReportForm}
+          onChooseOutputDirectory={chooseReportOutputDirectory}
+          onGenerate={generateProjectReport}
+        />
+      );
+    }
+
+    if (view === "emergency") {
+      return (
+        <EmergencyPlanView
+          form={emergencyForm}
+          generating={emergencyGenerating}
+          result={emergencyResult}
+          onChange={updateEmergencyForm}
+          onPickTemplates={pickEmergencyTemplates}
+          onRemoveTemplate={removeEmergencyTemplate}
+          onChooseOutputDirectory={chooseEmergencyOutputDirectory}
+          onGenerate={generateEmergencyPlan}
         />
       );
     }
@@ -906,45 +1184,54 @@ export default function App() {
   }
 
   return (
-    <div className={clsx("app-shell", showPreviewPane && "with-preview", view === "settings" && "settings-mode")}>
-      {view === "settings" ? (
-        <SettingsSidebar
-          settingsSection={settingsSection}
-          onBack={() => setView("chat")}
-          onSelect={setSettingsSection}
-        />
-      ) : (
-        <PrimarySidebar
-          activeThreadId={activeThreadId}
-          activeThreads={activeThreads}
-          archivedThreads={archivedThreads}
-          busyThreadId={sessionStatus.openingThreadId ?? sessionStatus.mutatingThreadId}
-          creatingThread={sessionStatus.creatingThread}
-          view={view}
-          workspaceIssue={workspaceIssue}
-          onArchiveThread={archiveThread}
-          onCreateThread={createThread}
-          onDeleteThread={deleteThreadImmediately}
-          onOpenThread={openThread}
-          onSetView={setView}
-        />
-      )}
+    <div className={clsx("window-frame", windowState?.maximized && "maximized")}>
+      <AppTitleBar
+        view={view}
+        windowState={windowState}
+        onClose={closeWindow}
+        onMinimize={minimizeWindow}
+        onToggleMaximize={toggleMaximizeWindow}
+      />
 
-      <main className="workspace">
-        {renderMainView()}
-      </main>
+      <div className={clsx("app-shell", showPreviewPane && "with-preview", view === "settings" && "settings-mode")}>
+        {view === "settings" ? (
+          <SettingsSidebar
+            settingsSection={settingsSection}
+            onBack={() => setView("chat")}
+            onSelect={setSettingsSection}
+          />
+        ) : (
+          <PrimarySidebar
+            activeThreadId={activeThreadId}
+            activeThreads={activeThreads}
+            archivedThreads={archivedThreads}
+            busyThreadId={sessionStatus.openingThreadId ?? sessionStatus.mutatingThreadId}
+            creatingThread={sessionStatus.creatingThread}
+            view={view}
+            workspaceIssue={workspaceIssue}
+            onArchiveThread={archiveThread}
+            onCreateThread={createThread}
+            onDeleteThread={deleteThreadImmediately}
+            onOpenThread={openThread}
+            onSetView={setView}
+          />
+        )}
 
-      {showPreviewPane && preview ? (
-        <PreviewPane
-          preview={preview}
-          onClearPreview={() => setPreview(null)}
-          onClosePane={() => setPreviewOpen(false)}
-          onOpenLink={openPreviewLink}
-        />
-      ) : null}
+        <main className="workspace">
+          {renderMainView()}
+        </main>
+
+        {showPreviewPane && preview ? (
+          <PreviewPane
+            preview={preview}
+            onClearPreview={() => setPreview(null)}
+            onClosePane={() => setPreviewOpen(false)}
+            onOpenLink={openPreviewLink}
+          />
+        ) : null}
+      </div>
 
       {toast ? <div className="toast">{toast}</div> : null}
     </div>
   );
 }
-

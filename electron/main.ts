@@ -4,7 +4,18 @@ import path from "node:path";
 import { APP_DATA_DIR, APP_NAME, APP_WINDOW_TITLE, migrateLegacyAppData } from "./app-identity";
 import { McpInspector } from "./mcp-inspector";
 import { WorkspaceService } from "./workspace-service";
-import type { AppConfig, WorkspaceTool } from "../src/types";
+import {
+  summarizeMapToolResult,
+} from "./project-report";
+import type {
+  AppConfig,
+  DesktopWindowState,
+  EmergencyPlanInput,
+  McpServerConfig,
+  McpToolInfo,
+  ProjectReportInput,
+  WorkspaceTool,
+} from "../src/types";
 
 app.setName(APP_NAME);
 app.setPath("userData", path.join(app.getPath("appData"), APP_DATA_DIR));
@@ -14,14 +25,121 @@ let service: WorkspaceService | null = null;
 const mcpInspector = new McpInspector();
 const threadMonitors = new Map<string, { cancelled: boolean; promise: Promise<void> }>();
 
+function isLikelyMapTool(tool: Pick<WorkspaceTool, "name" | "title" | "description">) {
+  const text = [tool.name, tool.title, tool.description].filter(Boolean).join(" ").toLowerCase();
+  return /(map|geo|geocode|coordinate|location|amap|gaode|baidu|tencent|place|poi|reverse)/i.test(text);
+}
+
+function inferMapArguments(tool: McpToolInfo, input: ProjectReportInput) {
+  const params = tool.parameters.map((item) => item.name);
+  const lowerMap = new Map(params.map((name) => [name.toLowerCase(), name]));
+  const args: Record<string, unknown> = {};
+  const query = [input.projectName, input.projectLocation, input.projectType].filter(Boolean).join(" ").trim();
+  const lng = input.longitude?.trim();
+  const lat = input.latitude?.trim();
+  const location = lng && lat ? `${lng},${lat}` : "";
+
+  const assign = (candidates: string[], value: unknown) => {
+    if (value === undefined || value === null || value === "") return;
+    for (const key of candidates) {
+      const matched = lowerMap.get(key);
+      if (matched && args[matched] === undefined) {
+        args[matched] = value;
+        return;
+      }
+    }
+  };
+
+  assign(["query", "q", "keyword", "keywords", "address", "input", "text"], query);
+  assign(["projectname", "project_name", "name"], input.projectName.trim());
+  assign(["location", "coordinates", "coord", "center", "lnglat"], location || input.projectLocation?.trim());
+  assign(["longitude", "lng", "lon"], lng);
+  assign(["latitude", "lat"], lat);
+  assign(["addressdetail", "formatted_address", "region", "city"], input.projectLocation?.trim());
+
+  if (Object.keys(args).length === 0 && params.length > 0) {
+    args[params[0]] = location || query || input.projectName.trim();
+  }
+
+  return args;
+}
+
+async function resolveMapSummary(input: ProjectReportInput, config: AppConfig) {
+  const selectedServerId = input.preferredMapServerId?.trim();
+  const selectedToolName = input.preferredMapToolName?.trim();
+  const servers = config.mcpServers.filter((server) => server.enabled !== false);
+
+  const candidates: Array<{ server: McpServerConfig; toolName?: string }> = selectedServerId
+    ? servers
+        .filter((server) => server.id === selectedServerId)
+        .map((server) => ({ server, toolName: selectedToolName }))
+    : servers.map((server) => ({ server }));
+
+  for (const candidate of candidates) {
+    try {
+      const inspected = await mcpInspector.inspectServer({
+        server: candidate.server,
+        workspaceRoot: input.workspaceRoot || config.opencodeRoot,
+      });
+      const tool =
+        (candidate.toolName
+          ? inspected.tools.find((item) => item.name === candidate.toolName)
+          : inspected.tools.find((item) =>
+              isLikelyMapTool({
+                name: item.name,
+                title: item.title,
+                description: item.description,
+              }),
+            )) ?? null;
+      if (!tool) continue;
+
+      const argumentsJson = JSON.stringify(inferMapArguments(tool, input));
+      const result = await mcpInspector.debugTool({
+        server: candidate.server,
+        workspaceRoot: input.workspaceRoot || config.opencodeRoot,
+        toolName: tool.name,
+        argumentsJson,
+      });
+      if (result.isError) continue;
+
+      return {
+        mapSummary: summarizeMapToolResult(result),
+        mapToolUsed: `${candidate.server.name} / ${tool.name}`,
+      };
+    } catch {
+      continue;
+    }
+  }
+
+  return {
+    mapSummary: [
+      input.projectLocation,
+      input.longitude && input.latitude ? `Coordinates: ${input.longitude}, ${input.latitude}` : "",
+    ]
+      .filter(Boolean)
+      .join("; "),
+    mapToolUsed: undefined,
+  };
+}
+
 function createWindow() {
+  const isMac = process.platform === "darwin";
+
   mainWindow = new BrowserWindow({
     width: 1680,
     height: 1020,
     minWidth: 1280,
     minHeight: 820,
-    backgroundColor: "#f5f2ed",
+    backgroundColor: "#ece7dd",
     title: APP_WINDOW_TITLE,
+    autoHideMenuBar: true,
+    frame: isMac,
+    ...(isMac
+      ? {
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: { x: 18, y: 18 },
+        }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -29,6 +147,20 @@ function createWindow() {
       sandbox: false,
     },
   });
+
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.removeMenu();
+
+  const emitWindowState = () => {
+    if (!mainWindow) return;
+    mainWindow.webContents.send("desktop:window-state", getWindowState());
+  };
+
+  mainWindow.on("maximize", emitWindowState);
+  mainWindow.on("unmaximize", emitWindowState);
+  mainWindow.on("enter-full-screen", emitWindowState);
+  mainWindow.on("leave-full-screen", emitWindowState);
+  mainWindow.webContents.on("did-finish-load", emitWindowState);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
@@ -44,6 +176,16 @@ function createWindow() {
   void mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
 }
 
+function getWindowState(): DesktopWindowState {
+  const platform =
+    process.platform === "darwin" || process.platform === "win32" ? process.platform : "linux";
+
+  return {
+    platform,
+    maximized: Boolean(mainWindow?.isMaximized() || mainWindow?.isFullScreen()),
+  };
+}
+
 async function broadcastState() {
   if (!service || !mainWindow) return;
   const payload = await service.bootstrap();
@@ -57,7 +199,7 @@ async function stopThreadMonitor(threadId: string) {
   await monitor.promise.catch(() => undefined);
 }
 
-function monitorThreadProgress(threadId: string, intervalMs = 350) {
+function monitorThreadProgress(threadId: string, intervalMs = 900) {
   void stopThreadMonitor(threadId);
 
   const monitor = {
@@ -140,15 +282,22 @@ app.whenReady().then(async () => {
     return next;
   });
 
-  ipcMain.handle("desktop:send-message", async (_event, payload: { threadId: string; message: string; attachments: unknown[] }) => {
+  ipcMain.handle(
+    "desktop:send-message",
+    async (
+      _event,
+      payload: { threadId?: string; workspaceRoot?: string; message: string; attachments: unknown[] },
+    ) => {
     const result = await service!.sendMessage({
       threadId: payload.threadId,
+      workspaceRoot: payload.workspaceRoot,
       message: payload.message,
       attachments: Array.isArray(payload.attachments) ? (payload.attachments as any[]) : [],
     });
-    monitorThreadProgress(payload.threadId);
+    monitorThreadProgress(result.thread.id);
     return result;
-  });
+    },
+  );
 
   ipcMain.handle("desktop:abort-thread", async (_event, threadId: string) => {
     await stopThreadMonitor(threadId);
@@ -207,6 +356,10 @@ app.whenReady().then(async () => {
     return await service!.addKnowledgeWebsite(payload);
   });
 
+  ipcMain.handle("desktop:delete-knowledge-item", async (_event, payload: { baseId: string; itemId: string }) => {
+    return await service!.deleteKnowledgeItem(payload);
+  });
+
   ipcMain.handle(
     "desktop:search-knowledge-bases",
     async (
@@ -217,11 +370,32 @@ app.whenReady().then(async () => {
     },
   );
 
-  ipcMain.handle("desktop:run-skill", async (_event, payload: { threadId: string; skillId: string; prompt: string }) => {
-    const result = await service!.runSkill(payload);
-    monitorThreadProgress(payload.threadId);
-    return result;
+  ipcMain.handle("desktop:generate-project-report", async (_event, payload: ProjectReportInput) => {
+    const bootstrap = await service!.bootstrap();
+    const mapPayload = await resolveMapSummary(payload, bootstrap.config);
+    return await service!.generateProjectReport({
+      ...payload,
+      workspaceRoot: payload.workspaceRoot || bootstrap.config.opencodeRoot,
+      ...mapPayload,
+    });
   });
+
+  ipcMain.handle("desktop:generate-emergency-plan", async (_event, payload: EmergencyPlanInput) => {
+    const bootstrap = await service!.bootstrap();
+    return await service!.generateEmergencyPlan({
+      ...payload,
+      workspaceRoot: payload.workspaceRoot || bootstrap.config.opencodeRoot,
+    });
+  });
+
+  ipcMain.handle(
+    "desktop:run-skill",
+    async (_event, payload: { threadId?: string; workspaceRoot?: string; skillId: string; prompt: string }) => {
+    const result = await service!.runSkill(payload);
+    monitorThreadProgress(result.thread.id);
+    return result;
+    },
+  );
 
   ipcMain.handle("desktop:uninstall-skill", async (_event, skillId: string) => {
     const payload = await service!.uninstallSkill(skillId);
@@ -334,6 +508,29 @@ app.whenReady().then(async () => {
     if (target) {
       await shell.openPath(target);
     }
+  });
+
+  ipcMain.handle("desktop:get-window-state", async () => getWindowState());
+
+  ipcMain.handle("desktop:minimize-window", async () => {
+    mainWindow?.minimize();
+    return getWindowState();
+  });
+
+  ipcMain.handle("desktop:toggle-maximize-window", async () => {
+    if (mainWindow) {
+      if (mainWindow.isMaximized()) {
+        mainWindow.unmaximize();
+      } else {
+        mainWindow.maximize();
+      }
+    }
+
+    return getWindowState();
+  });
+
+  ipcMain.handle("desktop:close-window", async () => {
+    mainWindow?.close();
   });
 
   app.on("activate", () => {

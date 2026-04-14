@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +17,21 @@ import {
   inferProviderModelVendor,
 } from "../src/lib/model-metadata";
 import { KnowledgeService } from "./knowledge-service";
+import {
+  buildEmergencyPlanPrompt,
+  createDefaultEmergencyPlanFileName,
+  createEmergencyPlanDocBuffer,
+  recognizeEmergencyTemplate,
+  sanitizeEmergencyPlanFileName,
+} from "./emergency-plan";
+import {
+  buildProjectReportPrompt,
+  createDefaultReportFileName,
+  createProjectReportDocBuffer,
+  mergeKnowledgeResults,
+  resolveReportOutputPath,
+  sanitizeReportFileName,
+} from "./project-report";
 import { readJsonFile, writeJsonFile } from "./store";
 import {
   OpencodeRuntime,
@@ -40,11 +55,16 @@ import type {
   KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
   KnowledgeCatalogPayload,
+  KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
   McpServerConfig,
   ModelProviderConfig,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
+  EmergencyPlanInput,
+  EmergencyPlanResult,
+  ProjectReportInput,
+  ProjectReportResult,
   PendingQuestion,
   PreviewKind,
   ProxyConfig,
@@ -69,6 +89,15 @@ interface PersistedThreadMeta {
   title?: string;
   archived?: boolean;
   workspaceRoot?: string;
+  lastMessage?: string;
+  messageCount?: number;
+  messagePresentation?: Record<
+    string,
+    {
+      displayText?: string;
+      knowledge?: SendMessageResult["knowledge"];
+    }
+  >;
 }
 
 const IFLY_RPA_BASE_URL = "https://oneapi.iflyrpa.com/v1";
@@ -136,6 +165,9 @@ const DEFAULT_CONFIG: AppConfig = {
   environment: "local",
   activeModelId: createRuntimeModelId("iflyrpa", "azure/gpt-5-mini"),
   contextTier: "high",
+  appearance: {
+    theme: "linen",
+  },
   proxy: {
     http: "",
     https: "",
@@ -253,6 +285,7 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
       ? rawConfig.modelProviders.map((item) => ({
           ...item,
           kind: item.kind ?? "openai-compatible",
+          baseUrl: normalizeProviderBaseUrl(String(item.baseUrl ?? "")),
           enabled: item.enabled !== false,
           temperature: typeof item.temperature === "number" ? item.temperature : 0.2,
           maxTokens: typeof item.maxTokens === "number" ? item.maxTokens : 4096,
@@ -279,6 +312,10 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
       ...DEFAULT_CONFIG,
       ...rawConfig,
       activeModelId,
+      appearance: {
+        ...DEFAULT_CONFIG.appearance,
+        ...(rawConfig.appearance ?? {}),
+      },
       proxy,
       modelProviders,
       hiddenCodexSkillIds: Array.isArray(rawConfig.hiddenCodexSkillIds)
@@ -342,12 +379,40 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
                 const meta = value as PersistedThreadMeta | null | undefined;
                 const title = typeof meta?.title === "string" ? meta.title.trim() : "";
                 const workspaceRoot = typeof meta?.workspaceRoot === "string" ? meta.workspaceRoot.trim() : "";
+                const messagePresentation =
+                  meta?.messagePresentation && typeof meta.messagePresentation === "object"
+                    ? Object.fromEntries(
+                        Object.entries(meta.messagePresentation)
+                          .map(([messageId, presentation]) => {
+                            const nextDisplayText =
+                              typeof presentation?.displayText === "string" ? presentation.displayText.trim() : "";
+                            const nextKnowledge = presentation?.knowledge;
+                            return [
+                              messageId,
+                              {
+                                ...(nextDisplayText ? { displayText: nextDisplayText } : {}),
+                                ...(nextKnowledge ? { knowledge: nextKnowledge } : {}),
+                              },
+                            ] as const;
+                          })
+                          .filter(([, presentation]) => Object.keys(presentation).length > 0),
+                      )
+                    : undefined;
                 return [
                   threadId,
                   {
                     ...(title ? { title } : {}),
                     ...(workspaceRoot ? { workspaceRoot } : {}),
+                    ...(typeof meta?.lastMessage === "string" && meta.lastMessage.trim()
+                      ? { lastMessage: meta.lastMessage.trim().slice(0, 120) }
+                      : {}),
+                    ...(typeof meta?.messageCount === "number" && meta.messageCount > 0
+                      ? { messageCount: Math.max(0, Math.round(meta.messageCount)) }
+                      : {}),
                     ...(meta?.archived !== undefined ? { archived: meta.archived === true } : {}),
+                    ...(messagePresentation && Object.keys(messagePresentation).length > 0
+                      ? { messagePresentation }
+                      : {}),
                   } satisfies PersistedThreadMeta,
                 ] as const;
               })
@@ -358,11 +423,19 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
 }
 
 function createModelListUrl(baseUrl: string) {
-  const normalized = normalizeBaseUrl(baseUrl);
+  const normalized = normalizeProviderBaseUrl(baseUrl);
   if (!normalized) {
     throw new Error("请先填写供应商接口地址");
   }
   return normalized.endsWith("/models") ? normalized : `${normalized}/models`;
+}
+
+function normalizeProviderBaseUrl(baseUrl: string) {
+  const normalized = normalizeBaseUrl(baseUrl);
+  if (/^https:\/\/openrouter\.ai$/i.test(normalized)) {
+    return "https://openrouter.ai/api/v1";
+  }
+  return normalized;
 }
 
 function inferVendorName(record: Record<string, unknown>, id: string, label: string, description: string, group?: string) {
@@ -646,6 +719,7 @@ async function importExternalCodexSkills(statePath: string) {
   const managedSystemRoot = getManagedCodexSystemSkillsRoot(statePath);
   const entries = await readdir(externalRoot, { withFileTypes: true }).catch(() => []);
 
+  await rm(managedRoot, { recursive: true, force: true }).catch(() => undefined);
   await mkdir(managedRoot, { recursive: true }).catch(() => undefined);
   await mkdir(managedSystemRoot, { recursive: true }).catch(() => undefined);
 
@@ -659,7 +733,7 @@ async function importExternalCodexSkills(statePath: string) {
         await cp(
           path.join(externalRoot, entry.name, systemEntry.name),
           path.join(managedSystemRoot, systemEntry.name),
-          { recursive: true, force: false, errorOnExist: false },
+          { recursive: true, force: true, errorOnExist: false },
         ).catch(() => undefined);
       }
       continue;
@@ -668,7 +742,7 @@ async function importExternalCodexSkills(statePath: string) {
     await cp(
       path.join(externalRoot, entry.name),
       path.join(managedRoot, entry.name),
-      { recursive: true, force: false, errorOnExist: false },
+      { recursive: true, force: true, errorOnExist: false },
     ).catch(() => undefined);
   }
 }
@@ -817,6 +891,23 @@ function getThreadMeta(state: PersistedWorkspaceState, threadId: string): Persis
   return state.threadMeta[threadId] ?? {};
 }
 
+function summarizeMessages(messages: ChatMessage[]) {
+  const lastMessage =
+    [...messages]
+      .reverse()
+      .map((item) => compact(item.displayText ?? item.text))
+      .find(Boolean) ?? "";
+
+  return {
+    lastMessage: lastMessage.slice(0, 120),
+    messageCount: messages.length,
+  };
+}
+
+function summarizeRuntimeMessages(sourceMessages: OpencodeSessionMessage[]) {
+  return summarizeMessages(applyMessagePresentation(convertMessages(sourceMessages)));
+}
+
 function updateThreadMeta(
   state: PersistedWorkspaceState,
   threadId: string,
@@ -828,6 +919,46 @@ function updateThreadMeta(
     return;
   }
   state.threadMeta[threadId] = next;
+}
+
+function updateMessagePresentation(
+  state: PersistedWorkspaceState,
+  threadId: string,
+  messageId: string,
+  presentation: NonNullable<PersistedThreadMeta["messagePresentation"]>[string],
+) {
+  updateThreadMeta(state, threadId, (previous) => {
+    const nextPresentation = {
+      ...(previous.messagePresentation ?? {}),
+      [messageId]: presentation,
+    };
+
+    return {
+      ...previous,
+      messagePresentation: nextPresentation,
+    };
+  });
+}
+
+function rememberThreadSummary(
+  state: PersistedWorkspaceState,
+  threadId: string,
+  summary: Pick<ThreadSummary, "lastMessage" | "messageCount">,
+) {
+  const previous = getThreadMeta(state, threadId);
+  const nextLastMessage = summary.lastMessage || "";
+  const nextMessageCount = Math.max(0, summary.messageCount);
+  const changed =
+    (previous.lastMessage || "") !== nextLastMessage ||
+    (previous.messageCount ?? 0) !== nextMessageCount;
+
+  updateThreadMeta(state, threadId, (current) => ({
+    ...current,
+    ...(nextLastMessage ? { lastMessage: nextLastMessage } : {}),
+    ...(nextMessageCount > 0 ? { messageCount: nextMessageCount } : {}),
+  }));
+
+  return changed;
 }
 
 function isThreadArchived(state: PersistedWorkspaceState, threadId: string, session?: OpencodeSessionInfo) {
@@ -1011,23 +1142,39 @@ function convertMessages(messages: OpencodeSessionMessage[]): ChatMessage[] {
   return result.sort((left, right) => left.createdAt - right.createdAt);
 }
 
+function applyMessagePresentation(messages: ChatMessage[], meta?: PersistedThreadMeta): ChatMessage[] {
+  const presentation = meta?.messagePresentation;
+  if (!presentation) return messages;
+
+  return messages.map((message) => {
+    const next = presentation[message.id];
+    if (!next) return message;
+    return {
+      ...message,
+      ...(next.displayText ? { displayText: next.displayText } : {}),
+      ...(next.knowledge ? { knowledge: next.knowledge } : {}),
+    };
+  });
+}
+
 function createThreadSummary(
   session: OpencodeSessionInfo,
-  messages: ChatMessage[],
+  messagesOrSummary: ChatMessage[] | Pick<ThreadSummary, "lastMessage" | "messageCount">,
   meta?: PersistedThreadMeta,
 ): ThreadSummary {
-  const lastMessage =
-    [...messages]
-      .reverse()
-      .map((item) => compact(item.text))
-      .find(Boolean) ?? "";
+  const summary = Array.isArray(messagesOrSummary)
+    ? summarizeMessages(messagesOrSummary)
+    : {
+        lastMessage: messagesOrSummary.lastMessage,
+        messageCount: messagesOrSummary.messageCount,
+      };
 
   return {
     id: session.id,
     title: meta?.title?.trim() || normalizeSessionTitle(session.title),
     updatedAt: session.time.updated,
-    lastMessage: lastMessage.slice(0, 120),
-    messageCount: messages.length,
+    lastMessage: summary.lastMessage || meta?.lastMessage?.trim() || "",
+    messageCount: summary.messageCount,
     archived: meta?.archived ?? Boolean(session.time.archived),
     workspaceRoot: meta?.workspaceRoot?.trim() || session.directory,
   };
@@ -1038,7 +1185,7 @@ function createThreadRecord(
   sourceMessages: OpencodeSessionMessage[],
   meta?: PersistedThreadMeta,
 ): ThreadRecord {
-  const messages = convertMessages(sourceMessages);
+  const messages = applyMessagePresentation(convertMessages(sourceMessages), meta);
   return {
     ...createThreadSummary(session, messages, meta),
     messages,
@@ -1069,6 +1216,7 @@ function buildKnowledgePrompt(message: string, searchPayload: KnowledgeSearchPay
         resultCount: 0,
         searchedBaseIds,
         warnings: searchPayload.warnings,
+        results: [],
       },
     };
   }
@@ -1104,6 +1252,7 @@ function buildKnowledgePrompt(message: string, searchPayload: KnowledgeSearchPay
       resultCount: searchPayload.results.length,
       searchedBaseIds,
       warnings: searchPayload.warnings,
+      results: searchPayload.results,
     },
   };
 }
@@ -1120,17 +1269,25 @@ export class WorkspaceService {
     const state = await this.loadState();
     const sessions = await this.runtime.listSessions(state.config);
     let changed = this.pruneThreadMeta(state, sessions);
-    let current = sessions.find((item) => item.id === state.activeThreadId) ?? sessions[0];
+    let current = sessions.find((item) => item.id === state.activeThreadId);
+
+    if (!current && state.activeThreadId) {
+      current = await this.runtime.getSession(state.config, state.activeThreadId).catch(() => null);
+      if (current && !sessions.some((item) => item.id === current!.id)) {
+        sessions.unshift(current);
+      }
+    }
+
+    current ??= sessions[0] ?? null;
 
     if (!current) {
-      current = await this.runtime.createSession(state.config, "新会话");
+      current = await this.runtime.createSession(state.config, "New Thread");
       sessions.push(current);
       state.activeThreadId = current.id;
       changed = true;
-    }
-
-    if (changed) {
-      await this.saveState(state);
+    } else if (state.activeThreadId !== current.id) {
+      state.activeThreadId = current.id;
+      changed = true;
     }
 
     const [threads, currentMessages, availableSkills, availableAgents, mcpStatuses, pendingQuestions] = await Promise.all([
@@ -1141,6 +1298,11 @@ export class WorkspaceService {
       this.runtime.listMcpStatuses(state.config).catch(() => []),
       this.runtime.listQuestions(state.config).catch(() => []),
     ]);
+
+    const summaryChanged = rememberThreadSummary(state, current.id, summarizeRuntimeMessages(currentMessages));
+    if (changed || summaryChanged) {
+      await this.saveState(state);
+    }
 
     return {
       config: state.config,
@@ -1173,16 +1335,46 @@ export class WorkspaceService {
 
   async listThreads() {
     const state = await this.loadState();
-    const sessions = await this.runtime.listSessions(state.config);
+    const sessions = await this.listKnownSessions(state);
     return await this.listThreadSummaries(state, sessions);
   }
 
   async createThread(title?: string) {
     const state = await this.loadState();
-    const session = await this.runtime.createSession(state.config, title?.trim() || "新会话");
+    const session = await this.runtime.createSession(state.config, title?.trim() || "New Thread");
     state.activeThreadId = session.id;
+    updateThreadMeta(state, session.id, (previous) => ({
+      ...previous,
+      ...(session.title?.trim() ? { title: session.title.trim() } : {}),
+      ...(session.directory?.trim() ? { workspaceRoot: session.directory.trim() } : {}),
+      lastMessage: previous.lastMessage?.trim() || "",
+      messageCount: previous.messageCount ?? 0,
+    }));
     await this.saveState(state);
-    return await this.bootstrap();
+
+    const sessions = await this.listKnownSessions(state);
+    if (!sessions.some((item) => item.id === session.id)) {
+      sessions.unshift(session);
+    }
+
+    const [threads, availableSkills, availableAgents, mcpStatuses, pendingQuestions] = await Promise.all([
+      this.listThreadSummaries(state, sessions),
+      this.runtime.listSkills(state.config).catch(() => []),
+      this.runtime.listAgents(state.config).catch(() => []),
+      this.runtime.listMcpStatuses(state.config).catch(() => []),
+      this.runtime.listQuestions(state.config).catch(() => []),
+    ]);
+
+    return {
+      config: state.config,
+      threads,
+      activeThreadId: session.id,
+      currentThread: createThreadRecord(session, [], getThreadMeta(state, session.id)),
+      availableSkills,
+      availableAgents,
+      mcpStatuses,
+      pendingQuestions: pendingQuestions.map(questionRequestFromRuntime),
+    };
   }
 
   async setActiveThread(threadId: string) {
@@ -1228,11 +1420,10 @@ export class WorkspaceService {
     if (archived && state.activeThreadId === threadId) {
       const sessions = await this.runtime.listSessions(state.config);
       const nextActiveThreadId = this.pickUnarchivedThreadId(state, sessions, threadId);
-
       if (nextActiveThreadId) {
         state.activeThreadId = nextActiveThreadId;
       } else {
-        const session = await this.runtime.createSession(state.config, "新会话");
+        const session = await this.runtime.createSession(state.config, "New Thread");
         state.activeThreadId = session.id;
       }
     }
@@ -1249,11 +1440,10 @@ export class WorkspaceService {
     if (state.activeThreadId === threadId) {
       const sessions = await this.runtime.listSessions(state.config);
       const nextActiveThreadId = this.pickUnarchivedThreadId(state, sessions);
-
       if (nextActiveThreadId) {
         state.activeThreadId = nextActiveThreadId;
       } else {
-        const session = await this.runtime.createSession(state.config, "新会话");
+        const session = await this.runtime.createSession(state.config, "New Thread");
         state.activeThreadId = session.id;
       }
     }
@@ -1264,6 +1454,10 @@ export class WorkspaceService {
 
   async sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
     const state = await this.loadState();
+    const target = await this.resolveThreadMutationTarget(state, {
+      threadId: input.threadId,
+      workspaceRoot: input.workspaceRoot,
+    });
     let transportMessage = input.message;
     let knowledgeMeta: SendMessageResult["knowledge"] | undefined;
 
@@ -1288,17 +1482,58 @@ export class WorkspaceService {
       }
     }
 
-    await this.runtime.promptAsync(this.getThreadConfig(state, input.threadId), input.threadId, transportMessage, input.attachments);
-    state.activeThreadId = input.threadId;
-    updateThreadMeta(state, input.threadId, (previous) => ({
+    try {
+      await this.runtime.promptAsync(target.threadConfig, target.threadId, transportMessage, input.attachments);
+    } catch (error) {
+      if (target.createdOnDemand) {
+        await this.runtime.deleteSession(state.config, target.threadId).catch(() => undefined);
+        delete state.threadMeta[target.threadId];
+      }
+      throw error;
+    }
+
+    state.activeThreadId = target.threadId;
+    updateThreadMeta(state, target.threadId, (previous) => ({
       ...(previous.title?.trim() ? { title: previous.title.trim() } : {}),
     }));
-    let thread = await this.readThreadRecord(state, input.threadId);
+    let thread = await this.readThreadRecord(state, target.threadId);
     this.maybeAssignGeneratedThreadTitle(state, thread);
+
+    if (knowledgeMeta?.injected && transportMessage !== input.message) {
+      const targetUserMessage = [...thread.messages]
+        .reverse()
+        .find((message) => message.role === "user" && message.text === transportMessage);
+
+      if (targetUserMessage) {
+        updateMessagePresentation(state, target.threadId, targetUserMessage.id, {
+          displayText: input.message.trim() || input.message,
+          knowledge: knowledgeMeta,
+        });
+        thread = {
+          ...thread,
+          messages: thread.messages.map((message) =>
+            message.id === targetUserMessage.id
+              ? {
+                  ...message,
+                  displayText: input.message.trim() || input.message,
+                  knowledge: knowledgeMeta,
+                }
+              : message,
+          ),
+        };
+      }
+    }
+
     thread = {
       ...thread,
-      title: getThreadMeta(state, input.threadId).title?.trim() || thread.title,
-      archived: isThreadArchived(state, input.threadId),
+      title: getThreadMeta(state, target.threadId).title?.trim() || thread.title,
+      archived: isThreadArchived(state, target.threadId),
+      lastMessage:
+        [...thread.messages]
+          .reverse()
+          .map((message) => compact(message.displayText ?? message.text))
+          .find(Boolean)
+          ?.slice(0, 120) ?? "",
     };
     await this.saveState(state);
     return {
@@ -1309,17 +1544,31 @@ export class WorkspaceService {
 
   async runSkill(input: SkillRunInput): Promise<SkillRunResult> {
     const state = await this.loadState();
-    await this.runtime.commandAsync(this.getThreadConfig(state, input.threadId), input.threadId, input.skillId, input.prompt || "", []);
-    state.activeThreadId = input.threadId;
-    updateThreadMeta(state, input.threadId, (previous) => ({
+    const target = await this.resolveThreadMutationTarget(state, {
+      threadId: input.threadId,
+      workspaceRoot: input.workspaceRoot,
+    });
+
+    try {
+      await this.runtime.commandAsync(target.threadConfig, target.threadId, input.skillId, input.prompt || "", []);
+    } catch (error) {
+      if (target.createdOnDemand) {
+        await this.runtime.deleteSession(state.config, target.threadId).catch(() => undefined);
+        delete state.threadMeta[target.threadId];
+      }
+      throw error;
+    }
+
+    state.activeThreadId = target.threadId;
+    updateThreadMeta(state, target.threadId, (previous) => ({
       ...(previous.title?.trim() ? { title: previous.title.trim() } : {}),
     }));
-    let thread = await this.readThreadRecord(state, input.threadId);
+    let thread = await this.readThreadRecord(state, target.threadId);
     this.maybeAssignGeneratedThreadTitle(state, thread);
     thread = {
       ...thread,
-      title: getThreadMeta(state, input.threadId).title?.trim() || thread.title,
-      archived: isThreadArchived(state, input.threadId),
+      title: getThreadMeta(state, target.threadId).title?.trim() || thread.title,
+      archived: isThreadArchived(state, target.threadId),
     };
     await this.saveState(state);
     return {
@@ -1363,9 +1612,13 @@ export class WorkspaceService {
 
   async updateConfig(patch: Partial<AppConfig>) {
     const state = await this.loadState();
-    state.config = {
+    const nextConfig = {
       ...state.config,
       ...patch,
+      appearance: {
+        ...state.config.appearance,
+        ...(patch.appearance ?? {}),
+      },
       proxy: {
         ...state.config.proxy,
         ...(patch.proxy ?? {}),
@@ -1376,6 +1629,11 @@ export class WorkspaceService {
       hiddenCodexSkillIds: patch.hiddenCodexSkillIds ?? state.config.hiddenCodexSkillIds,
       knowledgeBase: patch.knowledgeBase ?? state.config.knowledgeBase,
     };
+    state.config = normalizeState({
+      config: nextConfig,
+      activeThreadId: state.activeThreadId,
+      threadMeta: state.threadMeta,
+    }).config;
     await this.saveState(state);
     return await this.bootstrap();
   }
@@ -1459,6 +1717,162 @@ export class WorkspaceService {
   async addKnowledgeWebsite(input: KnowledgeAddUrlInput): Promise<KnowledgeCatalogPayload> {
     const state = await this.loadState();
     return await this.knowledge.addWebsite(state.config, input);
+  }
+
+  async deleteKnowledgeItem(input: KnowledgeDeleteItemInput): Promise<KnowledgeCatalogPayload> {
+    return await this.knowledge.deleteItem(input);
+  }
+
+  async generateProjectReport(
+    input: ProjectReportInput & { mapSummary?: string; mapToolUsed?: string },
+  ): Promise<ProjectReportResult> {
+    const state = await this.loadState();
+    const knowledgeBaseId = input.knowledgeBaseId.trim();
+    if (!knowledgeBaseId) {
+      throw new Error("Please select a knowledge base first.");
+    }
+    if (!input.projectName.trim()) {
+      throw new Error("Please enter the project name first.");
+    }
+
+    const workspaceRoot = input.workspaceRoot?.trim() || state.config.opencodeRoot || process.cwd();
+    const outputDirectory = input.outputDirectory?.trim() || path.join(workspaceRoot, "reports");
+    const outputFileName = (() => {
+      const raw = input.outputFileName?.trim();
+      if (!raw) return createDefaultReportFileName(input);
+      const normalized = sanitizeReportFileName(raw.replace(/\.docx?$/i, ""));
+      return `${normalized}.docx`;
+    })();
+
+    await mkdir(outputDirectory, { recursive: true });
+
+    const knowledgeQueries = [
+      input.projectName.trim(),
+      `${input.projectName.trim()} 环评 编制依据`,
+      `${input.projectName.trim()} 评价等级`,
+      `${input.projectName.trim()} 选址符合性`,
+      `${input.projectName.trim()} 政策符合性`,
+      input.projectLocation?.trim() ? `${input.projectLocation.trim()} ${input.projectName.trim()}` : "",
+    ].filter(Boolean);
+
+    const searchResults = await Promise.all(
+      knowledgeQueries.map((query) =>
+        this.searchKnowledgeBases({
+          query,
+          knowledgeBaseIds: [knowledgeBaseId],
+          documentCount: 6,
+        }).catch(() => ({
+          query,
+          total: 0,
+          results: [],
+          searchedBases: [],
+          warnings: [],
+        })),
+      ),
+    );
+
+    const references = mergeKnowledgeResults(searchResults.map((item) => item.results));
+    const threadConfig = this.createThreadConfig(state, workspaceRoot);
+    const session = await this.runtime.createSession(threadConfig, `${input.projectName.trim()} Report Draft`);
+
+    try {
+      const prompt = buildProjectReportPrompt(input, references, input.mapSummary);
+      const response = await this.runtime.prompt(threadConfig, session.id, prompt, []);
+      const draft = baseMessageText(response.parts).trim();
+
+      if (!draft) {
+        throw new Error("The model returned an empty report draft.");
+      }
+
+      const filePath = resolveReportOutputPath(outputDirectory, outputFileName);
+      const buffer = await createProjectReportDocBuffer({
+        title: `${input.projectName.trim()} 环评分析报告`,
+        content: draft,
+        meta: [
+          `项目名称：${input.projectName.trim()}`,
+          input.projectLocation?.trim() ? `项目位置：${input.projectLocation.trim()}` : "",
+          input.mapToolUsed ? `地图工具：${input.mapToolUsed}` : "",
+          input.mapSummary ? `定位摘要：${input.mapSummary.slice(0, 140)}` : "",
+        ],
+      });
+
+      await writeFile(filePath, buffer);
+
+      return {
+        outputPath: filePath,
+        fileName: outputFileName,
+        generatedAt: Date.now(),
+        locationSummary: input.mapSummary,
+        mapToolUsed: input.mapToolUsed,
+        references,
+        content: draft,
+      };
+    } finally {
+      await this.runtime.deleteSession(threadConfig, session.id).catch(() => undefined);
+    }
+  }
+
+  async generateEmergencyPlan(input: EmergencyPlanInput): Promise<EmergencyPlanResult> {
+    const state = await this.loadState();
+    const projectName = input.projectName.trim();
+    if (!projectName) {
+      throw new Error("请先填写项目名称。");
+    }
+    if (!Array.isArray(input.templateFiles) || input.templateFiles.length === 0) {
+      throw new Error("请至少选择一个 PDF 或 Word 模板文件。");
+    }
+
+    const workspaceRoot = input.workspaceRoot?.trim() || state.config.opencodeRoot;
+    const outputDirectory = input.outputDirectory?.trim() || path.join(workspaceRoot, "emergency-plans");
+    await mkdir(outputDirectory, { recursive: true });
+
+    const recognizedTemplates = await Promise.all(input.templateFiles.map((file) => recognizeEmergencyTemplate(file)));
+    const fileName = sanitizeEmergencyPlanFileName(
+      input.outputFileName?.trim() || createDefaultEmergencyPlanFileName(input),
+    ).replace(/(?:\.docx)?$/i, ".docx");
+    const outputPath = path.join(outputDirectory, fileName);
+
+    const threadConfig = this.createThreadConfig(state, workspaceRoot);
+    const session = await this.runtime.createSession(threadConfig, `${projectName} Emergency Plan Draft`);
+
+    try {
+      const prompt = buildEmergencyPlanPrompt(input, recognizedTemplates);
+      const response = await this.runtime.prompt(threadConfig, session.id, prompt, []);
+      const draft = baseMessageText(response.parts).trim();
+
+      if (!draft) {
+        throw new Error("模型没有返回应急预案内容。");
+      }
+
+      const buffer = await createEmergencyPlanDocBuffer({
+        title: `${projectName} 突发环境事件应急预案`,
+        content: draft,
+        meta: [
+          input.companyName ? `企业名称：${input.companyName}` : "",
+          input.projectLocation ? `项目位置：${input.projectLocation}` : "",
+          `模板数量：${recognizedTemplates.length}`,
+          `生成时间：${new Date().toLocaleString("zh-CN", { hour12: false })}`,
+        ],
+      });
+
+      await writeFile(outputPath, buffer);
+
+      return {
+        outputPath,
+        fileName,
+        generatedAt: Date.now(),
+        templateCount: recognizedTemplates.length,
+        recognizedTemplates: recognizedTemplates.map((template) => ({
+          name: template.name,
+          path: template.path,
+          kind: template.kind,
+          excerpt: template.excerpt,
+        })),
+        content: draft,
+      };
+    } finally {
+      await this.runtime.deleteSession(threadConfig, session.id).catch(() => undefined);
+    }
   }
 
   async searchKnowledgeBases(input: {
@@ -1580,7 +1994,7 @@ export class WorkspaceService {
             name,
             description: BUILTIN_TOOL_DESCRIPTIONS[name] ?? "Tool observed in recent runtime activity.",
             source: "runtime",
-            origin: "运行时工具",
+            origin: "Runtime",
             observed: true,
           });
         }
@@ -1594,7 +2008,7 @@ export class WorkspaceService {
         name,
         description,
         source: "runtime",
-        origin: "运行时工具",
+        origin: "Runtime",
         observed: false,
       });
     }
@@ -1608,7 +2022,33 @@ export class WorkspaceService {
   private async readThreadRecord(state: PersistedWorkspaceState, threadId: string) {
     const session = await this.runtime.getSession(state.config, threadId);
     const messages = await this.runtime.listMessages(state.config, threadId);
+    rememberThreadSummary(state, threadId, summarizeRuntimeMessages(messages));
     return createThreadRecord(session, messages, getThreadMeta(state, threadId));
+  }
+
+  private async listKnownSessions(state: PersistedWorkspaceState) {
+    const sessions = await this.runtime.listSessions(state.config);
+    const knownIds = new Set(sessions.map((session) => session.id));
+    const candidateIds = new Set<string>();
+
+    if (state.activeThreadId) {
+      candidateIds.add(state.activeThreadId);
+    }
+
+    for (const threadId of Object.keys(state.threadMeta)) {
+      candidateIds.add(threadId);
+    }
+
+    const missingIds = Array.from(candidateIds).filter((threadId) => threadId && !knownIds.has(threadId));
+    if (missingIds.length === 0) {
+      return sessions;
+    }
+
+    const recovered = await Promise.all(
+      missingIds.map((threadId) => this.runtime.getSession(state.config, threadId).catch(() => null)),
+    );
+
+    return [...sessions, ...recovered.filter((session): session is OpencodeSessionInfo => Boolean(session))];
   }
 
   private getThreadConfig(state: PersistedWorkspaceState, threadId: string) {
@@ -1616,6 +2056,49 @@ export class WorkspaceService {
     return {
       ...state.config,
       opencodeRoot: workspaceRoot || state.config.opencodeRoot,
+    };
+  }
+
+  private createThreadConfig(state: PersistedWorkspaceState, workspaceRoot?: string) {
+    const nextWorkspaceRoot = workspaceRoot?.trim();
+    if (!nextWorkspaceRoot) {
+      return state.config;
+    }
+
+    return {
+      ...state.config,
+      opencodeRoot: nextWorkspaceRoot,
+    };
+  }
+
+  private async resolveThreadMutationTarget(
+    state: PersistedWorkspaceState,
+    input: { threadId?: string; workspaceRoot?: string },
+  ) {
+    const existingThreadId = input.threadId?.trim();
+    if (existingThreadId) {
+      return {
+        threadId: existingThreadId,
+        createdOnDemand: false,
+        threadConfig: this.getThreadConfig(state, existingThreadId),
+      };
+    }
+
+    const threadConfig = this.createThreadConfig(state, input.workspaceRoot);
+    const session = await this.runtime.createSession(threadConfig, "New Thread");
+    const workspaceRoot = input.workspaceRoot?.trim();
+
+    if (workspaceRoot) {
+      updateThreadMeta(state, session.id, (previous) => ({
+        ...previous,
+        workspaceRoot,
+      }));
+    }
+
+    return {
+      threadId: session.id,
+      createdOnDemand: true,
+      threadConfig: this.getThreadConfig(state, session.id),
     };
   }
 
@@ -1661,12 +2144,17 @@ export class WorkspaceService {
   }
 
   private async listThreadSummaries(state: PersistedWorkspaceState, sessions: OpencodeSessionInfo[]) {
-    const summaries = await Promise.all(
-      sessions.map(async (session) => {
-        const messages = await this.runtime.listMessages(state.config, session.id).catch(() => []);
-        return createThreadSummary(session, convertMessages(messages), getThreadMeta(state, session.id));
-      }),
-    );
+    const summaries = sessions.map((session) => {
+      const meta = getThreadMeta(state, session.id);
+      return createThreadSummary(
+        session,
+        {
+          lastMessage: meta.lastMessage?.trim() || "",
+          messageCount: meta.messageCount ?? 0,
+        },
+        meta,
+      );
+    });
 
     return summaries.sort((left, right) => {
       if (left.archived !== right.archived) {

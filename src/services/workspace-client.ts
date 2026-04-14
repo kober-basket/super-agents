@@ -29,6 +29,8 @@ export const workspaceClient = {
     window.desktopAgent.addKnowledgeUrl(payload),
   addKnowledgeWebsite: (payload: Parameters<typeof window.desktopAgent.addKnowledgeWebsite>[0]) =>
     window.desktopAgent.addKnowledgeWebsite(payload),
+  deleteKnowledgeItem: (payload: Parameters<typeof window.desktopAgent.deleteKnowledgeItem>[0]) =>
+    window.desktopAgent.deleteKnowledgeItem(payload),
   searchKnowledgeBases: (payload: Parameters<typeof window.desktopAgent.searchKnowledgeBases>[0]) =>
     window.desktopAgent.searchKnowledgeBases(payload),
   runSkill: (payload: Parameters<typeof window.desktopAgent.runSkill>[0]) =>
@@ -43,6 +45,10 @@ export const workspaceClient = {
   debugMcpTool: (payload: Parameters<typeof window.desktopAgent.debugMcpTool>[0]) =>
     window.desktopAgent.debugMcpTool(payload),
   listTools: () => window.desktopAgent.listTools(),
+  generateEmergencyPlan: (payload: Parameters<typeof window.desktopAgent.generateEmergencyPlan>[0]) =>
+    window.desktopAgent.generateEmergencyPlan(payload),
+  generateProjectReport: (payload: Parameters<typeof window.desktopAgent.generateProjectReport>[0]) =>
+    window.desktopAgent.generateProjectReport(payload),
   selectFiles: () => window.desktopAgent.selectFiles(),
   selectWorkspaceFolder: () => window.desktopAgent.selectWorkspaceFolder(),
   setThreadWorkspace: (threadId: string, workspaceRoot: string) =>
@@ -50,6 +56,12 @@ export const workspaceClient = {
   readPreview: (payload: Parameters<typeof window.desktopAgent.readPreview>[0]) =>
     window.desktopAgent.readPreview(payload),
   openWorkspaceFolder: (threadId?: string) => window.desktopAgent.openWorkspaceFolder(threadId),
+  getWindowState: () => window.desktopAgent.getWindowState(),
+  minimizeWindow: () => window.desktopAgent.minimizeWindow(),
+  toggleMaximizeWindow: () => window.desktopAgent.toggleMaximizeWindow(),
+  closeWindow: () => window.desktopAgent.closeWindow(),
   onWorkspaceChanged: (listener: Parameters<typeof window.desktopAgent.onWorkspaceChanged>[0]) =>
     window.desktopAgent.onWorkspaceChanged(listener),
+  onWindowStateChanged: (listener: Parameters<typeof window.desktopAgent.onWindowStateChanged>[0]) =>
+    window.desktopAgent.onWindowStateChanged(listener),
 };

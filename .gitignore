@@ -5,6 +5,7 @@ release/
 out/
 .cache/
 temp-smoke/
+.codex-logs/
 
 *.log
 *.zip
