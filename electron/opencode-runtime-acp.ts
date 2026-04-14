@@ -66,6 +66,7 @@ interface SessionCache {
   toolIndex: Map<string, ToolCallRecord>;
   status: OpencodeSessionStatus;
   loaded: boolean;
+  hydratingHistory: boolean;
   loadPromise: Promise<void> | null;
   availableSkills: RuntimeSkill[];
   modeState: acp.SessionModeState | null;
@@ -447,6 +448,7 @@ function createSessionCache(sessionID: string, directory: string, title?: string
     toolIndex: new Map(),
     status: { type: "idle" },
     loaded: false,
+    hydratingHistory: false,
     loadPromise: null,
     availableSkills: [],
     modeState: null,
@@ -523,6 +525,7 @@ export class OpencodeRuntime {
     for (const session of this.sessions.values()) {
       session.status = { type: "idle" };
       session.loaded = false;
+      session.hydratingHistory = false;
       session.loadPromise = null;
       session.modeState = null;
       session.configOptions = [];
@@ -758,7 +761,9 @@ export class OpencodeRuntime {
       },
       sessionUpdate: async ({ sessionId, update }) => {
         const session = this.ensureSession(sessionId);
-        session.info.time.updated = Date.now();
+        if (!session.hydratingHistory) {
+          session.info.time.updated = Date.now();
+        }
 
         switch (update.sessionUpdate) {
           case "user_message_chunk":
@@ -917,18 +922,23 @@ export class OpencodeRuntime {
       session.messages = [];
       session.messageIndex.clear();
       session.toolIndex.clear();
+      session.hydratingHistory = true;
 
-      const response = await handle.connection.loadSession({
-        sessionId: sessionID,
-        cwd: directory,
-        mcpServers: [],
-      });
+      try {
+        const response = await handle.connection.loadSession({
+          sessionId: sessionID,
+          cwd: directory,
+          mcpServers: [],
+        });
 
-      session.modeState = response.modes ?? session.modeState;
-      session.configOptions = response.configOptions ?? session.configOptions;
-      await this.syncSessionRuntimeOptions(handle, config, sessionID, session);
-      session.loaded = true;
-      this.finalizeAssistantMessages(session);
+        session.modeState = response.modes ?? session.modeState;
+        session.configOptions = response.configOptions ?? session.configOptions;
+        await this.syncSessionRuntimeOptions(handle, config, sessionID, session);
+        session.loaded = true;
+        this.finalizeAssistantMessages(session);
+      } finally {
+        session.hydratingHistory = false;
+      }
     })();
 
     try {
