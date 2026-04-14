@@ -17,7 +17,7 @@ export function FileCard({ file, onOpen }: FileCardProps) {
     name: file.name,
     mimeType: file.mimeType,
   });
-  const secondaryText = file.size > 0 ? formatBytes(file.size) : "Attached file";
+  const secondaryText = file.size > 0 ? formatBytes(file.size) : "已附加文件";
 
   return (
     <button className="file-tile" onClick={() => onOpen(file)}>

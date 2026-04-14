@@ -2,7 +2,7 @@
   "name": "super-agents",
   "version": "0.1.0",
   "private": true,
-  "description": "super-agents Electron desktop agent client built on opencode.",
+  "description": "super-agents Electron desktop workspace shell.",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
@@ -12,6 +12,7 @@
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
     "build:main": "tsup electron/main.ts electron/preload.ts --format cjs --out-dir dist-electron --minify --external electron",
+    "test:electron": "tsc -p tsconfig.test.json && node -e \"const { spawnSync } = require('node:child_process'); const result = spawnSync(process.execPath, ['--test'], { cwd: '.test-dist', stdio: 'inherit' }); process.exit(result.status ?? 1);\"",
     "package": "npm run build && electron-builder --dir",
     "preview": "vite preview --host 127.0.0.1 --port 4173"
   },

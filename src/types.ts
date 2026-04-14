@@ -336,7 +336,7 @@ export interface RemoteControlConfig {
 }
 
 export interface AppConfig {
-  opencodeRoot: string;
+  workspaceRoot: string;
   bridgeUrl: string;
   environment: EnvironmentMode;
   defaultAgentMode: DefaultAgentMode;
@@ -426,41 +426,22 @@ export interface ChatMessage {
   knowledge?: KnowledgeInjectionMeta;
 }
 
-export interface PendingQuestionOption {
-  label: string;
-  description: string;
-}
-
-export interface PendingQuestionItem {
-  header: string;
-  question: string;
-  options: PendingQuestionOption[];
-  multiple?: boolean;
-  custom?: boolean;
-}
-
-export interface PendingQuestion {
-  id: string;
-  sessionID: string;
-  questions: PendingQuestionItem[];
-  tool?: {
-    messageID: string;
-    callID: string;
-  };
-}
-
-export interface ThreadSummary {
-  id: string;
+export interface CurrentChatState {
+  sessionId: string | null;
   title: string;
-  updatedAt: number;
-  lastMessage: string;
-  messageCount: number;
-  archived: boolean;
+  messages: ChatMessage[];
+  busy: boolean;
+  blockedOnQuestion: boolean;
   workspaceRoot?: string;
 }
 
-export interface ThreadRecord extends ThreadSummary {
-  messages: ChatMessage[];
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  archivedAt?: number;
+  workspaceRoot?: string;
 }
 
 export interface FilePreviewPayload {
@@ -485,58 +466,20 @@ export interface FileDropEntry {
   dataUrl?: string;
 }
 
-export interface BootstrapPayload {
-  snapshotAt: number;
-  config: AppConfig;
-  threads: ThreadSummary[];
-  activeThreadId: string;
-  currentThread: ThreadRecord | null;
-  availableSkills: RuntimeSkill[];
-  availableAgents: RuntimeAgent[];
-  mcpStatuses: McpServerStatus[];
-  pendingQuestions: PendingQuestion[];
-}
-
 export interface SendMessageInput {
-  threadId?: string;
-  workspaceRoot?: string;
   message: string;
   attachments: FileDropEntry[];
 }
 
 export interface SendMessageResult {
-  thread: ThreadRecord;
-  knowledge?: KnowledgeInjectionMeta;
+  currentChat: CurrentChatState;
 }
 
-export interface QuestionReplyInput {
-  requestId: string;
-  sessionId: string;
-  answers: string[][];
-}
-
-export interface QuestionRejectInput {
-  requestId: string;
-  sessionId: string;
-}
-
-export interface SkillRunInput {
-  threadId?: string;
-  workspaceRoot?: string;
-  skillId: string;
-  prompt: string;
-}
-
-export interface SkillRunResult {
-  thread: ThreadRecord;
-}
-
-export interface SkillDeleteResult {
+export interface BootstrapPayload {
+  snapshotAt: number;
   config: AppConfig;
-  threads: ThreadSummary[];
-  activeThreadId: string;
-  currentThread: ThreadRecord;
   availableSkills: RuntimeSkill[];
-  availableAgents: RuntimeAgent[];
   mcpStatuses: McpServerStatus[];
+  chatSessions: ChatSessionSummary[];
+  currentChat: CurrentChatState;
 }

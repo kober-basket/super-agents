@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Suspense, lazy } from "react";
 import clsx from "clsx";
 import {
@@ -24,12 +24,12 @@ import type {
 } from "./types";
 import { workspaceClient } from "./services/workspace-client";
 import { ChatView } from "./features/chat/ChatView";
+import { CHAT_HOME_QUICK_PROMPTS, shouldShowChatHome } from "./features/chat/home-state";
 import { PrimarySidebar } from "./features/navigation/PrimarySidebar";
-import { AppTitleBar } from "./features/navigation/AppTitleBar";
+import { AppTitleBar, describeRuntimeEngineStatus } from "./features/navigation/AppTitleBar";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
-import { useSessionController } from "./features/session/useSessionController";
-import { cloneConfig, matchQuery } from "./features/session/utils";
+import { useWorkspaceController } from "./features/workspace/useWorkspaceController";
 import { fileKind, sanitizeMcpName } from "./features/shared/utils";
 
 const PreviewPane = lazy(async () => {
@@ -63,6 +63,16 @@ const RemoteControlSettings = lazy(async () => {
 
 function uid() {
   return Math.random().toString(36).slice(2);
+}
+
+function cloneConfig(config: AppConfig) {
+  return JSON.parse(JSON.stringify(config)) as AppConfig;
+}
+
+function matchQuery(query: string, values: Array<string | undefined>) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  return values.some((value) => value?.toLowerCase().includes(normalized));
 }
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "super-agents:sidebar-width";
@@ -139,66 +149,49 @@ export default function App() {
   const resizeStateRef = useRef<{ startX: number; startWidth: number; target: ResizeTarget } | null>(null);
   const {
     activeModel,
-    activeSummary,
-    activeThread,
-    activeThreadId,
-    activeThreads,
-    applySuggestion,
     appendAttachments,
-    archiveThread,
-    archivedThreads,
     attachments,
     availableSkills,
-    pendingQuestions,
-    replyQuestion,
-    rejectQuestion,
-    abortThread,
-    chooseThreadWorkspace,
-    clearSelectedComposerSkill,
+    chatSessions,
     commitConfig,
     composer,
     composerComposing,
     composerModelId,
     config,
-    createThread,
+    currentChat,
     currentWorkspaceLabel,
     currentWorkspacePath,
-    deleteThread: deleteThreadImmediately,
-    drafting,
+    chatBusy,
     dragActive,
-    mcpStatuses,
     mcpStatusMap,
     messageListRef,
-    openThread,
-    openWorkspaceFolder,
+    abortCurrentChat,
+    archiveChatSession,
     pickFiles,
     prepareSkillDraft,
-    refreshThreadList,
     refreshWorkspaceSnapshot,
     removeAttachment,
-    runSkill,
+    resetCurrentChat,
     scheduleConfigPersist,
+    selectCurrentChatSession,
     selectableModels,
-    selectedComposerSkill,
-    selectComposerSkill,
-    sendMessageWithSkills,
-    sending,
+    sendCurrentMessage,
+    setAttachments,
     setComposer,
     setComposerComposing,
     setDragActive,
-    slashSkillSuggestions,
-    status: sessionStatus,
-    title,
     uninstallSkill,
+    unarchiveChatSession,
+    deleteChatSession,
     updateConfigField,
     useReferenceSkill,
-    workspaceIssue,
-  } = useSessionController({
+  } = useWorkspaceController({
     onOpenChat: () => setView("chat"),
     onToast: (message) => setToast(message),
   });
   const toolsLoadedRef = useRef(false);
   const knowledgeLoadedRef = useRef(false);
+  const wechatLoginCancelledRef = useRef(false);
 
   const configuredSkills = useMemo(
     () =>
@@ -207,9 +200,9 @@ export default function App() {
         location:
           skill.kind === "codex"
             ? skill.system
-              ? "Codex system skill"
-              : skill.sourcePath || "Codex local skill"
-            : "Workspace builtin skill",
+              ? "Codex 系统技能"
+              : skill.sourcePath || "Codex 本地技能"
+            : "内置技能",
       })),
     [config.skills],
   );
@@ -227,6 +220,22 @@ export default function App() {
       ),
     [availableSkills, skillQuery],
   );
+  const canSendMessage =
+    !chatBusy &&
+    !composerComposing &&
+    selectableModels.length > 0 &&
+    (composer.trim().length > 0 || attachments.length > 0);
+  const runtimeStatus = useMemo(
+    () =>
+      describeRuntimeEngineStatus({
+        engineLabel: "OpenCode",
+        hasSession: Boolean(currentChat.sessionId),
+        busy: currentChat.busy,
+        blockedOnQuestion: currentChat.blockedOnQuestion,
+      }),
+    [currentChat.blockedOnQuestion, currentChat.busy, currentChat.sessionId],
+  );
+  const showChatHome = shouldShowChatHome(currentChat);
   useEffect(() => {
     if (!toast) return undefined;
     const timer = window.setTimeout(() => setToast(null), 1800);
@@ -449,7 +458,7 @@ export default function App() {
         });
         setPreview(payload);
       } catch {
-        setToast("Open preview failed");
+      setToast("打开预览失败");
       }
     }
   }
@@ -474,7 +483,7 @@ export default function App() {
       });
       setPreview(payload);
     } catch {
-      setToast("Open page preview failed");
+      setToast("打开页面预览失败");
     }
   }
 
@@ -482,7 +491,7 @@ export default function App() {
     try {
       await workspaceClient.openPreviewTarget(payload);
     } catch {
-      setToast("Open preview externally failed");
+      setToast("在外部打开预览失败");
     }
   }
 
@@ -510,7 +519,7 @@ export default function App() {
     } satisfies AppConfig;
   }
 
-  function commitModelProviders(modelProviders: ModelProviderConfig[], message = "Settings saved") {
+  function commitModelProviders(modelProviders: ModelProviderConfig[], message = "设置已保存") {
     void commitConfig(buildConfigWithModelProviders(modelProviders), message);
   }
 
@@ -559,7 +568,7 @@ export default function App() {
       ...config.modelProviders,
       {
         id: providerId,
-        name: "New Provider",
+        name: "新模型提供方",
         kind: "openai-compatible" as const,
         baseUrl: "https://api.example.com/v1",
         apiKey: "",
@@ -570,7 +579,7 @@ export default function App() {
       },
     ];
     setSelectedModelProviderId(providerId);
-    commitModelProviders(modelProviders, "Added provider");
+    commitModelProviders(modelProviders, "已添加提供方");
   }
 
   function removeModelProvider(providerId: string) {
@@ -578,7 +587,7 @@ export default function App() {
     const modelProviders = config.modelProviders.filter((item) => item.id !== providerId);
     commitModelProviders(
       modelProviders,
-      target ? `Removed ${target.name || "provider"} configuration` : "Removed provider configuration",
+      target ? `已移除 ${target.name || "提供方"} 配置` : "已移除提供方配置",
     );
   }
 
@@ -597,7 +606,7 @@ export default function App() {
 
     void commitConfig(
       buildConfigWithModelProviders(modelProviders, createRuntimeModelId(providerId, modelId)),
-      "Default model updated",
+      "默认模型已更新",
     );
   }
 
@@ -631,7 +640,7 @@ export default function App() {
       );
       commitModelProviders(modelProviders, `${provider.name} models discovered`);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Fetch models failed");
+      setToast(error instanceof Error ? error.message : "拉取模型列表失败");
     } finally {
       setProviderRefreshingId(null);
     }
@@ -647,7 +656,7 @@ export default function App() {
     const mcpServers = config.mcpServers.filter((item) => item.id !== serverId);
     void commitConfig(
       { ...cloneConfig(config), mcpServers },
-      target ? `Removed ${target.name || "MCP"} configuration` : "Removed MCP configuration",
+      target ? `已移除 ${target.name || "MCP"} 配置` : "已移除 MCP 配置",
     );
   }
 
@@ -656,7 +665,7 @@ export default function App() {
       ...config.mcpServers,
       {
         id: `mcp-${uid()}`,
-        name: "New MCP",
+        name: "新 MCP 服务",
         transport: "local" as const,
         command: "node",
         args: [],
@@ -667,7 +676,7 @@ export default function App() {
         timeoutMs: 30000,
       },
     ];
-    void commitConfig({ ...cloneConfig(config), mcpServers }, "Added MCP server");
+    void commitConfig({ ...cloneConfig(config), mcpServers }, "已添加 MCP 服务");
   }
 
   function addRecommendedMcpServer(server: {
@@ -677,7 +686,7 @@ export default function App() {
   }) {
     const normalized = sanitizeMcpName(server.name);
     if (config.mcpServers.some((item) => sanitizeMcpName(item.name) === normalized)) {
-      setToast("This server draft already exists");
+      setToast("这个服务草稿已经存在");
       setView("tools");
       return;
     }
@@ -698,19 +707,19 @@ export default function App() {
       },
     ];
 
-    void commitConfig({ ...cloneConfig(config), mcpServers }, "Added recommended MCP server");
+    void commitConfig({ ...cloneConfig(config), mcpServers }, "已添加推荐的 MCP 服务");
     setView("tools");
   }
 
   async function refreshSkillsView() {
     setSkillsRefreshing(true);
-    await refreshWorkspaceSnapshot("Skills refreshed");
+    await refreshWorkspaceSnapshot("技能列表已刷新");
     setSkillsRefreshing(false);
   }
 
   async function refreshMcpView() {
     setMcpRefreshing(true);
-    await refreshWorkspaceSnapshot("MCP refreshed");
+    await refreshWorkspaceSnapshot("MCP 状态已刷新");
     setMcpRefreshing(false);
   }
 
@@ -721,7 +730,7 @@ export default function App() {
       const payload = await workspaceClient.listTools();
       setTools(payload.tools);
     } catch {
-      setToast("Refresh tools failed");
+      setToast("刷新工具列表失败");
     } finally {
       setToolsRefreshing(false);
     }
@@ -890,6 +899,7 @@ export default function App() {
   }
 
   async function connectWechatRemoteControl() {
+    wechatLoginCancelledRef.current = false;
     setWechatConnecting(true);
     try {
       const start = await workspaceClient.startWechatLogin();
@@ -911,9 +921,13 @@ export default function App() {
         timeoutMs: 480000,
       });
       await refreshRemoteControlStatus({ silent: true });
-      setToast(result.connected ? "微信连接成功" : result.message || "微信连接未完成");
+      if (!wechatLoginCancelledRef.current) {
+        setToast(result.connected ? "微信已连接" : result.message || "微信登录未完成");
+      }
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "微信连接失败");
+      if (!wechatLoginCancelledRef.current) {
+        setToast(error instanceof Error ? error.message : "微信连接失败");
+      }
       await refreshRemoteControlStatus({ silent: true });
     } finally {
       setWechatConnecting(false);
@@ -921,12 +935,14 @@ export default function App() {
   }
 
   async function disconnectWechatRemoteControl() {
+    wechatLoginCancelledRef.current = true;
+    setWechatConnecting(false);
     try {
       await workspaceClient.disconnectWechat();
       await refreshRemoteControlStatus({ silent: true });
-      setToast("微信连接已断开");
+      setToast("微信已断开连接");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "断开微信失败");
+      setToast(error instanceof Error ? error.message : "断开微信连接失败");
     }
   }
 
@@ -1026,7 +1042,7 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeDirectory({ baseId, directoryPath });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("目录资料已添加");
+      setToast("目录已添加");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "添加目录失败");
     } finally {
@@ -1039,9 +1055,9 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeUrl({ baseId, url });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("网址资料已添加");
+      setToast("链接已添加");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "添加网址失败");
+      setToast(error instanceof Error ? error.message : "添加链接失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -1052,7 +1068,7 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeWebsite({ baseId, url });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("网站资料已添加");
+      setToast("网站已添加");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "添加网站失败");
     } finally {
@@ -1065,9 +1081,9 @@ export default function App() {
     try {
       const payload = await workspaceClient.deleteKnowledgeItem({ baseId, itemId });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("资料已删除");
+      setToast("知识项已删除");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "删除资料失败");
+      setToast(error instanceof Error ? error.message : "删除知识项失败");
     } finally {
       setKnowledgeRefreshing(false);
     }
@@ -1086,7 +1102,7 @@ export default function App() {
           theme,
         },
       },
-      "外观主题已更新",
+      "主题已更新",
     );
   }
 
@@ -1095,7 +1111,7 @@ export default function App() {
       const payload = await workspaceClient.minimizeWindow();
       setWindowState(payload);
     } catch {
-      setToast("Minimize window failed");
+      setToast("最小化窗口失败");
     }
   }
 
@@ -1104,7 +1120,7 @@ export default function App() {
       const payload = await workspaceClient.toggleMaximizeWindow();
       setWindowState(payload);
     } catch {
-      setToast("Resize window failed");
+      setToast("切换窗口大小失败");
     }
   }
 
@@ -1112,7 +1128,7 @@ export default function App() {
     try {
       await workspaceClient.closeWindow();
     } catch {
-      setToast("Close window failed");
+      setToast("关闭窗口失败");
     }
   }
 
@@ -1128,17 +1144,11 @@ export default function App() {
             : `${activeSidebarWidth}px minmax(0, 1fr)`,
         }
       : undefined;
-  const threadBusy = !drafting && (activeThread?.messages.some((message) => message.status === "loading") ?? false);
-  const settingsStats = {
-    threadCount: activeThreads.length + archivedThreads.length,
-    providerCount: config.modelProviders.length,
-    mcpCount: config.mcpServers.length,
-  };
   const hasSkillResults =
     filteredInstalledSkills.length > 0 || filteredReferenceSkills.length > 0;
 
   const beginResize =
-    (target: ResizeTarget, width: number) => (event: React.PointerEvent<HTMLButtonElement>) => {
+    (target: ResizeTarget, width: number) => (event: ReactPointerEvent<HTMLButtonElement>) => {
       if (event.button !== 0) {
         return;
       }
@@ -1184,13 +1194,11 @@ export default function App() {
           <AssistantSettings
             activeModel={activeModel}
             composerModelId={composerModelId}
-            defaultAgentMode={config.defaultAgentMode}
             modelProviders={config.modelProviders}
             providerRefreshingId={providerRefreshingId}
             selectedModelProviderId={selectedModelProviderId}
             selectableModels={selectableModels}
             onAddModelProvider={addModelProvider}
-            onDefaultAgentModeChange={(value) => updateConfigField("defaultAgentMode", value)}
             onModelChange={(value) => updateConfigField("activeModelId", value)}
             onRefreshProviderModels={refreshProviderModels}
             onRemoveModelProvider={removeModelProvider}
@@ -1260,7 +1268,7 @@ export default function App() {
             onDebugTool={(server, toolName, argumentsJson) =>
               workspaceClient.debugMcpTool({
                 server,
-                workspaceRoot: config.opencodeRoot,
+                workspaceRoot: config.workspaceRoot,
                 toolName,
                 argumentsJson,
               })
@@ -1268,7 +1276,7 @@ export default function App() {
             onInspectServer={(server) =>
               workspaceClient.inspectMcpServer({
                 server,
-                workspaceRoot: config.opencodeRoot,
+                workspaceRoot: config.workspaceRoot,
               })
             }
             onRefresh={refreshToolsView}
@@ -1311,60 +1319,68 @@ export default function App() {
     }
 
     return (
-        <ChatView
-          activeThread={activeThread}
-          attachments={attachments}
-          composer={composer}
-          composerModelId={composerModelId}
-          composing={composerComposing}
-          currentWorkspaceLabel={currentWorkspaceLabel}
-          currentWorkspacePath={currentWorkspacePath}
-          dragActive={dragActive}
-          knowledgeBases={knowledgeBases}
-          knowledgeConfig={config.knowledgeBase}
-          messageListRef={messageListRef}
-          previewAvailable={Boolean(preview)}
-          previewOpen={previewOpen}
-          selectedSkillName={selectedComposerSkill?.name ?? null}
-          selectableModels={selectableModels}
-          pendingQuestions={pendingQuestions}
-          sending={sending}
-          threadBusy={threadBusy}
-          slashSkillSuggestions={slashSkillSuggestions.map((skill) => ({
-            id: skill.id,
-            name: skill.name,
-            description: skill.description,
-            source: skill.source,
-          }))}
-          title={title}
-          workspaceIssue={workspaceIssue}
-          onApplySuggestion={applySuggestion}
-          onComposerChange={setComposer}
-          onChooseWorkspace={chooseThreadWorkspace}
-          onDragActiveChange={setDragActive}
-          onFilesDropped={appendAttachments}
-          onCompositionChange={setComposerComposing}
-          onOpenFile={openPreview}
-          onOpenKnowledge={() => setView("knowledge")}
-          onOpenLink={openPreviewLink}
-          onPickFiles={pickFiles}
-          onModelChange={(value) => updateConfigField("activeModelId", value)}
-          onReplyQuestion={replyQuestion}
-          onRejectQuestion={rejectQuestion}
-          onRemoveAttachment={removeAttachment}
-          onRemoveSelectedSkill={clearSelectedComposerSkill}
-          onSelectSlashSkill={selectComposerSkill}
-          onSend={sendMessageWithSkills}
-          onStop={() => abortThread()}
-          onToggleKnowledgeBase={toggleKnowledgeBaseSelection}
-          onTogglePreviewPane={() => setPreviewOpen((value) => !value)}
-        />
+      <ChatView
+        attachments={attachments}
+        canSend={canSendMessage}
+        chatBusy={chatBusy}
+        composer={composer}
+        composerKnowledgeBaseIds={config.knowledgeBase.selectedBaseIds}
+        composerModelId={composerModelId}
+        composing={composerComposing}
+        currentWorkspaceLabel={currentWorkspaceLabel}
+        currentWorkspacePath={currentWorkspacePath}
+        dragActive={dragActive}
+        knowledgeBaseOptions={knowledgeBases.map((item) => ({ id: item.id, name: item.name }))}
+        messageListRef={messageListRef}
+        messages={currentChat.messages}
+        modelOptions={selectableModels.map((item) => ({ id: item.id, label: item.label }))}
+        previewAvailable={Boolean(preview)}
+        previewOpen={previewOpen}
+        quickPrompts={CHAT_HOME_QUICK_PROMPTS}
+        showHome={showChatHome}
+        title={currentChat.title}
+        onChooseWorkspace={async () => {
+          try {
+            const selected = await workspaceClient.selectWorkspaceFolder();
+            if (!selected) return;
+            await commitConfig(
+              {
+                ...cloneConfig(config),
+                workspaceRoot: selected,
+              },
+              `工作区已切换到 ${selected}`,
+            );
+          } catch {
+            setToast("切换工作区失败");
+          }
+        }}
+        onComposerChange={setComposer}
+        onComposerKnowledgeBaseIdsChange={(selectedBaseIds) =>
+          updateKnowledgeBaseConfig({
+            enabled: selectedBaseIds.length > 0,
+            selectedBaseIds,
+          })
+        }
+        onComposerModelChange={(value) => updateConfigField("activeModelId", value)}
+        onDragActiveChange={setDragActive}
+        onFilesDropped={appendAttachments}
+        onCompositionChange={setComposerComposing}
+        onOpenFile={openPreview}
+        onOpenLink={openPreviewLink}
+        onPickFiles={pickFiles}
+        onQuickPrompt={setComposer}
+        onRemoveAttachment={removeAttachment}
+        onSend={sendCurrentMessage}
+        onStop={abortCurrentChat}
+        onTogglePreviewPane={() => setPreviewOpen((value) => !value)}
+      />
     );
   }
 
   return (
     <div className={clsx("window-frame", windowState?.maximized && "maximized")}>
       <AppTitleBar
+        runtimeStatus={runtimeStatus}
         view={view}
         windowState={windowState}
         onClose={closeWindow}
@@ -1384,17 +1400,37 @@ export default function App() {
           />
         ) : (
           <PrimarySidebar
-            activeThreadId={view === "chat" ? activeThreadId : ""}
-            activeThreads={activeThreads}
-            archivedThreads={archivedThreads}
-            busyThreadId={sessionStatus.mutatingThreadId}
-            creatingThread={sessionStatus.creatingThread}
+            activeChatSessionId={currentChat.sessionId}
+            chatSessions={chatSessions}
             view={view}
-            workspaceIssue={workspaceIssue}
-            onArchiveThread={archiveThread}
-            onCreateThread={createThread}
-            onDeleteThread={deleteThreadImmediately}
-            onOpenThread={openThread}
+            onNewChat={() => {
+              setView("chat");
+              setComposer("");
+              setAttachments([]);
+              setDragActive(false);
+              setPreview(null);
+              setPreviewOpen(false);
+              void resetCurrentChat();
+            }}
+            onSelectChatSession={(sessionId) => {
+              setView("chat");
+              setPreview(null);
+              setPreviewOpen(false);
+              void selectCurrentChatSession(sessionId);
+            }}
+            onArchiveChatSession={(sessionId) => {
+              setPreview(null);
+              setPreviewOpen(false);
+              void archiveChatSession(sessionId);
+            }}
+            onUnarchiveChatSession={(sessionId) => {
+              void unarchiveChatSession(sessionId);
+            }}
+            onDeleteChatSession={(sessionId) => {
+              setPreview(null);
+              setPreviewOpen(false);
+              void deleteChatSession(sessionId);
+            }}
             onSetView={setView}
           />
         )}
@@ -1424,7 +1460,7 @@ export default function App() {
 
         {showInlinePreviewPane ? (
           <button
-            aria-label="调整右侧预览宽度"
+            aria-label="调整预览栏宽度"
             className={clsx("pane-resizer", "pane-resizer-right", resizeTarget === "preview" && "active")}
             onDoubleClick={() => resetWidth("preview")}
             onPointerDown={beginResize("preview", previewPaneWidth)}

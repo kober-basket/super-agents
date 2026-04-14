@@ -21,41 +21,29 @@ import type {
   ModelProviderFetchInput,
   ModelProviderFetchResult,
   RemoteControlStatus,
-  QuestionRejectInput,
-  QuestionReplyInput,
   SendMessageInput,
   SendMessageResult,
-  SkillRunInput,
-  SkillRunResult,
   WechatLoginStartResult,
   WechatLoginWaitResult,
-  ThreadRecord,
-  ThreadSummary,
   WorkspaceToolCatalog,
 } from "../src/types";
 
 const desktopAgent = {
   bootstrap: () => ipcRenderer.invoke("desktop:bootstrap") as Promise<BootstrapPayload>,
-  listThreads: () => ipcRenderer.invoke("desktop:list-threads") as Promise<ThreadSummary[]>,
-  getThread: (threadId: string) => ipcRenderer.invoke("desktop:get-thread", threadId) as Promise<ThreadRecord>,
-  createThread: (title?: string) =>
-    ipcRenderer.invoke("desktop:create-thread", title) as Promise<BootstrapPayload>,
-  setActiveThread: (threadId: string) =>
-    ipcRenderer.invoke("desktop:set-active-thread", threadId) as Promise<ThreadRecord>,
-  resetThread: (threadId: string) =>
-    ipcRenderer.invoke("desktop:reset-thread", threadId) as Promise<ThreadRecord>,
-  archiveThread: (threadId: string, archived: boolean) =>
-    ipcRenderer.invoke("desktop:archive-thread", { threadId, archived }) as Promise<BootstrapPayload>,
-  deleteThread: (threadId: string) =>
-    ipcRenderer.invoke("desktop:delete-thread", threadId) as Promise<BootstrapPayload>,
   sendMessage: (payload: SendMessageInput) =>
     ipcRenderer.invoke("desktop:send-message", payload) as Promise<SendMessageResult>,
-  abortThread: (threadId: string) =>
-    ipcRenderer.invoke("desktop:abort-thread", threadId) as Promise<BootstrapPayload>,
-  replyQuestion: (payload: QuestionReplyInput) =>
-    ipcRenderer.invoke("desktop:reply-question", payload) as Promise<BootstrapPayload>,
-  rejectQuestion: (payload: QuestionRejectInput) =>
-    ipcRenderer.invoke("desktop:reject-question", payload) as Promise<BootstrapPayload>,
+  selectCurrentChatSession: (sessionId: string) =>
+    ipcRenderer.invoke("desktop:select-current-chat-session", sessionId) as Promise<BootstrapPayload>,
+  resetCurrentChat: () =>
+    ipcRenderer.invoke("desktop:reset-current-chat") as Promise<BootstrapPayload>,
+  archiveChatSession: (sessionId: string) =>
+    ipcRenderer.invoke("desktop:archive-chat-session", sessionId) as Promise<BootstrapPayload>,
+  unarchiveChatSession: (sessionId: string) =>
+    ipcRenderer.invoke("desktop:unarchive-chat-session", sessionId) as Promise<BootstrapPayload>,
+  deleteChatSession: (sessionId: string) =>
+    ipcRenderer.invoke("desktop:delete-chat-session", sessionId) as Promise<BootstrapPayload>,
+  abortCurrentChat: () =>
+    ipcRenderer.invoke("desktop:abort-current-chat") as Promise<BootstrapPayload>,
   listKnowledgeBases: () =>
     ipcRenderer.invoke("desktop:list-knowledge-bases") as Promise<KnowledgeCatalogPayload>,
   createKnowledgeBase: (payload: KnowledgeBaseCreateInput) =>
@@ -76,8 +64,6 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:delete-knowledge-item", payload) as Promise<KnowledgeCatalogPayload>,
   searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) =>
     ipcRenderer.invoke("desktop:search-knowledge-bases", payload) as Promise<KnowledgeSearchPayload>,
-  runSkill: (payload: SkillRunInput) =>
-    ipcRenderer.invoke("desktop:run-skill", payload) as Promise<SkillRunResult>,
   uninstallSkill: (skillId: string) =>
     ipcRenderer.invoke("desktop:uninstall-skill", skillId) as Promise<BootstrapPayload>,
   updateConfig: (patch: Partial<AppConfig>) =>
@@ -102,13 +88,12 @@ const desktopAgent = {
   prepareAttachments: (filePaths: string[]) =>
     ipcRenderer.invoke("desktop:prepare-attachments", filePaths) as Promise<FileDropEntry[]>,
   selectWorkspaceFolder: () => ipcRenderer.invoke("desktop:select-workspace-folder") as Promise<string>,
-  setThreadWorkspace: (threadId: string, workspaceRoot: string) =>
-    ipcRenderer.invoke("desktop:set-thread-workspace", { threadId, workspaceRoot }) as Promise<BootstrapPayload>,
   readPreview: (payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) =>
     ipcRenderer.invoke("desktop:read-preview", payload) as Promise<FilePreviewPayload>,
   openPreviewTarget: (payload: { path?: string; url?: string }) =>
     ipcRenderer.invoke("desktop:open-preview-target", payload) as Promise<void>,
-  openWorkspaceFolder: (threadId?: string) => ipcRenderer.invoke("desktop:open-workspace-folder", threadId) as Promise<void>,
+  openWorkspaceFolder: () => ipcRenderer.invoke("desktop:open-workspace-folder") as Promise<void>,
+  openFolder: (targetPath: string) => ipcRenderer.invoke("desktop:open-folder", targetPath) as Promise<void>,
   getWindowState: () => ipcRenderer.invoke("desktop:get-window-state") as Promise<DesktopWindowState>,
   minimizeWindow: () => ipcRenderer.invoke("desktop:minimize-window") as Promise<DesktopWindowState>,
   toggleMaximizeWindow: () => ipcRenderer.invoke("desktop:toggle-maximize-window") as Promise<DesktopWindowState>,
@@ -122,11 +107,6 @@ const desktopAgent = {
     const wrapped = (_event: unknown, payload: DesktopWindowState) => listener(payload);
     ipcRenderer.on("desktop:window-state", wrapped);
     return () => ipcRenderer.removeListener("desktop:window-state", wrapped);
-  },
-  onGatewayEvent: (listener: (payload: BootstrapPayload) => void) => {
-    const wrapped = (_event: unknown, payload: BootstrapPayload) => listener(payload);
-    ipcRenderer.on("desktop:workspace-changed", wrapped);
-    return () => ipcRenderer.removeListener("desktop:workspace-changed", wrapped);
   },
 };
 

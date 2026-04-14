@@ -1,20 +1,13 @@
 export const workspaceClient = {
   bootstrap: () => window.desktopAgent.bootstrap(),
-  listThreads: () => window.desktopAgent.listThreads(),
-  getThread: (threadId: string) => window.desktopAgent.getThread(threadId),
-  createThread: (title?: string) => window.desktopAgent.createThread(title),
-  setActiveThread: (threadId: string) => window.desktopAgent.setActiveThread(threadId),
-  resetThread: (threadId: string) => window.desktopAgent.resetThread(threadId),
-  archiveThread: (threadId: string, archived: boolean) =>
-    window.desktopAgent.archiveThread(threadId, archived),
-  deleteThread: (threadId: string) => window.desktopAgent.deleteThread(threadId),
   sendMessage: (payload: Parameters<typeof window.desktopAgent.sendMessage>[0]) =>
     window.desktopAgent.sendMessage(payload),
-  abortThread: (threadId: string) => window.desktopAgent.abortThread(threadId),
-  replyQuestion: (payload: Parameters<typeof window.desktopAgent.replyQuestion>[0]) =>
-    window.desktopAgent.replyQuestion(payload),
-  rejectQuestion: (payload: Parameters<typeof window.desktopAgent.rejectQuestion>[0]) =>
-    window.desktopAgent.rejectQuestion(payload),
+  selectCurrentChatSession: (sessionId: string) => window.desktopAgent.selectCurrentChatSession(sessionId),
+  resetCurrentChat: () => window.desktopAgent.resetCurrentChat(),
+  archiveChatSession: (sessionId: string) => window.desktopAgent.archiveChatSession(sessionId),
+  unarchiveChatSession: (sessionId: string) => window.desktopAgent.unarchiveChatSession(sessionId),
+  deleteChatSession: (sessionId: string) => window.desktopAgent.deleteChatSession(sessionId),
+  abortCurrentChat: () => window.desktopAgent.abortCurrentChat(),
   listKnowledgeBases: () => window.desktopAgent.listKnowledgeBases(),
   createKnowledgeBase: (payload: Parameters<typeof window.desktopAgent.createKnowledgeBase>[0]) =>
     window.desktopAgent.createKnowledgeBase(payload),
@@ -33,8 +26,6 @@ export const workspaceClient = {
     window.desktopAgent.deleteKnowledgeItem(payload),
   searchKnowledgeBases: (payload: Parameters<typeof window.desktopAgent.searchKnowledgeBases>[0]) =>
     window.desktopAgent.searchKnowledgeBases(payload),
-  runSkill: (payload: Parameters<typeof window.desktopAgent.runSkill>[0]) =>
-    window.desktopAgent.runSkill(payload),
   uninstallSkill: (skillId: string) => window.desktopAgent.uninstallSkill(skillId),
   updateConfig: (patch: Parameters<typeof window.desktopAgent.updateConfig>[0]) =>
     window.desktopAgent.updateConfig(patch),
@@ -53,13 +44,12 @@ export const workspaceClient = {
   selectFiles: () => window.desktopAgent.selectFiles(),
   prepareAttachments: (filePaths: string[]) => window.desktopAgent.prepareAttachments(filePaths),
   selectWorkspaceFolder: () => window.desktopAgent.selectWorkspaceFolder(),
-  setThreadWorkspace: (threadId: string, workspaceRoot: string) =>
-    window.desktopAgent.setThreadWorkspace(threadId, workspaceRoot),
   readPreview: (payload: Parameters<typeof window.desktopAgent.readPreview>[0]) =>
     window.desktopAgent.readPreview(payload),
   openPreviewTarget: (payload: Parameters<typeof window.desktopAgent.openPreviewTarget>[0]) =>
     window.desktopAgent.openPreviewTarget(payload),
-  openWorkspaceFolder: (threadId?: string) => window.desktopAgent.openWorkspaceFolder(threadId),
+  openWorkspaceFolder: () => window.desktopAgent.openWorkspaceFolder(),
+  openFolder: (targetPath: string) => window.desktopAgent.openFolder(targetPath),
   getWindowState: () => window.desktopAgent.getWindowState(),
   minimizeWindow: () => window.desktopAgent.minimizeWindow(),
   toggleMaximizeWindow: () => window.desktopAgent.toggleMaximizeWindow(),

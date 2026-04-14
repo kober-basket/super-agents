@@ -12,30 +12,14 @@ import {
   normalizeProviderModels,
   sanitizeModelProviderId,
 } from "../src/lib/model-config";
+import { inferProviderModelCapabilities, inferProviderModelGroup, inferProviderModelVendor } from "../src/lib/model-metadata";
 import { DEFAULT_REMOTE_CONTROL_CONFIG, normalizeRemoteControlConfig } from "../src/lib/remote-control-config";
-import {
-  inferProviderModelCapabilities,
-  inferProviderModelGroup,
-  inferProviderModelVendor,
-} from "../src/lib/model-metadata";
-import {
-  DEFAULT_THREAD_TITLE as FALLBACK_THREAD_TITLE,
-  deriveThreadTitleFromMessages,
-  formatThreadTitle,
-} from "../src/lib/thread-title";
-import { KnowledgeService } from "./knowledge-service";
-import { readJsonFile, writeJsonFile } from "./store";
-import {
-  OpencodeRuntime,
-  type OpencodeFilePart,
-  type OpencodePart,
-  type OpencodeSessionMessage,
-  type OpencodeToolPart,
-} from "./opencode-runtime-acp";
+import { sanitizeMcpName } from "../src/features/shared/utils";
 import type {
   AppConfig,
   BootstrapPayload,
-  ChatMessage,
+  ChatSessionSummary,
+  CurrentChatState,
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeAddDirectoryInput,
@@ -47,26 +31,48 @@ import type {
   KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
   McpServerConfig,
+  McpServerStatus,
   ModelProviderConfig,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
   PreviewKind,
   ProxyConfig,
+  RuntimeSkill,
   SendMessageInput,
   SendMessageResult,
   SkillConfig,
-  SkillRunInput,
-  SkillRunResult,
-  ThreadRecord,
-  ThreadSummary,
-  WorkspaceTool,
   WorkspaceToolCatalog,
 } from "../src/types";
+import { convertSessionMessages, createEmptyCurrentChatState } from "./current-chat";
+import { KnowledgeService } from "./knowledge-service";
+import {
+  OpencodeRuntime,
+  type OpencodeQuestionRequest,
+  type OpencodeSessionInfo,
+  type OpencodeSessionMessage,
+  type OpencodeSessionStatus,
+} from "./opencode-runtime-acp";
+import { readJsonFile, writeJsonFile } from "./store";
 
 interface PersistedWorkspaceState {
   config: AppConfig;
-  activeThreadId: string;
-  threads: ThreadSummary[];
+  currentChatSessionId: string;
+  archivedChatSessionIds: string[];
+}
+
+interface WorkspaceRuntime {
+  createSession(config: AppConfig, title?: string): Promise<OpencodeSessionInfo>;
+  listSessions(config: AppConfig): Promise<OpencodeSessionInfo[]>;
+  getSession(config: AppConfig, sessionID: string): Promise<OpencodeSessionInfo>;
+  listMessages(config: AppConfig, sessionID: string): Promise<OpencodeSessionMessage[]>;
+  listSessionStatuses(config: AppConfig): Promise<Record<string, OpencodeSessionStatus>>;
+  listQuestions(config: AppConfig): Promise<OpencodeQuestionRequest[]>;
+  promptAsync(config: AppConfig, sessionID: string, message: string, attachments: FileDropEntry[]): Promise<unknown>;
+  abortSession(config: AppConfig, sessionID: string): Promise<unknown>;
+  deleteSession?(config: AppConfig, sessionID: string): Promise<unknown>;
+  listSkills(config: AppConfig): Promise<RuntimeSkill[]>;
+  listMcpStatuses(config: AppConfig): Promise<McpServerStatus[]>;
+  dispose(): Promise<void>;
 }
 
 const IFLY_RPA_BASE_URL = "https://oneapi.iflyrpa.com/v1";
@@ -133,7 +139,7 @@ const DEFAULT_SKILLS: SkillConfig[] = [
 ];
 
 const DEFAULT_CONFIG: AppConfig = {
-  opencodeRoot: path.resolve(process.cwd(), "..", "opencode"),
+  workspaceRoot: "",
   bridgeUrl: "",
   environment: "local",
   defaultAgentMode: "general",
@@ -163,60 +169,24 @@ const DEFAULT_CONFIG: AppConfig = {
   remoteControl: DEFAULT_REMOTE_CONTROL_CONFIG,
 };
 
-const BUILTIN_TOOL_DESCRIPTIONS: Record<string, string> = {
-  question: "Ask the user for confirmation or missing input before continuing.",
-  webfetch: "Fetch a web page and extract the parts needed for the current task.",
-};
-
-const DEFAULT_THREAD_TITLE = "新会话";
-
-function sortPersistedThreads(threads: ThreadSummary[]) {
-  return [...threads].sort((left, right) => right.updatedAt - left.updatedAt);
-}
-
-function normalizePersistedThreads(value: unknown): ThreadSummary[] {
-  if (!Array.isArray(value)) return [];
-
-  const byId = new Map<string, ThreadSummary>();
-  for (const item of value) {
-    if (!item || typeof item !== "object") continue;
-    const record = item as Partial<ThreadSummary>;
-    const id = typeof record.id === "string" ? record.id.trim() : "";
-    if (!id) continue;
-
-    byId.set(id, {
-      id,
-      title: typeof record.title === "string" && record.title.trim() ? record.title.trim() : DEFAULT_THREAD_TITLE,
-      updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : 0,
-      lastMessage: typeof record.lastMessage === "string" ? record.lastMessage : "",
-      messageCount: typeof record.messageCount === "number" ? record.messageCount : 0,
-      archived: record.archived === true,
-      workspaceRoot:
-        typeof record.workspaceRoot === "string" && record.workspaceRoot.trim()
-          ? record.workspaceRoot.trim()
-          : undefined,
-    });
-  }
-
-  return sortPersistedThreads(Array.from(byId.values()));
+function cloneDefaultConfig(): AppConfig {
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as AppConfig;
 }
 
 function createEmptyState(): PersistedWorkspaceState {
   return {
-    config: {
-      ...DEFAULT_CONFIG,
-      modelProviders: DEFAULT_MODEL_PROVIDERS.map((provider) => ({
-        ...provider,
-        models: provider.models.map((model) => ({ ...model })),
-      })),
-      mcpServers: DEFAULT_MCP.map((server) => ({ ...server })),
-      skills: DEFAULT_SKILLS.map((skill) => ({ ...skill })),
-      hiddenCodexSkillIds: [],
-      remoteControl: normalizeRemoteControlConfig(undefined),
-    },
-    activeThreadId: "",
-    threads: [],
+    config: cloneDefaultConfig(),
+    currentChatSessionId: "",
+    archivedChatSessionIds: [],
   };
+}
+
+function buildInitialChatTitle(message: string) {
+  const normalized = message.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "新对话";
+  }
+  return normalized.length > 48 ? `${normalized.slice(0, 48).trimEnd()}…` : normalized;
 }
 
 function normalizeBaseUrl(value: string) {
@@ -228,7 +198,6 @@ function migrateLegacyModels(legacyModels: any[], legacyActiveModelId?: string) 
     string,
     {
       provider: ModelProviderConfig;
-      legacyIds: string[];
     }
   >();
   let nextActiveModelId = "";
@@ -256,7 +225,6 @@ function migrateLegacyModels(legacyModels: any[], legacyActiveModelId?: string) 
           enabled: item?.enabled !== false,
           models: [],
         },
-        legacyIds: [],
       });
     }
 
@@ -266,7 +234,6 @@ function migrateLegacyModels(legacyModels: any[], legacyActiveModelId?: string) 
       label: String(item?.label ?? "").trim() || modelId,
       enabled: item?.enabled !== false,
     });
-    target.legacyIds.push(String(item?.id ?? ""));
 
     if (String(item?.id ?? "") === legacyActiveModelId) {
       nextActiveModelId = createRuntimeModelId(target.provider.id, modelId);
@@ -285,13 +252,23 @@ function migrateLegacyModels(legacyModels: any[], legacyActiveModelId?: string) 
 }
 
 function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefined): PersistedWorkspaceState {
-  const rawConfig = (state?.config ?? {}) as AppConfig & { customModels?: any[] };
-  const legacyModels = Array.isArray(rawConfig.customModels) ? rawConfig.customModels.filter(Boolean) : [];
+  const rawConfig = (state?.config ?? {}) as Partial<AppConfig> & {
+    customModels?: any[];
+  } & Record<string, unknown>;
+  const { customModels, workspaceRoot, ...restConfigWithLegacy } = rawConfig;
+  const legacyWorkspaceRootKey = ["open", "codeRoot"].join("");
+  const { [legacyWorkspaceRootKey]: _legacyWorkspaceRoot, ...restConfig } = restConfigWithLegacy;
+  const legacyModels = Array.isArray(customModels) ? customModels.filter(Boolean) : [];
+  const normalizedWorkspaceRoot =
+    typeof workspaceRoot === "string" && workspaceRoot.trim()
+      ? workspaceRoot
+      : DEFAULT_CONFIG.workspaceRoot;
   const migratedLegacy = migrateLegacyModels(legacyModels, rawConfig.activeModelId);
-  const hasStoredProviders = Array.isArray(rawConfig.modelProviders);
+  const cleanedConfig = restConfig as Partial<AppConfig>;
+  const hasStoredProviders = Array.isArray(cleanedConfig.modelProviders);
   const modelProviders =
     hasStoredProviders
-      ? rawConfig.modelProviders.map((item) => ({
+      ? cleanedConfig.modelProviders!.map((item) => ({
           ...item,
           kind: item.kind ?? "openai-compatible",
           enabled: item.enabled !== false,
@@ -301,14 +278,13 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
         }))
       : migratedLegacy.providers.length > 0
         ? migratedLegacy.providers
-        : DEFAULT_MODEL_PROVIDERS.map((item) => ({
-            ...item,
-            models: item.models.map((model) => ({ ...model })),
-          }));
-  const preferredActiveModelId =
-    modelProviders.some((provider) => provider.models.some((model) => createRuntimeModelId(provider.id, model.id) === rawConfig.activeModelId))
-      ? rawConfig.activeModelId
-      : migratedLegacy.activeModelId || rawConfig.activeModelId || DEFAULT_CONFIG.activeModelId;
+        : cloneDefaultConfig().modelProviders;
+  const preferredActiveModelId: string =
+    modelProviders.some((provider) =>
+      provider.models.some((model) => createRuntimeModelId(provider.id, model.id) === rawConfig.activeModelId),
+    )
+      ? String(rawConfig.activeModelId ?? "")
+      : String(migratedLegacy.activeModelId || rawConfig.activeModelId || DEFAULT_CONFIG.activeModelId);
   const activeModelId = ensureActiveModelId(modelProviders, preferredActiveModelId);
   const proxy = {
     ...DEFAULT_CONFIG.proxy,
@@ -318,8 +294,8 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
   return {
     config: {
       ...DEFAULT_CONFIG,
-      ...rawConfig,
-      defaultAgentMode: rawConfig.defaultAgentMode === "build" ? "build" : "general",
+      ...cleanedConfig,
+      workspaceRoot: normalizedWorkspaceRoot,
       activeModelId,
       appearance: {
         ...DEFAULT_CONFIG.appearance,
@@ -333,19 +309,20 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
       knowledgeBase: {
         enabled: rawConfig.knowledgeBase?.enabled === true,
         embeddingProviderId:
-          typeof rawConfig.knowledgeBase?.embeddingProviderId === "string" && rawConfig.knowledgeBase.embeddingProviderId.trim()
+          typeof rawConfig.knowledgeBase?.embeddingProviderId === "string" &&
+          rawConfig.knowledgeBase.embeddingProviderId.trim()
             ? rawConfig.knowledgeBase.embeddingProviderId.trim()
             : DEFAULT_CONFIG.knowledgeBase.embeddingProviderId,
         embeddingModel:
-          typeof rawConfig.knowledgeBase?.embeddingModel === "string" && rawConfig.knowledgeBase.embeddingModel.trim()
+          typeof rawConfig.knowledgeBase?.embeddingModel === "string" &&
+          rawConfig.knowledgeBase.embeddingModel.trim()
             ? rawConfig.knowledgeBase.embeddingModel.trim()
             : DEFAULT_CONFIG.knowledgeBase.embeddingModel,
         selectedBaseIds: Array.isArray(rawConfig.knowledgeBase?.selectedBaseIds)
           ? rawConfig.knowledgeBase.selectedBaseIds.map((item) => String(item)).filter(Boolean)
           : [],
         documentCount:
-          typeof rawConfig.knowledgeBase?.documentCount === "number" &&
-          rawConfig.knowledgeBase.documentCount > 0
+          typeof rawConfig.knowledgeBase?.documentCount === "number" && rawConfig.knowledgeBase.documentCount > 0
             ? Math.min(Math.max(Math.round(rawConfig.knowledgeBase.documentCount), 1), 10)
             : DEFAULT_CONFIG.knowledgeBase.documentCount,
         chunkSize:
@@ -361,34 +338,36 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
       mcpServers:
         Array.isArray(rawConfig.mcpServers) && rawConfig.mcpServers.length > 0
           ? rawConfig.mcpServers.map((item) => ({
-              transport: "local",
-              url: "",
-              headersJson: "{}",
-              timeoutMs: 30000,
               ...item,
+              transport: item.transport ?? "local",
+              url: item.url ?? "",
+              headersJson: item.headersJson ?? "{}",
+              timeoutMs: typeof item.timeoutMs === "number" ? item.timeoutMs : 30000,
             }))
           : DEFAULT_CONFIG.mcpServers,
       skills:
         Array.isArray(rawConfig.skills) && rawConfig.skills.length > 0
           ? rawConfig.skills.map((item) => ({
+              ...item,
               kind: item.kind === "codex" ? "codex" : "command",
               sourcePath: item.sourcePath,
               system: item.system === true,
-              ...item,
               command: item.command ?? "",
               enabled: item.enabled !== false,
             }))
           : DEFAULT_CONFIG.skills,
     },
-    activeThreadId: typeof state?.activeThreadId === "string" ? state.activeThreadId.trim() : "",
-    threads: normalizePersistedThreads(state?.threads),
+    currentChatSessionId: typeof state?.currentChatSessionId === "string" ? state.currentChatSessionId.trim() : "",
+    archivedChatSessionIds: Array.isArray(state?.archivedChatSessionIds)
+      ? state.archivedChatSessionIds.map((item) => String(item).trim()).filter(Boolean)
+      : [],
   };
 }
 
 function createModelListUrl(baseUrl: string) {
   const normalized = normalizeBaseUrl(baseUrl);
   if (!normalized) {
-    throw new Error("请先填写供应商接口地址");
+    throw new Error("请先填写提供商接口地址");
   }
   return normalized.endsWith("/models") ? normalized : `${normalized}/models`;
 }
@@ -418,7 +397,14 @@ function extractStringList(value: unknown): string[] {
     .filter(Boolean);
 }
 
-function inferCapabilities(record: Record<string, unknown>, id: string, label: string, description: string, vendor?: string, group?: string) {
+function inferCapabilities(
+  record: Record<string, unknown>,
+  id: string,
+  label: string,
+  description: string,
+  vendor?: string,
+  group?: string,
+) {
   const architecture =
     record.architecture && typeof record.architecture === "object"
       ? (record.architecture as Record<string, unknown>)
@@ -437,8 +423,8 @@ function inferCapabilities(record: Record<string, unknown>, id: string, label: s
     record.pricing && typeof record.pricing === "object"
       ? (record.pricing as Record<string, unknown>)
       : {};
-  const promptPrice = Number(pricing.prompt ?? pricing.input ?? NaN);
-  const completionPrice = Number(pricing.completion ?? pricing.output ?? NaN);
+  const promptPrice = Number(pricing.prompt ?? pricing.input ?? Number.NaN);
+  const completionPrice = Number(pricing.completion ?? pricing.output ?? Number.NaN);
 
   return inferProviderModelCapabilities({
     id,
@@ -513,36 +499,6 @@ function extractModelList(payload: unknown) {
   return normalizeProviderModels(models as ModelProviderConfig["models"]);
 }
 
-async function fetchOpenAiCompatibleModels(input: ModelProviderFetchInput) {
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-  };
-
-  if (input.apiKey.trim()) {
-    headers.Authorization = `Bearer ${input.apiKey.trim()}`;
-    headers["api-key"] = input.apiKey.trim();
-    headers["x-api-key"] = input.apiKey.trim();
-  }
-
-  const response = await fetch(createModelListUrl(input.baseUrl), {
-    method: "GET",
-    headers,
-  });
-
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(text || `模型列表拉取失败（${response.status}）`);
-  }
-
-  const payload = text ? JSON.parse(text) : {};
-  const models = extractModelList(payload);
-  if (models.length === 0) {
-    throw new Error("供应商已响应，但没有返回可用模型列表");
-  }
-
-  return models;
-}
-
 async function fetchOpenAiCompatibleModelsEnhanced(input: ModelProviderFetchInput) {
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -615,7 +571,9 @@ function parseSkillFrontmatter(content: string) {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   const frontmatter = match?.[1] ?? "";
   const clean = (value: string) => value.trim().replace(/^['"]|['"]$/g, "");
-  const name = frontmatter.match(/^name:\s*(.+)$/m)?.[1] ? clean(frontmatter.match(/^name:\s*(.+)$/m)![1]) : "";
+  const name = frontmatter.match(/^name:\s*(.+)$/m)?.[1]
+    ? clean(frontmatter.match(/^name:\s*(.+)$/m)![1])
+    : "";
   const description = frontmatter.match(/^description:\s*(.+)$/m)?.[1]
     ? clean(frontmatter.match(/^description:\s*(.+)$/m)![1])
     : "";
@@ -632,7 +590,7 @@ async function readLocalCodexSkill(skillRoot: string, system: boolean): Promise<
     return {
       id: sanitizeModelProviderId(name),
       name,
-      description: parsed.description || "Codex 本地技能",
+      description: parsed.description || "Codex local skill",
       kind: "codex",
       command: "",
       enabled: true,
@@ -780,11 +738,6 @@ async function readAttachmentInlineContent(filePath: string, mimeType: string, k
   return null;
 }
 
-function normalizeName(value: string) {
-  const trimmed = value.trim();
-  return trimmed || "untitled";
-}
-
 function filePathFromUrl(url: string) {
   if (!url.startsWith("file:")) return null;
   try {
@@ -794,321 +747,98 @@ function filePathFromUrl(url: string) {
   }
 }
 
-function makeFileAttachment(filePath: string, content: string, mimeType: string, dataUrl?: string): FileDropEntry {
-  return {
-    id: randomUUID(),
-    name: path.basename(filePath),
-    path: filePath,
-    size: Buffer.byteLength(content),
-    mimeType,
-    dataUrl,
-  };
+function isInterpreterLikeCommand(command: string) {
+  const normalized = path.basename(command.trim()).toLowerCase();
+  return [
+    "",
+    "node",
+    "node.exe",
+    "npx",
+    "npx.cmd",
+    "npm",
+    "npm.cmd",
+    "pnpm",
+    "pnpm.cmd",
+    "yarn",
+    "yarn.cmd",
+    "python",
+    "python.exe",
+    "py",
+    "py.exe",
+    "bun",
+    "bun.exe",
+  ].includes(normalized);
 }
 
-function byteLengthFromDataUrl(url: string) {
-  const [, payload = ""] = url.split(",", 2);
-  const normalized = payload.replace(/\s+/g, "");
-  const padding = normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0;
-  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function attachmentFromFilePart(part: OpencodeFilePart): Promise<FileDropEntry> {
-  const localPath =
-    part.source?.type === "file" ? part.source.path ?? filePathFromUrl(part.url) : filePathFromUrl(part.url);
-  const displayPath = localPath ?? part.filename ?? part.url;
-  let size = 0;
-
-  if (localPath) {
-    size = await stat(localPath).then((entry) => entry.size).catch(() => 0);
-  } else if (part.url.startsWith("data:")) {
-    size = byteLengthFromDataUrl(part.url);
+function hasUsableRemoteUrl(server: McpServerConfig) {
+  const rawUrl = server.url.trim();
+  if (!rawUrl) return false;
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
   }
-
-  return {
-    id: part.id,
-    name: part.filename ?? path.basename(displayPath) ?? "attachment",
-    path: displayPath,
-    size,
-    mimeType: part.mime,
-    kind: detectKind(displayPath, part.mime),
-    url: part.url,
-  };
 }
 
-function formatToolInput(input: Record<string, unknown>) {
-  if (!input || Object.keys(input).length === 0) return "";
-  return JSON.stringify(input, null, 2);
+function hasUsableLocalCommand(server: McpServerConfig) {
+  const command = server.command.trim();
+  if (!command) return false;
+  if (server.args.filter(Boolean).length > 0) return true;
+  return !isInterpreterLikeCommand(command);
 }
 
-type SessionExecutionState = {
-  busy: boolean;
-  blockedOnQuestion: boolean;
-};
-
-function isSessionActivelyRunning(state: SessionExecutionState) {
-  return state.busy || state.blockedOnQuestion;
-}
-
-async function toolMessageFromPart(
-  part: OpencodeToolPart,
-  executionState: SessionExecutionState,
-): Promise<ChatMessage> {
-  const input = formatToolInput(part.state.input);
-  const lines: string[] = [];
-  const attachments =
-    part.state.status === "completed" ? await Promise.all((part.state.attachments ?? []).map(attachmentFromFilePart)) : [];
-
-  if (input) {
-    lines.push("Input:");
-    lines.push(input);
-  }
-
-  if (part.state.status === "completed") {
-    if (part.state.output?.trim()) {
-      if (lines.length > 0) lines.push("");
-      lines.push(part.state.output.trim());
-    }
-  } else if (part.state.status === "error") {
-    if (lines.length > 0) lines.push("");
-    lines.push(part.state.error.trim());
-  } else if (part.state.status === "running") {
-    if (part.state.title?.trim()) {
-      if (lines.length > 0) lines.push("");
-      lines.push(part.state.title.trim());
-    } else if (lines.length === 0) {
-      lines.push("Tool is running...");
-    }
-  } else if (lines.length === 0) {
-    lines.push("Tool call queued.");
-  }
-
-  const createdAt =
-    part.state.status === "pending"
-      ? Date.now()
-      : part.state.status === "running"
-        ? part.state.time.start
-        : part.state.time.start;
-
-  return {
-    id: part.callID,
-    role: "tool",
-    toolName: part.tool,
-    text: lines.join("\n"),
-    createdAt,
-    status:
-      part.state.status === "completed"
-        ? "done"
-        : part.state.status === "error"
-          ? "error"
-          : isSessionActivelyRunning(executionState)
-            ? "loading"
-            : "paused",
-    attachments,
-  };
-}
-
-function baseMessageText(parts: OpencodePart[]) {
-  const sanitizeMessageText = (value: string) =>
-    value
-      .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, " ")
-      .replace(/<\/?system-reminder>/gi, " ")
-      .replace(/[ \t]+\n/g, "\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-  const textParts = parts.filter(
-    (part): part is Extract<OpencodePart, { type: "text" }> => part.type === "text" && !part.synthetic,
-  );
-  const agentParts = parts.filter(
-    (part): part is Extract<OpencodePart, { type: "agent" }> => part.type === "agent",
-  );
-  const subtaskParts = parts.filter(
-    (part): part is Extract<OpencodePart, { type: "subtask" }> => part.type === "subtask",
-  );
-  const blocks: string[] = [];
-
-  if (textParts.length > 0) {
-    blocks.push(
-      textParts
-        .map((part) => sanitizeMessageText(part.text))
-        .filter(Boolean)
-        .join("\n\n")
-        .trim(),
-    );
-  }
-
-  if (agentParts.length > 0) {
-    blocks.push(agentParts.map((part) => `@${part.name}`).join("\n"));
-  }
-
-  if (subtaskParts.length > 0) {
-    blocks.push(
-      subtaskParts
-        .map((part) => `${part.description}\n${part.prompt}`.replace(/\s+/g, " ").trim())
-        .filter(Boolean)
-        .join("\n\n"),
-    );
-  }
-
-  return sanitizeMessageText(blocks.filter(Boolean).join("\n\n").trim());
-}
-
-function messageTimestamp(message: OpencodeSessionMessage) {
-  if (message.info.role === "assistant") {
-    return message.info.time.completed ?? message.info.time.created;
-  }
-  return message.info.time.created;
-}
-
-async function convertMessages(
-  messages: OpencodeSessionMessage[],
-  executionState: SessionExecutionState,
-): Promise<ChatMessage[]> {
-  const result: ChatMessage[] = [];
-
-  for (const message of messages) {
-    const isPendingAssistant =
-      message.info.role === "assistant" &&
-      !message.info.error &&
-      message.info.time.completed === undefined;
-    const fileAttachments = await Promise.all(
-      message.parts
-        .filter((part): part is OpencodeFilePart => part.type === "file")
-        .map(attachmentFromFilePart),
-    );
-
-    for (const part of message.parts) {
-      if (part.type === "tool") {
-        result.push(await toolMessageFromPart(part, executionState));
-      }
+function getMcpStatuses(config: AppConfig): McpServerStatus[] {
+  return config.mcpServers.map((server) => {
+    const name = sanitizeMcpName(server.name || server.id);
+    if (!server.enabled) {
+      return {
+        name,
+        status: "disabled" as const,
+      };
     }
 
-    const text = baseMessageText(message.parts) || message.info.error?.data?.message || "";
-    if (!text && fileAttachments.length === 0 && message.info.role === "assistant" && !isPendingAssistant) {
-      continue;
-    }
+    const valid =
+      server.transport === "remote" ? hasUsableRemoteUrl(server) : hasUsableLocalCommand(server);
 
-    result.push({
-      id: message.info.id,
-      role: message.info.role,
-      text,
-      createdAt: messageTimestamp(message),
-      attachments: fileAttachments,
-      status:
-        message.info.error
-          ? "error"
-          : isPendingAssistant
-            ? isSessionActivelyRunning(executionState)
-              ? "loading"
-              : "paused"
-            : "done",
-    });
-  }
-
-  if (executionState.busy && !result.some((message) => message.status === "loading")) {
-    const anchorMessage = [...messages].reverse().find((message) => message.info.role === "user") ?? messages.at(-1);
-    result.push({
-      id: `pending:${anchorMessage?.info.id ?? "assistant"}`,
-      role: "assistant",
-      text: "",
-      createdAt: anchorMessage ? messageTimestamp(anchorMessage) + 1 : Date.now(),
-      status: "loading",
-    });
-  }
-
-  const sorted = result.sort((left, right) => left.createdAt - right.createdAt);
-  const deduped: ChatMessage[] = [];
-
-  for (const message of sorted) {
-    const duplicateUserIndex = deduped.findLastIndex(
-      (candidate) =>
-        candidate.role === "user" &&
-        candidate.status === "done" &&
-        message.role === "user" &&
-        message.status === "done" &&
-        candidate.text.trim() &&
-        candidate.text.trim() === message.text.trim() &&
-        Math.abs(message.createdAt - candidate.createdAt) <= 15_000,
-    );
-    const retryPlaceholders =
-      duplicateUserIndex >= 0
-        ? deduped.slice(duplicateUserIndex + 1)
-        : [];
-    const isRetryDuplicate =
-      duplicateUserIndex >= 0 &&
-      retryPlaceholders.length > 0 &&
-      retryPlaceholders.every(
-        (candidate) =>
-          candidate.role === "assistant" &&
-          !candidate.text.trim() &&
-          (candidate.status === "loading" || candidate.status === "paused"),
-      );
-
-    if (isRetryDuplicate) {
-      const placeholder = deduped[duplicateUserIndex + 1];
-      if (
-        placeholder?.role === "assistant" &&
-        !placeholder.text.trim() &&
-        (placeholder.status === "loading" || placeholder.status === "paused")
-      ) {
-        deduped.splice(duplicateUserIndex + 1, 1);
-      }
-      continue;
-    }
-
-    deduped.push(message);
-  }
-
-  return deduped;
+    return {
+      name,
+      status: valid ? ("connected" as const) : ("failed" as const),
+      error: valid ? undefined : "MCP server configuration is incomplete.",
+    };
+  });
 }
 
 export class WorkspaceService {
-  private readonly runtime = new OpencodeRuntime();
+  private readonly runtime: WorkspaceRuntime;
   private readonly knowledge: KnowledgeService;
-  private activeThreadId: string = "";
-  private threadSessionMap = new Map<string, string>();
-  private threadSummaryCache = new Map<string, ThreadSummary>();
 
-  constructor(private readonly statePath: string) {
+  constructor(private readonly statePath: string, runtime: WorkspaceRuntime = new OpencodeRuntime()) {
+    this.runtime = runtime;
     this.knowledge = new KnowledgeService(path.join(path.dirname(statePath), "knowledge"));
   }
 
   async bootstrap(): Promise<BootstrapPayload> {
     const state = await this.loadState();
-    const [availableSkills, availableAgents, mcpStatuses] = await Promise.all([
+    const [availableSkills, mcpStatuses, chatSessions, currentChat] = await Promise.all([
       this.runtime.listSkills(state.config).catch(() => []),
-      this.runtime.listAgents(state.config).catch(() => []),
-      this.runtime.listMcpStatuses(state.config).catch(() => []),
+      this.runtime.listMcpStatuses(state.config).catch(() => getMcpStatuses(state.config)),
+      this.buildChatSessionSummaries(state.config),
+      this.buildCurrentChatState(state.config, state.currentChatSessionId),
     ]);
 
-    const threads = await this.listThreads();
-    const currentThread = this.activeThreadId ? await this.getThread(this.activeThreadId).catch(() => null) : null;
-    const pendingQuestions = await this.runtime.listQuestions(state.config).catch(() => []);
+    if (state.currentChatSessionId && currentChat.sessionId === null) {
+      state.currentChatSessionId = "";
+      await this.saveState(state);
+    }
 
     return {
       snapshotAt: Date.now(),
       config: state.config,
-      threads,
-      activeThreadId: this.activeThreadId,
-      currentThread,
       availableSkills,
-      availableAgents,
       mcpStatuses,
-      pendingQuestions: pendingQuestions.map((q) => ({
-        id: q.id,
-        sessionID: q.sessionID,
-        questions: q.questions.map((item) => ({
-          header: item.header,
-          question: item.question,
-          options: item.options,
-          multiple: item.multiple,
-          custom: item.custom,
-        })),
-        tool: q.tool,
-      })),
+      chatSessions,
+      currentChat,
     };
   }
 
@@ -1121,72 +851,87 @@ export class WorkspaceService {
     await this.runtime.dispose();
   }
 
-  private rememberThreadSummary(summary: ThreadSummary) {
-    const previous = this.threadSummaryCache.get(summary.id);
-    const normalized = {
-      ...summary,
-      title: formatThreadTitle(summary.title, previous?.title || summary.lastMessage || FALLBACK_THREAD_TITLE),
-    };
-    this.threadSummaryCache.set(summary.id, normalized);
-    return normalized;
-  }
+  private async buildCurrentChatState(config: AppConfig, sessionId: string): Promise<CurrentChatState> {
+    if (!sessionId) {
+      return createEmptyCurrentChatState({
+        workspaceRoot: config.workspaceRoot || undefined,
+      });
+    }
 
-  private syncPersistedThread(state: PersistedWorkspaceState, summary: ThreadSummary | ThreadRecord) {
-    const normalized = this.rememberThreadSummary({
-      id: summary.id,
-      title: summary.title || DEFAULT_THREAD_TITLE,
-      updatedAt: summary.updatedAt,
-      lastMessage: summary.lastMessage || "",
-      messageCount: summary.messageCount,
-      archived: summary.archived,
-      workspaceRoot: summary.workspaceRoot,
-    });
-    const nextThreads = state.threads.filter((thread) => thread.id !== normalized.id);
-    nextThreads.push(normalized);
-    state.threads = sortPersistedThreads(nextThreads);
-    return normalized;
-  }
+    try {
+      const [session, messages, statuses, questions] = await Promise.all([
+        this.runtime.getSession(config, sessionId),
+        this.runtime.listMessages(config, sessionId),
+        this.runtime.listSessionStatuses(config).catch(() => ({} as Record<string, OpencodeSessionStatus>)),
+        this.runtime.listQuestions(config).catch(() => []),
+      ]);
+      const executionState = {
+        busy: statuses[sessionId]?.type === "busy" || statuses[sessionId]?.type === "retry",
+        blockedOnQuestion: questions.some((question) => question.sessionID === sessionId),
+      };
 
-  private removePersistedThread(state: PersistedWorkspaceState, threadId: string) {
-    state.threads = state.threads.filter((thread) => thread.id !== threadId);
-    if (state.activeThreadId === threadId) {
-      state.activeThreadId = "";
+      return createEmptyCurrentChatState({
+        sessionId: session.id,
+        title: session.title.trim() || "当前会话",
+        messages: await convertSessionMessages(messages, executionState),
+        busy: executionState.busy,
+        blockedOnQuestion: executionState.blockedOnQuestion,
+        workspaceRoot: session.directory || config.workspaceRoot || undefined,
+      });
+    } catch {
+      return createEmptyCurrentChatState({
+        workspaceRoot: config.workspaceRoot || undefined,
+      });
     }
   }
 
-  async getThreadProgress(threadId: string) {
+  private async buildChatSessionSummaries(config: AppConfig): Promise<ChatSessionSummary[]> {
     const state = await this.loadState();
-    const sessionId = this.threadSessionMap.get(threadId) || threadId;
-    const [statuses, questions] = await Promise.all([
-      this.runtime.listSessionStatuses(state.config).catch(() => ({})),
-      this.runtime.listQuestions(state.config).catch(() => []),
-    ]);
-    const sessionStatus = statuses[sessionId];
-    return {
-      busy: sessionStatus?.type === "busy" || sessionStatus?.type === "retry",
-      blockedOnQuestion: questions.some((question) => question.sessionID === sessionId),
-    };
+    const archivedIds = new Set(state.archivedChatSessionIds);
+    try {
+      const sessions = await this.runtime.listSessions(config);
+      return sessions.map((session) => ({
+        id: session.id,
+        title: session.title.trim() || "New chat",
+        createdAt: session.time.created,
+        updatedAt: session.time.updated,
+        archivedAt: session.time.archived ?? (archivedIds.has(session.id) ? session.time.updated : undefined),
+        workspaceRoot: session.directory || config.workspaceRoot || undefined,
+      }));
+    } catch {
+      return [];
+    }
   }
 
-  async runSkill(input: SkillRunInput): Promise<SkillRunResult> {
-    const state = await this.loadState();
+  private async createCurrentChatSession(state: PersistedWorkspaceState, title: string) {
+    const session = await this.runtime.createSession(state.config, title);
+    state.currentChatSessionId = session.id;
+    await this.saveState(state);
+    return session.id;
+  }
 
-    // Use active thread or create a new one
-    let threadId = input.threadId || this.activeThreadId;
-    if (!threadId) {
-      const payload = await this.createThread("新会话");
-      threadId = payload.activeThreadId;
+  private async ensureCurrentChatSession(state: PersistedWorkspaceState) {
+    if (state.currentChatSessionId) {
+      return state.currentChatSessionId;
     }
 
-    const sessionId = this.threadSessionMap.get(threadId) || threadId;
-    await this.runtime.commandAsync(state.config, sessionId, input.skillId, input.prompt || "", []);
-
-    const thread = await this.getThread(threadId);
-    return { thread };
+    const session = await this.runtime.createSession(state.config, "当前会话");
+    state.currentChatSessionId = session.id;
+    await this.saveState(state);
+    return session.id;
   }
 
   async updateConfig(patch: Partial<AppConfig>) {
     const state = await this.loadState();
+    const nextWorkspaceRoot =
+      typeof patch.workspaceRoot === "string" ? patch.workspaceRoot.trim() : state.config.workspaceRoot.trim();
+    const workspaceChanged = nextWorkspaceRoot !== state.config.workspaceRoot.trim();
+
+    if (workspaceChanged && state.currentChatSessionId) {
+      await this.runtime.abortSession(state.config, state.currentChatSessionId).catch(() => undefined);
+      state.currentChatSessionId = "";
+    }
+
     state.config = {
       ...state.config,
       ...patch,
@@ -1221,9 +966,7 @@ export class WorkspaceService {
         await rm(target.sourcePath, { recursive: true, force: true }).catch(() => undefined);
       }
       if (target.system === true) {
-        state.config.hiddenCodexSkillIds = Array.from(
-          new Set([...state.config.hiddenCodexSkillIds, target.id]),
-        );
+        state.config.hiddenCodexSkillIds = Array.from(new Set([...state.config.hiddenCodexSkillIds, target.id]));
       }
     }
 
@@ -1234,7 +977,7 @@ export class WorkspaceService {
 
   async fetchProviderModels(input: ModelProviderFetchInput): Promise<ModelProviderFetchResult> {
     if (input.kind !== "openai-compatible") {
-      throw new Error("当前仅支持 OpenAI 兼容供应商自动拉取模型列表");
+      throw new Error("当前仅支持 OpenAI 兼容提供商自动拉取模型列表");
     }
 
     return {
@@ -1301,7 +1044,13 @@ export class WorkspaceService {
     return await Promise.all(filePaths.map((filePath) => this.readSelectedFile(filePath)));
   }
 
-  async readPreview(payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }): Promise<FilePreviewPayload> {
+  async readPreview(payload: {
+    path?: string;
+    url?: string;
+    content?: string;
+    kind?: string;
+    title?: string;
+  }): Promise<FilePreviewPayload> {
     if (payload.content) {
       return {
         title: payload.title ?? "Preview",
@@ -1320,12 +1069,12 @@ export class WorkspaceService {
         mimeType === "application/pdf"
           ? "pdf"
           : mimeType.startsWith("text/html")
-          ? "web"
-          : mimeType.startsWith("text/markdown")
-            ? "markdown"
-            : mimeType.startsWith("text/")
-              ? "text"
-              : "binary";
+            ? "web"
+            : mimeType.startsWith("text/markdown")
+              ? "markdown"
+              : mimeType.startsWith("text/")
+                ? "text"
+                : "binary";
 
       if (kind === "pdf") {
         return {
@@ -1370,7 +1119,11 @@ export class WorkspaceService {
     }
 
     const directPath =
-      payload.path && !payload.path.startsWith("file:") && !payload.path.startsWith("data:") && !payload.path.startsWith("http://") && !payload.path.startsWith("https://")
+      payload.path &&
+      !payload.path.startsWith("file:") &&
+      !payload.path.startsWith("data:") &&
+      !payload.path.startsWith("http://") &&
+      !payload.path.startsWith("https://")
         ? payload.path
         : null;
     const resolvedPath = directPath ?? (payload.url ? filePathFromUrl(payload.url) : null);
@@ -1433,398 +1186,113 @@ export class WorkspaceService {
   async listObservedTools(): Promise<WorkspaceToolCatalog> {
     return {
       fetchedAt: Date.now(),
-      tools: Object.entries(BUILTIN_TOOL_DESCRIPTIONS).map(([name, description]) => ({
-        id: `runtime:${name}`,
-        name,
-        description,
-        source: "runtime" as const,
-        origin: "运行时工具",
-        observed: false,
-      })),
+      tools: [],
     };
-  }
-
-  async listThreads(): Promise<ThreadSummary[]> {
-    const state = await this.loadState();
-    const previousSnapshot = JSON.stringify({
-      activeThreadId: state.activeThreadId,
-      threads: state.threads,
-    });
-    const managedSessions = await this.runtime.listSessions(state.config).catch(() => null);
-
-    if (!managedSessions) {
-      return sortPersistedThreads(state.threads);
-    }
-
-    if (state.threads.length === 0 && managedSessions.length > 0) {
-      const latestSession = [...managedSessions].sort((left, right) => right.time.updated - left.time.updated)[0];
-      if (latestSession) {
-        this.syncPersistedThread(state, {
-          id: latestSession.id,
-          title: formatThreadTitle(latestSession.title, ""),
-          updatedAt: latestSession.time.updated,
-          lastMessage: "",
-          messageCount: 0,
-          archived: !!latestSession.time.archived,
-          workspaceRoot: latestSession.directory || undefined,
-        });
-        if (!state.activeThreadId) {
-          state.activeThreadId = latestSession.id;
-        }
-      }
-    }
-
-    const managedSessionsById = new Map(managedSessions.map((session) => [session.id, session] as const));
-    const managedSummaries = sortPersistedThreads(
-      state.threads
-        .map((storedThread) => {
-          const session = managedSessionsById.get(storedThread.id);
-          if (!session) {
-            return null;
-          }
-          this.threadSessionMap.set(session.id, session.id);
-          const cached = this.threadSummaryCache.get(session.id);
-          return this.rememberThreadSummary({
-            id: session.id,
-            title: formatThreadTitle(
-              session.title,
-              cached?.title || storedThread.title || storedThread.lastMessage || cached?.lastMessage || "",
-            ),
-            updatedAt: Math.max(session.time.updated, cached?.updatedAt ?? 0, storedThread.updatedAt),
-            lastMessage: cached?.lastMessage || storedThread.lastMessage || "",
-            messageCount: Math.max(cached?.messageCount ?? 0, storedThread.messageCount),
-            archived: !!session.time.archived,
-            workspaceRoot: session.directory || cached?.workspaceRoot || storedThread.workspaceRoot,
-          });
-        })
-        .filter((thread): thread is ThreadSummary => Boolean(thread)),
-    );
-
-    state.threads = managedSummaries;
-    if (state.activeThreadId && !managedSummaries.some((thread) => thread.id === state.activeThreadId)) {
-      state.activeThreadId = "";
-    }
-    if (!this.activeThreadId && state.activeThreadId) {
-      this.activeThreadId = state.activeThreadId;
-    }
-
-    const nextSnapshot = JSON.stringify({
-      activeThreadId: state.activeThreadId,
-      threads: state.threads,
-    });
-    if (previousSnapshot !== nextSnapshot) {
-      await this.saveState(state);
-    }
-
-    return managedSummaries;
-    const sessions = await this.runtime.listSessions(state.config).catch(() => []);
-
-    const summaries = sessions.map((session) => {
-      this.threadSessionMap.set(session.id, session.id);
-      const cached = this.threadSummaryCache.get(session.id);
-      return this.rememberThreadSummary({
-        id: session.id,
-        title: session.title || cached?.title || DEFAULT_THREAD_TITLE,
-        updatedAt: Math.max(session.time.updated, cached?.updatedAt ?? 0),
-        lastMessage: cached?.lastMessage || "",
-        messageCount: cached?.messageCount ?? 0,
-        archived: !!session.time.archived,
-        workspaceRoot: session.directory || cached?.workspaceRoot,
-      });
-    });
-
-    return summaries.sort((left, right) => right.updatedAt - left.updatedAt);
-
-    return sessions.map((session) => {
-      this.threadSessionMap.set(session.id, session.id);
-      return {
-        id: session.id,
-        title: session.title || "新会话",
-        updatedAt: session.time.updated,
-        lastMessage: "",
-        messageCount: 0,
-        archived: !!session.time.archived,
-        workspaceRoot: session.directory || undefined,
-      };
-    });
-  }
-
-  async getThread(threadId: string): Promise<ThreadRecord> {
-    const state = await this.loadState();
-    const sessionId = this.threadSessionMap.get(threadId) || threadId;
-
-    const [session, messages, statuses, questions] = await Promise.all([
-      this.runtime.getSession(state.config, sessionId),
-      this.runtime.listMessages(state.config, sessionId),
-      this.runtime.listSessionStatuses(state.config).catch(() => ({})),
-      this.runtime.listQuestions(state.config).catch(() => []),
-    ]);
-
-    const sessionStatus = statuses[sessionId];
-    const executionState: SessionExecutionState = {
-      busy: sessionStatus?.type === "busy" || sessionStatus?.type === "retry",
-      blockedOnQuestion: questions.some((question) => question.sessionID === sessionId),
-    };
-
-    const chatMessages = await convertMessages(messages, executionState);
-    const derivedTitle = deriveThreadTitleFromMessages(chatMessages);
-    const lastMessage =
-      [...chatMessages]
-        .reverse()
-        .find((message) => message.text.trim())?.text || "";
-    const thread: ThreadRecord = {
-      id: session.id,
-      title: formatThreadTitle(session.title, derivedTitle || lastMessage),
-      updatedAt: session.time.updated,
-      lastMessage,
-      messageCount: chatMessages.length,
-      archived: !!session.time.archived,
-      workspaceRoot: session.directory || undefined,
-      messages: chatMessages,
-    };
-    const previousSnapshot = JSON.stringify({
-      activeThreadId: state.activeThreadId,
-      threads: state.threads,
-    });
-    this.threadSessionMap.set(thread.id, session.id);
-    this.syncPersistedThread(state, thread);
-    if (state.activeThreadId === threadId) {
-      state.activeThreadId = thread.id;
-    }
-    const nextSnapshot = JSON.stringify({
-      activeThreadId: state.activeThreadId,
-      threads: state.threads,
-    });
-    if (previousSnapshot !== nextSnapshot) {
-      await this.saveState(state);
-    }
-    return thread;
-
-    return {
-      id: session.id,
-      title: session.title || "新会话",
-      updatedAt: session.time.updated,
-      lastMessage: chatMessages.length > 0 ? chatMessages[chatMessages.length - 1]?.text || "" : "",
-      messageCount: chatMessages.length,
-      archived: !!session.time.archived,
-      workspaceRoot: session.directory || undefined,
-      messages: chatMessages,
-    };
-  }
-
-  async createThread(title?: string): Promise<BootstrapPayload> {
-    const state = await this.loadState();
-    const previousSnapshot = JSON.stringify({
-      activeThreadId: state.activeThreadId,
-      threads: state.threads,
-    });
-    const session = await this.runtime.createSession(state.config, title?.trim() || DEFAULT_THREAD_TITLE);
-
-    this.threadSessionMap.set(session.id, session.id);
-    this.activeThreadId = session.id;
-
-    const currentThread: ThreadRecord = {
-      id: session.id,
-      title: session.title || "新会话",
-      updatedAt: session.time.updated,
-      lastMessage: "",
-      messageCount: 0,
-      archived: false,
-      workspaceRoot: session.directory || undefined,
-      messages: [],
-    };
-    this.rememberThreadSummary({
-      id: currentThread.id,
-      title: currentThread.title,
-      updatedAt: currentThread.updatedAt,
-      lastMessage: currentThread.lastMessage,
-      messageCount: currentThread.messageCount,
-      archived: currentThread.archived,
-      workspaceRoot: currentThread.workspaceRoot,
-    });
-    state.activeThreadId = currentThread.id;
-    this.syncPersistedThread(state, currentThread);
-    const nextSnapshot = JSON.stringify({
-      activeThreadId: state.activeThreadId,
-      threads: state.threads,
-    });
-    if (previousSnapshot !== nextSnapshot) {
-      await this.saveState(state);
-    }
-
-    return await this.bootstrap();
-  }
-
-  async createBackgroundThread(title?: string): Promise<ThreadRecord> {
-    const state = await this.loadState();
-    const previousSnapshot = JSON.stringify({
-      activeThreadId: state.activeThreadId,
-      threads: state.threads,
-    });
-    const session = await this.runtime.createSession(state.config, title?.trim() || DEFAULT_THREAD_TITLE);
-
-    this.threadSessionMap.set(session.id, session.id);
-
-    const thread: ThreadRecord = {
-      id: session.id,
-      title: session.title || DEFAULT_THREAD_TITLE,
-      updatedAt: session.time.updated,
-      lastMessage: "",
-      messageCount: 0,
-      archived: false,
-      workspaceRoot: session.directory || undefined,
-      messages: [],
-    };
-    this.rememberThreadSummary({
-      id: thread.id,
-      title: thread.title,
-      updatedAt: thread.updatedAt,
-      lastMessage: thread.lastMessage,
-      messageCount: thread.messageCount,
-      archived: thread.archived,
-      workspaceRoot: thread.workspaceRoot,
-    });
-    this.syncPersistedThread(state, thread);
-    const nextSnapshot = JSON.stringify({
-      activeThreadId: state.activeThreadId,
-      threads: state.threads,
-    });
-    if (previousSnapshot !== nextSnapshot) {
-      await this.saveState(state);
-    }
-    return thread;
-  }
-
-  async setActiveThread(threadId: string): Promise<ThreadRecord> {
-    const thread = await this.getThread(threadId);
-    const state = await this.loadState();
-    const previousSnapshot = JSON.stringify({
-      activeThreadId: state.activeThreadId,
-      threads: state.threads,
-    });
-    this.activeThreadId = thread.id;
-    state.activeThreadId = thread.id;
-    this.syncPersistedThread(state, thread);
-    const nextSnapshot = JSON.stringify({
-      activeThreadId: state.activeThreadId,
-      threads: state.threads,
-    });
-    if (previousSnapshot !== nextSnapshot) {
-      await this.saveState(state);
-    }
-    return thread;
-  }
-
-  async resetThread(threadId: string): Promise<ThreadRecord> {
-    const state = await this.loadState();
-    const sessionId = this.threadSessionMap.get(threadId) || threadId;
-
-    await this.runtime.deleteSession(state.config, sessionId);
-    const newSession = await this.runtime.createSession(state.config, "新会话");
-
-    this.threadSessionMap.set(threadId, newSession.id);
-    return await this.getThread(threadId);
-  }
-
-  async archiveThread(threadId: string, archived: boolean): Promise<BootstrapPayload> {
-    // OpenCode runtime doesn't have a direct archive API
-    // We'll need to track this in our own state or skip for now
-    // For now, this is a no-op
-    return await this.bootstrap();
-  }
-
-  async deleteThread(threadId: string): Promise<BootstrapPayload> {
-    const state = await this.loadState();
-    const sessionId = this.threadSessionMap.get(threadId) || threadId;
-
-    await this.runtime.deleteSession(state.config, sessionId);
-    this.threadSessionMap.delete(threadId);
-    this.threadSummaryCache.delete(threadId);
-    this.removePersistedThread(state, threadId);
-
-    if (this.activeThreadId === threadId) {
-      this.activeThreadId = "";
-    }
-    if (state.activeThreadId === threadId) {
-      state.activeThreadId = "";
-    }
-    await this.saveState(state);
-
-    return await this.bootstrap();
   }
 
   async sendMessage(payload: SendMessageInput): Promise<SendMessageResult> {
     const state = await this.loadState();
-    const threadId = payload.threadId || this.activeThreadId;
-
-    if (!threadId) {
-      throw new Error("No active thread");
+    const message = payload.message.trim();
+    if (!message && payload.attachments.length === 0) {
+      return {
+        currentChat: await this.buildCurrentChatState(state.config, state.currentChatSessionId),
+      };
     }
 
-    const sessionId = this.threadSessionMap.get(threadId) || threadId;
-    const attachments = payload.attachments || [];
-
-    await this.runtime.promptAsync(state.config, sessionId, payload.message, attachments);
-    const thread = await this.getThread(threadId);
-    return { thread };
+    const sessionId = state.currentChatSessionId || (await this.createCurrentChatSession(state, buildInitialChatTitle(message)));
+    await this.runtime.promptAsync(state.config, sessionId, message, payload.attachments);
+    return {
+      currentChat: await this.buildCurrentChatState(state.config, sessionId),
+    };
   }
 
-  async abortThread(threadId?: string): Promise<BootstrapPayload> {
+  async resetCurrentChat() {
     const state = await this.loadState();
-    const targetThreadId = threadId || this.activeThreadId;
+    if (state.currentChatSessionId) {
+      state.currentChatSessionId = "";
+      await this.saveState(state);
+    }
+    return await this.bootstrap();
+  }
 
-    if (targetThreadId) {
-      const sessionId = this.threadSessionMap.get(targetThreadId) || targetThreadId;
-      let forceRestart = false;
+  async selectCurrentChatSession(sessionId: string) {
+    const state = await this.loadState();
+    state.currentChatSessionId = sessionId.trim();
+    await this.saveState(state);
+    return await this.bootstrap();
+  }
 
-      try {
-        await this.runtime.abortSession(state.config, sessionId);
-      } catch {
-        forceRestart = true;
-      }
-
-      if (!forceRestart) {
-        const deadline = Date.now() + 600;
-        while (Date.now() < deadline) {
-          const statuses = await this.runtime.listSessionStatuses(state.config).catch(() => ({}));
-          const sessionStatus = statuses[sessionId];
-          const busy = sessionStatus?.type === "busy" || sessionStatus?.type === "retry";
-          if (!busy) {
-            break;
-          }
-          await delay(50);
-        }
-
-        const statuses = await this.runtime.listSessionStatuses(state.config).catch(() => ({}));
-        const sessionStatus = statuses[sessionId];
-        forceRestart = sessionStatus?.type === "busy" || sessionStatus?.type === "retry";
-      }
-
-      if (forceRestart) {
-        await this.runtime.dispose();
-      }
+  async archiveChatSession(sessionId: string) {
+    const state = await this.loadState();
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      return await this.bootstrap();
     }
 
+    state.archivedChatSessionIds = Array.from(new Set([...state.archivedChatSessionIds, normalizedSessionId]));
+    if (state.currentChatSessionId === normalizedSessionId) {
+      state.currentChatSessionId = "";
+    }
+    await this.saveState(state);
     return await this.bootstrap();
   }
 
-  async replyQuestion(requestId: string, sessionId: string, answers: string[][]): Promise<BootstrapPayload> {
+  async unarchiveChatSession(sessionId: string) {
     const state = await this.loadState();
-    await this.runtime.replyQuestion(state.config, requestId, answers);
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      return await this.bootstrap();
+    }
+
+    state.archivedChatSessionIds = state.archivedChatSessionIds.filter((item) => item !== normalizedSessionId);
+    await this.saveState(state);
     return await this.bootstrap();
   }
 
-  async rejectQuestion(requestId: string, sessionId: string): Promise<BootstrapPayload> {
+  async deleteChatSession(sessionId: string) {
     const state = await this.loadState();
-    await this.runtime.rejectQuestion(state.config, requestId);
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      return await this.bootstrap();
+    }
+
+    await this.runtime.deleteSession?.(state.config, normalizedSessionId);
+    state.archivedChatSessionIds = state.archivedChatSessionIds.filter((item) => item !== normalizedSessionId);
+    if (state.currentChatSessionId === normalizedSessionId) {
+      state.currentChatSessionId = "";
+    }
+    await this.saveState(state);
     return await this.bootstrap();
   }
 
-  async setThreadWorkspace(threadId: string, workspaceRoot: string): Promise<BootstrapPayload> {
-    // OpenCode runtime doesn't have a direct API to change workspace after creation
-    // This would need to be tracked in our own state or implemented in runtime
-    // For now, this is a no-op
+  async abortCurrentChat() {
+    const state = await this.loadState();
+    if (state.currentChatSessionId) {
+      await this.runtime.abortSession(state.config, state.currentChatSessionId).catch(() => undefined);
+    }
     return await this.bootstrap();
+  }
+
+  async getCurrentChatProgress() {
+    const state = await this.loadState();
+    if (!state.currentChatSessionId) {
+      return {
+        busy: false,
+        blockedOnQuestion: false,
+      };
+    }
+
+    const [statuses, questions] = await Promise.all([
+      this.runtime.listSessionStatuses(state.config).catch(() => ({} as Record<string, OpencodeSessionStatus>)),
+      this.runtime.listQuestions(state.config).catch(() => []),
+    ]);
+
+    return {
+      busy:
+        statuses[state.currentChatSessionId]?.type === "busy" ||
+        statuses[state.currentChatSessionId]?.type === "retry",
+      blockedOnQuestion: questions.some((question) => question.sessionID === state.currentChatSessionId),
+    };
   }
 
   private async readSelectedFile(filePath: string): Promise<FileDropEntry> {
@@ -1834,11 +1302,14 @@ export class WorkspaceService {
 
     if (kind === "image") {
       const buffer = await readFile(filePath);
-      const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
       return {
-        ...makeFileAttachment(filePath, buffer.toString("base64"), mimeType, dataUrl),
-        kind,
+        id: randomUUID(),
+        name: path.basename(filePath),
+        path: filePath,
         size,
+        mimeType,
+        kind,
+        dataUrl: `data:${mimeType};base64,${buffer.toString("base64")}`,
       };
     }
 
@@ -1871,18 +1342,20 @@ export class WorkspaceService {
 
   private async loadState(): Promise<PersistedWorkspaceState> {
     const fallback = createEmptyState();
-    const state = await readJsonFile<Partial<PersistedWorkspaceState>>(this.statePath, fallback);
-    const normalized = normalizeState(state);
+    const rawState = await readJsonFile<any>(this.statePath, fallback);
+    const normalized = normalizeState(rawState);
     const synced = await syncManagedCodexSkills(this.statePath, normalized);
-    if (JSON.stringify(state) !== JSON.stringify(synced)) {
+    if (
+      JSON.stringify({
+        config: rawState?.config ?? null,
+        currentChatSessionId: rawState?.currentChatSessionId ?? "",
+      }) !==
+      JSON.stringify({
+        config: synced.config,
+        currentChatSessionId: synced.currentChatSessionId,
+      })
+    ) {
       await this.saveState(synced);
-    }
-    if (!this.activeThreadId && synced.activeThreadId) {
-      this.activeThreadId = synced.activeThreadId;
-    }
-    for (const thread of synced.threads) {
-      this.threadSessionMap.set(thread.id, thread.id);
-      this.threadSummaryCache.set(thread.id, thread);
     }
     return synced;
   }

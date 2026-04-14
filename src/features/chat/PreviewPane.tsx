@@ -62,13 +62,13 @@ export function PreviewPane({
         </span>
         <strong>
           {officeDocument
-            ? "Office files are not embedded yet"
-            : "This file type is not available for inline preview"}
+            ? "Office 文件暂不支持内嵌预览"
+            : "这种文件类型暂不支持内联预览"}
         </strong>
         <p>
           {officeDocument
-            ? "Use the system app for now, or plug in an Office viewer later if you want richer inline rendering."
-            : "Binary content now falls back to a safe placeholder instead of rendering unreadable text."}
+            ? "目前请先使用系统应用打开；如果后续需要更丰富的内联渲染，可以再接入 Office 预览器。"
+            : "二进制内容目前会回退为安全占位状态，避免渲染不可读文本。"}
         </p>
         {externalPayload ? (
           <button
@@ -76,7 +76,7 @@ export function PreviewPane({
             onClick={() => onOpenExternal(externalPayload)}
             type="button"
           >
-            {isRemote ? "Open in browser" : "Open in system app"}
+            {isRemote ? "在浏览器中打开" : "在系统应用中打开"}
           </button>
         ) : null}
       </section>
@@ -90,8 +90,8 @@ export function PreviewPane({
           <span className={clsx("preview-empty-badge", `tone-${presentation.tone}`)}>
             {presentation.badge}
           </span>
-          <strong>Preparing preview</strong>
-          <p>Reading the file and selecting the best renderer for this content...</p>
+          <strong>正在准备预览</strong>
+          <p>正在读取文件并为当前内容选择最合适的渲染方式...</p>
         </section>
       );
     }
@@ -112,8 +112,8 @@ export function PreviewPane({
               <span className={clsx("preview-empty-badge", `tone-${presentation.tone}`)}>
                 {presentation.badge}
               </span>
-              <strong>Loading PDF viewer</strong>
-              <p>The document shell is ready. The PDF renderer is loading on demand.</p>
+              <strong>正在加载 PDF 预览器</strong>
+              <p>文档外壳已就绪，PDF 渲染器正在按需加载。</p>
             </section>
           }
         >
@@ -167,7 +167,7 @@ export function PreviewPane({
       return (
         <section className="preview-surface preview-code-shell">
           <div className="preview-surface-head">
-            <span>Renderer</span>
+            <span>渲染器</span>
             <strong>{language.toUpperCase()}</strong>
           </div>
           <pre
@@ -184,8 +184,8 @@ export function PreviewPane({
       return (
         <section className="preview-surface preview-code-shell">
           <div className="preview-surface-head">
-            <span>Renderer</span>
-            <strong>Plain text</strong>
+            <span>渲染器</span>
+            <strong>纯文本</strong>
           </div>
           <pre className="preview-code">{preview.content}</pre>
         </section>
@@ -213,7 +213,7 @@ export function PreviewPane({
             <button
               className="ghost-icon"
               onClick={() => onOpenExternal(externalPayload)}
-              title={isRemote ? "Open in browser" : "Open in system app"}
+              title={isRemote ? "在浏览器中打开" : "在系统应用中打开"}
               type="button"
             >
               <ArrowUpRight size={16} />

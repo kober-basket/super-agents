@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Boxes, Compass, LoaderCircle, Plus, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { Boxes, Compass, FolderOpen, LoaderCircle, Plus, RefreshCw, Search, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { markdownToHtml } from "../../lib/format";
@@ -51,6 +51,7 @@ export function SkillsView({
   const [activeSkill, setActiveSkill] = useState<SkillModalState | null>(null);
   const [modalHtml, setModalHtml] = useState("");
   const [modalLoading, setModalLoading] = useState(false);
+  const activeSkillFolder = activeSkill ? resolveSkillFolderPath(activeSkill) : "";
 
   useEffect(() => {
     if (!activeSkill) return undefined;
@@ -122,7 +123,7 @@ export function SkillsView({
         <section className="skills-section">
           <div className="skills-section-head">
             <div>
-              <span className="section-kicker muted">Library</span>
+              <span className="section-kicker muted">已安装</span>
               <h3>已安装技能</h3>
             </div>
             <span className="section-count">{filteredInstalledSkills.length}</span>
@@ -170,7 +171,7 @@ export function SkillsView({
           <section className="skills-section">
             <div className="skills-section-head">
               <div>
-                <span className="section-kicker muted">Discover</span>
+                <span className="section-kicker muted">发现</span>
                 <h3>已发现技能</h3>
               </div>
               <span className="section-count">{filteredReferenceSkills.length}</span>
@@ -229,9 +230,21 @@ export function SkillsView({
                 </div>
               </div>
 
-              <button className="ghost-icon" onClick={() => setActiveSkill(null)} title="关闭" type="button">
-                <X size={16} />
-              </button>
+              <div className="skill-detail-head-actions">
+                {activeSkillFolder ? (
+                  <button
+                    className="ghost-icon"
+                    onClick={() => void workspaceClient.openFolder(activeSkillFolder)}
+                    title="打开技能所在文件夹"
+                    type="button"
+                  >
+                    <FolderOpen size={16} />
+                  </button>
+                ) : null}
+                <button className="ghost-icon" onClick={() => setActiveSkill(null)} title="关闭" type="button">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             <div className="skill-detail-body">
@@ -295,6 +308,27 @@ function appendSkillFilePath(sourcePath: string) {
   return `${sourcePath.replace(/[\\/]+$/, "")}\\SKILL.md`;
 }
 
+function resolveSkillFolderPath(activeSkill: SkillModalState) {
+  if (activeSkill.kind === "installed") {
+    return activeSkill.skill.sourcePath?.trim() || "";
+  }
+
+  return folderPathFromLocation(activeSkill.skill.location);
+}
+
+function folderPathFromLocation(location: string) {
+  const trimmed = location.trim();
+  if (!trimmed) return "";
+  if (/^(https?:)?\/\//i.test(trimmed)) return "";
+
+  const normalized = trimmed.replace(/[\\/]+$/, "");
+  if (/[/\\]SKILL\.md$/i.test(normalized)) {
+    return normalized.replace(/[/\\]SKILL\.md$/i, "");
+  }
+
+  return normalized;
+}
+
 async function resolveSkillMarkdown(activeSkill: SkillModalState) {
   if (activeSkill.kind === "reference") {
     return cleanSkillMarkdown(
@@ -306,7 +340,7 @@ async function resolveSkillMarkdown(activeSkill: SkillModalState) {
   if (activeSkill.skill.sourcePath) {
     const preview = await workspaceClient.readPreview({
       path: appendSkillFilePath(activeSkill.skill.sourcePath),
-      title: `${activeSkill.skill.name} Skill`,
+      title: `${activeSkill.skill.name} 技能`,
     });
 
     return cleanSkillMarkdown(
@@ -322,7 +356,7 @@ async function resolveSkillMarkdown(activeSkill: SkillModalState) {
       "",
       activeSkill.skill.description || "暂无描述",
       "",
-      "## Command",
+      "## 命令",
       "",
       "```text",
       activeSkill.skill.command,
@@ -342,7 +376,7 @@ function fallbackMarkdown(activeSkill: SkillModalState) {
       "",
       activeSkill.skill.description || "运行时发现的技能",
       "",
-      "## Location",
+      "## 位置",
       "",
       `\`${activeSkill.skill.location}\``,
     ].join("\n");
@@ -353,7 +387,7 @@ function fallbackMarkdown(activeSkill: SkillModalState) {
     "",
     activeSkill.skill.description || "暂无描述",
     "",
-    "## Location",
+    "## 位置",
     "",
     `\`${activeSkill.skill.location}\``,
   ].join("\n");

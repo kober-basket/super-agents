@@ -4,7 +4,6 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
-  Clock3,
   FileSearch,
   LoaderCircle,
   Sparkles,
@@ -14,18 +13,13 @@ import {
 } from "lucide-react";
 
 import { formatDateTime, markdownToHtml } from "../../lib/format";
-import type { ChatMessage, FileDropEntry, PendingQuestion } from "../../types";
+import type { ChatMessage, FileDropEntry } from "../../types";
 import { FileCard } from "./FileCard";
-import { QuestionCard } from "./QuestionCard";
 
 interface MessageBlockProps {
   message: ChatMessage;
-  questionRequest?: PendingQuestion;
   onOpenFile: (file: FileDropEntry) => void;
   onOpenLink: (url: string) => void;
-  onReplyQuestion: (requestId: string, sessionId: string, answers: string[][]) => Promise<void> | void;
-  onRejectQuestion: (requestId: string, sessionId: string) => Promise<void> | void;
-  onAbortThread: (threadId: string) => Promise<void> | void;
 }
 
 type ParsedToolMessage = {
@@ -87,7 +81,8 @@ function summarizeInputObject(toolName: string | undefined, inputObject: Record<
     return clipText(prompt, 96);
   }
 
-  const primary = inputObject.q ?? inputObject.query ?? inputObject.location ?? inputObject.url ?? inputObject.path;
+  const primary =
+    inputObject.q ?? inputObject.query ?? inputObject.location ?? inputObject.url ?? inputObject.path;
   if (typeof primary === "string" && primary.trim()) {
     return clipText(primary, 96);
   }
@@ -101,25 +96,24 @@ function summarizeInputObject(toolName: string | undefined, inputObject: Record<
     .slice(0, 2);
 
   if (entries.length > 0) {
-    return clipText(entries.join(" · "), 96);
+    return clipText(entries.join(" | "), 96);
   }
 
   const count = Object.keys(inputObject).length;
   return count > 0 ? `${toolName || "工具调用"} 参数 ${count} 项` : "";
 }
 
-function summarizeToolMessage(message: ChatMessage, questionRequest?: PendingQuestion) {
-  if (questionRequest?.questions.length) {
-    return questionRequest.questions[0]?.question || "需要你回答";
-  }
-
+function summarizeToolMessage(message: ChatMessage) {
   const parsed = parseToolMessage(message.text);
   const normalized =
-    summarizeInputObject(message.toolName, parsed.inputObject) || parsed.outputText || parsed.inputText || message.text;
+    summarizeInputObject(message.toolName, parsed.inputObject) ||
+    parsed.outputText ||
+    parsed.inputText ||
+    message.text;
 
   if (!normalized) {
-    if (message.status === "loading") return "正在执行...";
-    if (message.status === "paused") return "已停止";
+    if (message.status === "loading") return "执行中...";
+    if (message.status === "paused") return "已暂停";
     if (message.status === "error") return "执行失败";
     return "查看详情";
   }
@@ -129,19 +123,10 @@ function summarizeToolMessage(message: ChatMessage, questionRequest?: PendingQue
 
 function toolStatusMeta(
   message: ChatMessage,
-  questionRequest?: PendingQuestion,
 ): { label: string; icon: ReactNode; tone: "default" | "loading" | "success" | "error" } {
-  if (questionRequest) {
-    return {
-      label: "待回答",
-      icon: <Clock3 size={12} />,
-      tone: "default",
-    };
-  }
-
   if (message.status === "loading") {
     return {
-      label: "运行中",
+      label: "执行中",
       icon: <LoaderCircle size={12} className="spin" />,
       tone: "loading",
     };
@@ -149,7 +134,7 @@ function toolStatusMeta(
 
   if (message.status === "paused") {
     return {
-      label: "已停止",
+      label: "已暂停",
       icon: <Square size={11} />,
       tone: "default",
     };
@@ -170,15 +155,7 @@ function toolStatusMeta(
   };
 }
 
-export function MessageBlock({
-  message,
-  questionRequest,
-  onOpenFile,
-  onOpenLink,
-  onReplyQuestion,
-  onRejectQuestion,
-  onAbortThread,
-}: MessageBlockProps) {
+export function MessageBlock({ message, onOpenFile, onOpenLink }: MessageBlockProps) {
   const renderedText = message.displayText ?? message.text;
   const parsedToolMessage = message.role === "tool" ? parseToolMessage(message.text) : null;
   const knowledgeResults = message.knowledge?.results ?? [];
@@ -204,14 +181,14 @@ export function MessageBlock({
   }, [message.id]);
 
   if (message.role === "tool") {
-    const summary = summarizeToolMessage(message, questionRequest);
-    const statusMeta = toolStatusMeta(message, questionRequest);
+    const summary = summarizeToolMessage(message);
+    const statusMeta = toolStatusMeta(message);
 
     return (
       <article className="activity-row">
         <details
           className={clsx("activity-card", "tool-message-card", message.status)}
-          open={message.status === "loading" || Boolean(questionRequest)}
+          open={message.status === "loading"}
         >
           <summary className="activity-summary">
             <div className="activity-summary-main">
@@ -233,37 +210,28 @@ export function MessageBlock({
           </summary>
 
           <div className="activity-detail">
-            {questionRequest ? (
-              <QuestionCard
-                request={questionRequest}
-                onSubmit={(answers) => onReplyQuestion(questionRequest.id, questionRequest.sessionID, answers)}
-                onReject={() => onRejectQuestion(questionRequest.id, questionRequest.sessionID)}
-                onAbort={() => onAbortThread(questionRequest.sessionID)}
-              />
-            ) : null}
+            <section className="activity-panel activity-panel-summary">
+              <div className="activity-panel-label">概览</div>
+              <p>{summary}</p>
+            </section>
 
-            {!questionRequest ? (
-              <section className="activity-panel activity-panel-summary">
-                <div className="activity-panel-label">概览</div>
-                <p>{summary}</p>
-              </section>
-            ) : null}
-
-            {!questionRequest && parsedToolMessage?.inputText ? (
+            {parsedToolMessage?.inputText ? (
               <section className="activity-panel">
-                <div className="activity-panel-label">参数</div>
+                <div className="activity-panel-label">输入</div>
                 <pre>{parsedToolMessage.inputText}</pre>
               </section>
-            ) : !questionRequest && message.text ? (
+            ) : message.text ? (
               <section className="activity-panel">
                 <div className="activity-panel-label">详情</div>
                 <pre>{message.text}</pre>
               </section>
             ) : null}
 
-            {!questionRequest && parsedToolMessage?.outputText ? (
+            {parsedToolMessage?.outputText ? (
               <section className="activity-panel">
-                <div className="activity-panel-label">{message.status === "error" ? "错误" : "结果"}</div>
+                <div className="activity-panel-label">
+                  {message.status === "error" ? "错误" : "结果"}
+                </div>
                 <pre>{parsedToolMessage.outputText}</pre>
               </section>
             ) : null}
@@ -302,14 +270,14 @@ export function MessageBlock({
         {message.role === "assistant" && message.status === "loading" && !message.text ? (
           <div className="message-loading">
             <LoaderCircle size={14} className="spin" />
-            <span>正在生成...</span>
+            <span>生成中...</span>
           </div>
         ) : null}
 
         {message.role === "assistant" && message.status === "paused" && !message.text ? (
           <div className="message-loading">
             <Square size={12} />
-            <span>已停止</span>
+            <span>已暂停</span>
           </div>
         ) : null}
 
@@ -345,7 +313,7 @@ export function MessageBlock({
             onClick={() => setKnowledgeModalOpen(true)}
           >
             <FileSearch size={13} />
-            <span>参考来源</span>
+            <span>参考资料</span>
             <em>{message.knowledge.resultCount} 条片段</em>
           </button>
         ) : null}
@@ -356,14 +324,14 @@ export function MessageBlock({
           <div className="knowledge-reference-modal" onClick={(event) => event.stopPropagation()}>
             <div className="knowledge-reference-head">
               <div className="knowledge-reference-title">
-                <strong>参考来源</strong>
+                <strong>参考资料</strong>
                 <span>{message.knowledge?.query || renderedText}</span>
               </div>
               <button
                 type="button"
                 className="knowledge-icon-button"
                 onClick={() => setKnowledgeModalOpen(false)}
-                title="关闭"
+                title="Close"
               >
                 <X size={16} />
               </button>
@@ -396,7 +364,7 @@ export function MessageBlock({
                         {typeof activeKnowledge.metadata.source === "string"
                           ? activeKnowledge.metadata.source
                           : "知识库片段"}
-                        {" · "}
+                        {" | "}
                         相似度 {activeKnowledge.score.toFixed(3)}
                       </span>
                     </div>

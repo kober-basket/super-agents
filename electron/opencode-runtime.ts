@@ -199,10 +199,11 @@ function getNodeCommand() {
 
 function getBundledOpencodeCandidates() {
   const candidates: string[] = [];
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
 
   if (process.platform === "win32") {
-    if (process.resourcesPath) {
-      candidates.push(path.join(process.resourcesPath, BUNDLED_OPENCODE_WINDOWS_RELATIVE_PATH));
+    if (resourcesPath) {
+      candidates.push(path.join(resourcesPath, BUNDLED_OPENCODE_WINDOWS_RELATIVE_PATH));
     }
     candidates.push(path.resolve(__dirname, "..", BUNDLED_OPENCODE_WINDOWS_RELATIVE_PATH));
     candidates.push(path.resolve(process.cwd(), BUNDLED_OPENCODE_WINDOWS_RELATIVE_PATH));
@@ -904,7 +905,7 @@ export class OpencodeRuntime {
     directoryOverride?: string | null,
   ) {
     const url = new URL(route, `${baseUrl}/`);
-    const directory = directoryOverride === undefined ? input.opencodeRoot.trim() : directoryOverride?.trim() || "";
+    const directory = directoryOverride === undefined ? input.workspaceRoot.trim() : directoryOverride?.trim() || "";
     if (directory) {
       url.searchParams.set("directory", directory);
     }
@@ -922,7 +923,7 @@ export class OpencodeRuntime {
     query?: Record<string, string | number | undefined>,
     directoryOverride?: string | null,
     attempt = 0,
-  ) {
+  ): Promise<T> {
     const baseUrl = await this.ensureStarted(input);
     const url = this.buildUrl(baseUrl, input, route, query, directoryOverride);
     let response: Response;
@@ -1142,7 +1143,7 @@ export class OpencodeRuntime {
 
   async listSkills(config: AppConfig): Promise<RuntimeSkill[]> {
     const skills = await this.request<Array<{ name: string; description: string; location: string; content: string }>>(config, "/skill");
-    return skills.map((item) => ({
+    return skills.map((item: { name: string; description: string; location: string; content: string }) => ({
       id: item.name,
       name: item.name,
       description: item.description,
@@ -1153,7 +1154,7 @@ export class OpencodeRuntime {
 
   async listAgents(config: AppConfig): Promise<RuntimeAgent[]> {
     const agents = await this.request<Array<{ name: string; description?: string; mode: RuntimeAgent["mode"]; model?: { providerID: string; modelID: string } }>>(config, "/agent");
-    return agents.map((item) => ({
+    return agents.map((item: { name: string; description?: string; mode: RuntimeAgent["mode"]; model?: { providerID: string; modelID: string } }) => ({
       name: item.name,
       description: item.description,
       mode: item.mode,
@@ -1163,12 +1164,10 @@ export class OpencodeRuntime {
 
   async listMcpStatuses(config: AppConfig): Promise<McpServerStatus[]> {
     const statuses = await this.request<Record<string, { status: McpServerStatus["status"]; error?: string }>>(config, "/mcp");
-    return Object.entries(statuses).map(([name, status]) => ({
+    return Object.entries(statuses).map(([name, status]: [string, { status: McpServerStatus["status"]; error?: string }]) => ({
       name,
       status: status.status,
       error: status.error,
     }));
   }
 }
-
-export type { OpencodeFilePart, OpencodeQuestionRequest, OpencodeSessionStatus, OpencodeToolPart };

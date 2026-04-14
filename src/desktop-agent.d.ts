@@ -19,16 +19,10 @@ import type {
   ModelProviderFetchInput,
   ModelProviderFetchResult,
   RemoteControlStatus,
-  QuestionRejectInput,
-  QuestionReplyInput,
   SendMessageInput,
   SendMessageResult,
-  SkillRunInput,
-  SkillRunResult,
   WechatLoginStartResult,
   WechatLoginWaitResult,
-  ThreadRecord,
-  ThreadSummary,
   WorkspaceToolCatalog,
 } from "./types";
 
@@ -36,17 +30,13 @@ declare global {
   interface Window {
     desktopAgent: {
       bootstrap: () => Promise<BootstrapPayload>;
-      listThreads: () => Promise<ThreadSummary[]>;
-      getThread: (threadId: string) => Promise<ThreadRecord>;
-      createThread: (title?: string) => Promise<BootstrapPayload>;
-      setActiveThread: (threadId: string) => Promise<ThreadRecord>;
-      resetThread: (threadId: string) => Promise<ThreadRecord>;
-      archiveThread: (threadId: string, archived: boolean) => Promise<BootstrapPayload>;
-      deleteThread: (threadId: string) => Promise<BootstrapPayload>;
       sendMessage: (payload: SendMessageInput) => Promise<SendMessageResult>;
-      abortThread: (threadId: string) => Promise<BootstrapPayload>;
-      replyQuestion: (payload: QuestionReplyInput) => Promise<BootstrapPayload>;
-      rejectQuestion: (payload: QuestionRejectInput) => Promise<BootstrapPayload>;
+      selectCurrentChatSession: (sessionId: string) => Promise<BootstrapPayload>;
+      resetCurrentChat: () => Promise<BootstrapPayload>;
+      archiveChatSession: (sessionId: string) => Promise<BootstrapPayload>;
+      unarchiveChatSession: (sessionId: string) => Promise<BootstrapPayload>;
+      deleteChatSession: (sessionId: string) => Promise<BootstrapPayload>;
+      abortCurrentChat: () => Promise<BootstrapPayload>;
       listKnowledgeBases: () => Promise<KnowledgeCatalogPayload>;
       createKnowledgeBase: (payload: KnowledgeBaseCreateInput) => Promise<KnowledgeCatalogPayload>;
       deleteKnowledgeBase: (baseId: string) => Promise<KnowledgeCatalogPayload>;
@@ -57,7 +47,6 @@ declare global {
       addKnowledgeWebsite: (payload: KnowledgeAddUrlInput) => Promise<KnowledgeCatalogPayload>;
       deleteKnowledgeItem: (payload: KnowledgeDeleteItemInput) => Promise<KnowledgeCatalogPayload>;
       searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) => Promise<KnowledgeSearchPayload>;
-      runSkill: (payload: SkillRunInput) => Promise<SkillRunResult>;
       uninstallSkill: (skillId: string) => Promise<BootstrapPayload>;
       updateConfig: (patch: Partial<AppConfig>) => Promise<BootstrapPayload>;
       getRemoteControlStatus: () => Promise<RemoteControlStatus>;
@@ -71,17 +60,16 @@ declare global {
       selectFiles: () => Promise<FileDropEntry[]>;
       prepareAttachments: (filePaths: string[]) => Promise<FileDropEntry[]>;
       selectWorkspaceFolder: () => Promise<string>;
-      setThreadWorkspace: (threadId: string, workspaceRoot: string) => Promise<BootstrapPayload>;
       readPreview: (payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) => Promise<FilePreviewPayload>;
       openPreviewTarget: (payload: { path?: string; url?: string }) => Promise<void>;
-      openWorkspaceFolder: (threadId?: string) => Promise<void>;
+      openWorkspaceFolder: () => Promise<void>;
+      openFolder: (targetPath: string) => Promise<void>;
       getWindowState: () => Promise<DesktopWindowState>;
       minimizeWindow: () => Promise<DesktopWindowState>;
       toggleMaximizeWindow: () => Promise<DesktopWindowState>;
       closeWindow: () => Promise<void>;
       onWorkspaceChanged: (listener: (payload: BootstrapPayload) => void) => () => void;
       onWindowStateChanged: (listener: (payload: DesktopWindowState) => void) => () => void;
-      onGatewayEvent: (listener: (payload: BootstrapPayload) => void) => () => void;
     };
   }
 }

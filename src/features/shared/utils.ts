@@ -69,30 +69,30 @@ export function describePreviewItem(input: {
   const uppercaseExtension = extension ? extension.toUpperCase().slice(0, 4) : "FILE";
 
   if (input.kind === "pdf" || extension === "pdf" || input.mimeType === "application/pdf") {
-    return { badge: "PDF", label: "PDF document", tone: "rose" } as const;
+    return { badge: "PDF", label: "PDF 文档", tone: "rose" } as const;
   }
   if (input.kind === "image") {
-    return { badge: extension ? uppercaseExtension : "IMG", label: "Image asset", tone: "amber" } as const;
+    return { badge: extension ? uppercaseExtension : "IMG", label: "图片资源", tone: "amber" } as const;
   }
   if (input.kind === "web") {
-    return { badge: "WEB", label: "Web page", tone: "blue" } as const;
+    return { badge: "WEB", label: "网页", tone: "blue" } as const;
   }
   if (input.kind === "html") {
-    return { badge: "HTML", label: "HTML preview", tone: "orange" } as const;
+    return { badge: "HTML", label: "HTML 预览", tone: "orange" } as const;
   }
   if (input.kind === "markdown") {
-    return { badge: extension ? uppercaseExtension : "MD", label: "Markdown note", tone: "green" } as const;
+    return { badge: extension ? uppercaseExtension : "MD", label: "Markdown 笔记", tone: "green" } as const;
   }
   if (input.kind === "code") {
-    return { badge: extension ? uppercaseExtension : "CODE", label: "Source file", tone: "violet" } as const;
+    return { badge: extension ? uppercaseExtension : "CODE", label: "源代码文件", tone: "violet" } as const;
   }
   if (input.kind === "text") {
-    return { badge: extension ? uppercaseExtension : "TXT", label: "Text document", tone: "ink" } as const;
+    return { badge: extension ? uppercaseExtension : "TXT", label: "文本文档", tone: "ink" } as const;
   }
   if (isOfficeDocument(input.path ?? input.name, input.mimeType)) {
-    return { badge: uppercaseExtension, label: "Office document", tone: "blue" } as const;
+    return { badge: uppercaseExtension, label: "Office 文档", tone: "blue" } as const;
   }
-  return { badge: uppercaseExtension, label: "Binary file", tone: "slate" } as const;
+  return { badge: uppercaseExtension, label: "二进制文件", tone: "slate" } as const;
 }
 
 export function sanitizeMcpName(value: string) {
@@ -101,11 +101,6 @@ export function sanitizeMcpName(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
-}
-
-export function displayThreadTitle(title?: string | null) {
-  if (!title || title === "New Thread") return "新对话";
-  return title;
 }
 
 export function makeBadgeText(label: string, fallback = "SK") {
@@ -132,14 +127,14 @@ export function formatMcpStatusLabel(
     case "disabled":
       return "未启用";
     case "failed":
-      return "连接失败";
+      return "失败";
     case "needs_auth":
-      return "需要登录";
+      return "待认证";
     case "needs_client_registration":
-      return "需要注册客户端";
+      return "待客户端注册";
     case "connecting":
       return "连接中";
     default:
-      return "未配置";
+      return "未知";
   }
 }

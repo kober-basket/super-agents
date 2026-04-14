@@ -1,7 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 
-import { APP_DATA_DIR, APP_NAME, APP_WINDOW_TITLE, migrateLegacyAppData, migrateLegacyOpencodeConfig } from "./app-identity";
+import {
+  APP_DATA_DIR,
+  APP_NAME,
+  APP_WINDOW_TITLE,
+  migrateLegacyAppData,
+} from "./app-identity";
 import { McpInspector } from "./mcp-inspector";
 import { RemoteControlService } from "./remote-control-service";
 import { WorkspaceService } from "./workspace-service";
@@ -14,9 +19,9 @@ let mainWindow: BrowserWindow | null = null;
 let service: WorkspaceService | null = null;
 let remoteControlService: RemoteControlService | null = null;
 const mcpInspector = new McpInspector();
-const threadMonitors = new Map<string, ReturnType<typeof setTimeout>>();
-const abortingThreads = new Map<string, number>();
-const threadActivityVersions = new Map<string, number>();
+let currentChatMonitor: ReturnType<typeof setTimeout> | null = null;
+let currentChatActivityVersion = 0;
+let currentChatAbortingStartedAt = 0;
 
 function createWindow() {
   const isMac = process.platform === "darwin";
@@ -99,7 +104,6 @@ function getWindowState(): DesktopWindowState {
 
 app.whenReady().then(async () => {
   await migrateLegacyAppData(app.getPath("appData"));
-  await migrateLegacyOpencodeConfig(app.getPath("appData"));
   const statePath = path.join(app.getPath("userData"), "workspace.json");
   service = new WorkspaceService(statePath);
   remoteControlService = new RemoteControlService(statePath, service, {
@@ -113,136 +117,178 @@ app.whenReady().then(async () => {
 
   async function broadcastState() {
     if (!mainWindow || mainWindow.isDestroyed() || !service) return;
-    const payload = await service!.bootstrap();
+    const payload = await service.bootstrap();
     mainWindow.webContents.send("desktop:workspace-changed", payload);
   }
 
-  function stopThreadMonitor(threadId: string) {
-    const timer = threadMonitors.get(threadId);
-    if (!timer) return;
-    clearTimeout(timer);
-    threadMonitors.delete(threadId);
+  function stopCurrentChatMonitor() {
+    if (!currentChatMonitor) return;
+    clearTimeout(currentChatMonitor);
+    currentChatMonitor = null;
   }
 
-  function getThreadActivityVersion(threadId?: string) {
-    if (!threadId) return 0;
-    return threadActivityVersions.get(threadId) ?? 0;
+  function bumpCurrentChatActivityVersion() {
+    currentChatActivityVersion += 1;
+    return currentChatActivityVersion;
   }
 
-  function bumpThreadActivityVersion(threadId?: string) {
-    if (!threadId) return 0;
-    const nextVersion = getThreadActivityVersion(threadId) + 1;
-    threadActivityVersions.set(threadId, nextVersion);
-    return nextVersion;
+  function markCurrentChatAborting() {
+    currentChatAbortingStartedAt = Date.now();
   }
 
-  function markThreadAborting(threadId?: string) {
-    if (!threadId) return;
-    abortingThreads.set(threadId, Date.now());
+  function clearCurrentChatAborting() {
+    currentChatAbortingStartedAt = 0;
   }
 
-  function clearThreadAborting(threadId?: string) {
-    if (!threadId) return;
-    abortingThreads.delete(threadId);
-  }
-
-  function isThreadAborting(threadId?: string) {
-    if (!threadId) return false;
-    const startedAt = abortingThreads.get(threadId);
-    if (!startedAt) return false;
-    if (Date.now() - startedAt > 5_000) {
-      abortingThreads.delete(threadId);
+  function isCurrentChatAborting() {
+    if (!currentChatAbortingStartedAt) return false;
+    if (Date.now() - currentChatAbortingStartedAt > 5_000) {
+      currentChatAbortingStartedAt = 0;
       return false;
     }
     return true;
   }
 
-  async function monitorThreadProgress(
-    threadId: string,
+  async function monitorCurrentChatProgress(
     intervalMs = 400,
     finalPass = false,
-    activityVersion = getThreadActivityVersion(threadId),
+    activityVersion = currentChatActivityVersion,
   ) {
-    if (!service || !threadId) return;
-    if (isThreadAborting(threadId) || activityVersion !== getThreadActivityVersion(threadId)) {
-      stopThreadMonitor(threadId);
+    if (!service) return;
+    if (isCurrentChatAborting() || activityVersion !== currentChatActivityVersion) {
+      stopCurrentChatMonitor();
       return;
     }
 
-    stopThreadMonitor(threadId);
+    stopCurrentChatMonitor();
 
     try {
-      const progress = await service.getThreadProgress(threadId);
-
-      if (isThreadAborting(threadId) || activityVersion !== getThreadActivityVersion(threadId)) {
-        stopThreadMonitor(threadId);
+      const progress = await service.getCurrentChatProgress();
+      if (isCurrentChatAborting() || activityVersion !== currentChatActivityVersion) {
+        stopCurrentChatMonitor();
         return;
       }
 
       if (!progress.busy && !progress.blockedOnQuestion && !finalPass) {
-        const timer = setTimeout(() => {
-          void monitorThreadProgress(threadId, intervalMs, true, activityVersion);
+        currentChatMonitor = setTimeout(() => {
+          void monitorCurrentChatProgress(intervalMs, true, activityVersion);
         }, intervalMs);
-        threadMonitors.set(threadId, timer);
         return;
       }
 
       await broadcastState();
 
       if (progress.blockedOnQuestion) {
-        stopThreadMonitor(threadId);
+        stopCurrentChatMonitor();
         return;
       }
 
       if (!progress.busy) {
         if (finalPass) {
-          stopThreadMonitor(threadId);
+          stopCurrentChatMonitor();
           return;
         }
 
-        const timer = setTimeout(() => {
-          void monitorThreadProgress(threadId, intervalMs, true, activityVersion);
+        currentChatMonitor = setTimeout(() => {
+          void monitorCurrentChatProgress(intervalMs, true, activityVersion);
         }, intervalMs);
-        threadMonitors.set(threadId, timer);
         return;
       }
 
-      const timer = setTimeout(() => {
-        void monitorThreadProgress(threadId, intervalMs, false, activityVersion);
+      currentChatMonitor = setTimeout(() => {
+        void monitorCurrentChatProgress(intervalMs, false, activityVersion);
       }, intervalMs);
-      threadMonitors.set(threadId, timer);
     } catch {
-      stopThreadMonitor(threadId);
+      stopCurrentChatMonitor();
     }
   }
 
-  async function continueMonitoringIfNeeded(
-    threadId?: string,
-    activityVersion = getThreadActivityVersion(threadId),
-  ) {
-    if (!service || !threadId) return;
-    if (isThreadAborting(threadId) || activityVersion !== getThreadActivityVersion(threadId)) {
-      stopThreadMonitor(threadId);
+  async function continueMonitoringCurrentChatIfNeeded(activityVersion = currentChatActivityVersion) {
+    if (!service) return;
+    if (isCurrentChatAborting() || activityVersion !== currentChatActivityVersion) {
+      stopCurrentChatMonitor();
       return;
     }
+
     try {
-      const progress = await service.getThreadProgress(threadId);
-      if (isThreadAborting(threadId) || activityVersion !== getThreadActivityVersion(threadId)) {
-        stopThreadMonitor(threadId);
+      const progress = await service.getCurrentChatProgress();
+      if (isCurrentChatAborting() || activityVersion !== currentChatActivityVersion) {
+        stopCurrentChatMonitor();
         return;
       }
+
       if (progress.busy || progress.blockedOnQuestion) {
-        void monitorThreadProgress(threadId, 400, false, activityVersion);
+        void monitorCurrentChatProgress(400, false, activityVersion);
       } else {
-        stopThreadMonitor(threadId);
+        stopCurrentChatMonitor();
       }
     } catch {
-      stopThreadMonitor(threadId);
+      stopCurrentChatMonitor();
     }
   }
 
   ipcMain.handle("desktop:bootstrap", async () => {
     return await service!.bootstrap();
+  });
+
+  ipcMain.handle("desktop:send-message", async (_event, payload) => {
+    const requestedActivityVersion = bumpCurrentChatActivityVersion();
+    const result = await service!.sendMessage(payload);
+    await continueMonitoringCurrentChatIfNeeded(requestedActivityVersion);
+    await broadcastState();
+    return result;
+  });
+
+  ipcMain.handle("desktop:select-current-chat-session", async (_event, sessionId: string) => {
+    bumpCurrentChatActivityVersion();
+    stopCurrentChatMonitor();
+    const payload = await service!.selectCurrentChatSession(sessionId);
+    await continueMonitoringCurrentChatIfNeeded();
+    await broadcastState();
+    return payload;
+  });
+
+  ipcMain.handle("desktop:reset-current-chat", async () => {
+    bumpCurrentChatActivityVersion();
+    stopCurrentChatMonitor();
+    const payload = await service!.resetCurrentChat();
+    await broadcastState();
+    return payload;
+  });
+
+  ipcMain.handle("desktop:archive-chat-session", async (_event, sessionId: string) => {
+    bumpCurrentChatActivityVersion();
+    stopCurrentChatMonitor();
+    const payload = await service!.archiveChatSession(sessionId);
+    await broadcastState();
+    return payload;
+  });
+
+  ipcMain.handle("desktop:unarchive-chat-session", async (_event, sessionId: string) => {
+    const payload = await service!.unarchiveChatSession(sessionId);
+    await broadcastState();
+    return payload;
+  });
+
+  ipcMain.handle("desktop:delete-chat-session", async (_event, sessionId: string) => {
+    bumpCurrentChatActivityVersion();
+    stopCurrentChatMonitor();
+    const payload = await service!.deleteChatSession(sessionId);
+    await broadcastState();
+    return payload;
+  });
+
+  ipcMain.handle("desktop:abort-current-chat", async () => {
+    bumpCurrentChatActivityVersion();
+    stopCurrentChatMonitor();
+    markCurrentChatAborting();
+    try {
+      const payload = await service!.abortCurrentChat();
+      await broadcastState();
+      return payload;
+    } finally {
+      clearCurrentChatAborting();
+    }
   });
 
   ipcMain.handle("desktop:list-knowledge-bases", async () => {
@@ -291,26 +337,6 @@ app.whenReady().then(async () => {
       payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number },
     ) => {
       return await service!.searchKnowledgeBases(payload);
-    },
-  );
-
-  ipcMain.handle(
-    "desktop:run-skill",
-    async (_event, payload: { threadId?: string; workspaceRoot?: string; skillId: string; prompt: string }) => {
-      const requestedThreadId = payload.threadId?.trim() || undefined;
-      const requestedActivityVersion = getThreadActivityVersion(requestedThreadId);
-      const result = await service!.runSkill(payload);
-      const threadId = result.thread?.id || requestedThreadId;
-      const currentActivityVersion = getThreadActivityVersion(threadId);
-      if (
-        threadId &&
-        (isThreadAborting(threadId) || currentActivityVersion !== requestedActivityVersion)
-      ) {
-        return result;
-      }
-      await continueMonitoringIfNeeded(threadId, currentActivityVersion);
-      await broadcastState();
-      return result;
     },
   );
 
@@ -371,6 +397,7 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle("desktop:disconnect-wechat", async () => {
+    remoteControlService!.cancelWechatLogin();
     const config = await service!.getConfigSnapshot();
     const bootstrap = await service!.updateConfig({
       remoteControl: {
@@ -413,10 +440,9 @@ app.whenReady().then(async () => {
           try {
             return await mcpInspector.inspectServer({
               server,
-              workspaceRoot: config.opencodeRoot,
+              workspaceRoot: config.workspaceRoot,
             });
           } catch {
-            // Keep the tools view responsive even if one MCP server is unavailable.
             return null;
           }
         }),
@@ -505,9 +531,21 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("desktop:open-workspace-folder", async () => {
     const payload = await service!.bootstrap();
-    const target = payload.config.opencodeRoot;
+    const target = payload.config.workspaceRoot;
     if (target) {
       await shell.openPath(target);
+    }
+  });
+
+  ipcMain.handle("desktop:open-folder", async (_event, targetPath: string) => {
+    const target = String(targetPath || "").trim();
+    if (!target) {
+      throw new Error("Missing folder path");
+    }
+
+    const error = await shell.openPath(target);
+    if (error) {
+      throw new Error(error);
     }
   });
 
@@ -534,102 +572,6 @@ app.whenReady().then(async () => {
     mainWindow?.close();
   });
 
-  ipcMain.handle("desktop:list-threads", async () => {
-    return await service!.listThreads();
-  });
-
-  ipcMain.handle("desktop:get-thread", async (_event, threadId: string) => {
-    return await service!.getThread(threadId);
-  });
-
-  ipcMain.handle("desktop:create-thread", async (_event, title?: string) => {
-    const payload = await service!.createThread(title);
-    await broadcastState();
-    return payload;
-  });
-
-  ipcMain.handle("desktop:set-active-thread", async (_event, threadId: string) => {
-    const thread = await service!.setActiveThread(threadId);
-    await broadcastState();
-    return thread;
-  });
-
-  ipcMain.handle("desktop:reset-thread", async (_event, threadId: string) => {
-    bumpThreadActivityVersion(threadId);
-    stopThreadMonitor(threadId);
-    const thread = await service!.resetThread(threadId);
-    await broadcastState();
-    return thread;
-  });
-
-  ipcMain.handle("desktop:archive-thread", async (_event, payload: { threadId: string; archived: boolean }) => {
-    const result = await service!.archiveThread(payload.threadId, payload.archived);
-    await broadcastState();
-    return result;
-  });
-
-  ipcMain.handle("desktop:delete-thread", async (_event, threadId: string) => {
-    bumpThreadActivityVersion(threadId);
-    stopThreadMonitor(threadId);
-    const payload = await service!.deleteThread(threadId);
-    await broadcastState();
-    return payload;
-  });
-
-  ipcMain.handle("desktop:send-message", async (_event, payload: any) => {
-    const requestedThreadId = typeof payload?.threadId === "string" ? payload.threadId.trim() : "";
-    const requestedActivityVersion = getThreadActivityVersion(requestedThreadId || undefined);
-    const result = await service!.sendMessage(payload);
-    const threadId = result.thread?.id || requestedThreadId || undefined;
-    const currentActivityVersion = getThreadActivityVersion(threadId);
-    if (
-      threadId &&
-      (isThreadAborting(threadId) || currentActivityVersion !== requestedActivityVersion)
-    ) {
-      return result;
-    }
-    if (!isThreadAborting(threadId)) {
-      await continueMonitoringIfNeeded(threadId, currentActivityVersion);
-      await broadcastState();
-    }
-    return result;
-  });
-
-  ipcMain.handle("desktop:abort-thread", async (_event, threadId?: string) => {
-    bumpThreadActivityVersion(threadId);
-    markThreadAborting(threadId);
-    if (threadId) {
-      stopThreadMonitor(threadId);
-    }
-    try {
-      const payload = await service!.abortThread(threadId);
-      await broadcastState();
-      return payload;
-    } finally {
-      clearThreadAborting(threadId);
-    }
-  });
-
-  ipcMain.handle("desktop:reply-question", async (_event, payload: { requestId: string; sessionId: string; answers: string[][] }) => {
-    const result = await service!.replyQuestion(payload.requestId, payload.sessionId, payload.answers);
-    void monitorThreadProgress(payload.sessionId);
-    await broadcastState();
-    return result;
-  });
-
-  ipcMain.handle("desktop:reject-question", async (_event, payload: { requestId: string; sessionId: string }) => {
-    const result = await service!.rejectQuestion(payload.requestId, payload.sessionId);
-    void monitorThreadProgress(payload.sessionId);
-    await broadcastState();
-    return result;
-  });
-
-  ipcMain.handle("desktop:set-thread-workspace", async (_event, payload: { threadId: string; workspaceRoot: string }) => {
-    const result = await service!.setThreadWorkspace(payload.threadId, payload.workspaceRoot);
-    await broadcastState();
-    return result;
-  });
-
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -644,10 +586,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", async () => {
-  for (const timer of threadMonitors.values()) {
-    clearTimeout(timer);
-  }
-  threadMonitors.clear();
+  stopCurrentChatMonitor();
   await remoteControlService?.shutdown();
   await service?.shutdown();
 });

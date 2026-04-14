@@ -1,8 +1,7 @@
-import path from "node:path";
+﻿import path from "node:path";
 
 import type {
   AppConfig,
-  ChatMessage,
   RemoteChannelId,
   RemoteControlStatus,
   WechatLoginStartResult,
@@ -15,6 +14,7 @@ import { startDingtalkRemoteMonitor } from "./dingtalk-remote";
 import { startFeishuRemoteMonitor } from "./feishu-remote";
 import { startWecomRemoteMonitor } from "./wecom-remote";
 import {
+  cancelWechatQrLogin,
   downloadWechatAttachments,
   extractWechatText,
   getWechatUpdates,
@@ -91,7 +91,7 @@ function createRuntimeState(): RemoteChannelRuntimeState {
 }
 
 function describeWechatPeer(peerId: string) {
-  return `微信 · ${peerId}`;
+  return `寰俊 路 ${peerId}`;
 }
 
 function normalizeBindings(value: unknown): RemoteThreadBinding[] {
@@ -114,7 +114,7 @@ function normalizeBindings(value: unknown): RemoteThreadBinding[] {
         accountId: typeof item.accountId === "string" ? item.accountId.trim() : "",
         peerId: typeof item.peerId === "string" ? item.peerId.trim() : "",
         threadId: typeof item.threadId === "string" ? item.threadId.trim() : "",
-        title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "远程会话",
+        title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "杩滅▼浼氳瘽",
         contextToken:
           typeof item.contextToken === "string" && item.contextToken.trim()
             ? item.contextToken.trim()
@@ -260,6 +260,7 @@ export class RemoteControlService {
   }
 
   async startWechatLogin(): Promise<WechatLoginStartResult> {
+    this.cancelWechatLogin();
     const result = await startWechatQrLogin();
     this.pendingWechatLogin = {
       sessionKey: result.sessionKey,
@@ -272,11 +273,33 @@ export class RemoteControlService {
     sessionKey: string,
     timeoutMs?: number,
   ): Promise<WechatLoginWaitResult & { profile?: WechatAccountProfile }> {
-    const result = await waitForWechatQrLogin(sessionKey, timeoutMs);
+    const result = await waitForWechatQrLogin(sessionKey, timeoutMs, {
+      onQrCodeRefresh: (qrCodeUrl) => {
+        if (this.pendingWechatLogin?.sessionKey === sessionKey) {
+          this.pendingWechatLogin = {
+            ...this.pendingWechatLogin,
+            qrCodeUrl,
+          };
+        }
+      },
+    });
     if (this.pendingWechatLogin?.sessionKey === sessionKey) {
       this.pendingWechatLogin = null;
     }
     return result;
+  }
+
+  cancelWechatLogin(sessionKey?: string) {
+    const targetSessionKey = sessionKey?.trim() || this.pendingWechatLogin?.sessionKey;
+    if (targetSessionKey) {
+      cancelWechatQrLogin(targetSessionKey);
+    } else {
+      cancelWechatQrLogin();
+    }
+
+    if (!sessionKey || this.pendingWechatLogin?.sessionKey === targetSessionKey) {
+      this.pendingWechatLogin = null;
+    }
   }
 
   private async syncDingtalkMonitor(config: AppConfig) {
@@ -388,6 +411,12 @@ export class RemoteControlService {
 
   private async syncWechatMonitor(config: AppConfig) {
     const wechat = config.remoteControl.wechat;
+    if (!wechat.enabled) {
+      this.cancelWechatLogin();
+      await this.stopWechatMonitor();
+      return;
+    }
+
     const shouldRun = wechat.enabled && Boolean(wechat.botToken && wechat.accountId);
     if (!shouldRun) {
       await this.stopWechatMonitor();
@@ -556,7 +585,7 @@ export class RemoteControlService {
 
       if ((response.ret ?? 0) !== 0 || (response.errcode ?? 0) !== 0) {
         this.runtimes.wechat.lastError =
-          response.errmsg || `微信轮询失败: ret=${response.ret} errcode=${response.errcode}`;
+          response.errmsg || `寰俊杞澶辫触: ret=${response.ret} errcode=${response.errcode}`;
         await this.delay(2_000, signal);
         continue;
       }
@@ -652,62 +681,18 @@ export class RemoteControlService {
       });
     }
 
+    const hasText = Boolean(message.text.trim());
     const attachments =
       message.attachmentPaths.length > 0
         ? await this.workspace.prepareAttachments(message.attachmentPaths)
         : [];
-    const prompt =
-      message.text.trim() ||
-      (attachments.length > 0 ? "请查看我刚刚发来的附件并继续处理。" : "");
 
-    if (!prompt.trim() && attachments.length === 0) {
+    if (!hasText && attachments.length === 0) {
       return;
     }
-
-    let thread = await this.workspace.getThread(binding.threadId).catch(() => null);
-    if (!thread) {
-      binding = await this.createBinding(
-        message.channel,
-        message.accountId,
-        message.peerId,
-        message.title,
-        message.contextToken,
-      );
-      thread = await this.workspace.getThread(binding.threadId).catch(() => null);
-    }
-
-    const previousMessageIds = new Set((thread?.messages ?? []).map((item) => item.id));
-
-    await this.workspace.sendMessage({
-      threadId: binding.threadId,
-      message: prompt,
-      attachments,
-    });
-    await this.options.onWorkspaceChanged?.();
-
-    const outcome = await this.waitForThreadOutcome(binding.threadId, 15 * 60_000);
-    if (outcome === "question") {
-      await message.replyText(
-        "这个请求需要你到 super-agents 桌面端里继续确认，我已经把待处理事项挂起在当前会话中了。",
-        binding,
-      );
-      return;
-    }
-
-    if (outcome === "timeout") {
-      await message.replyText(
-        "任务还在处理中，我会继续执行。你也可以到 super-agents 桌面端查看当前进度。",
-        binding,
-      );
-      return;
-    }
-
-    const completedThread = await this.workspace.getThread(binding.threadId);
-    const replyText = this.collectAssistantReply(completedThread.messages, previousMessageIds);
 
     await message.replyText(
-      replyText ||
-        "请求已经处理完成，不过这次没有生成适合直接回发的文本结果。请到 super-agents 桌面端查看详情。",
+      "super-agents session runtime has been removed. Remote control can still receive messages, but it no longer creates sessions or runs the local Q&A pipeline. Please return to the desktop app for file preview and other retained static features.",
       binding,
     );
     await this.options.onWorkspaceChanged?.();
@@ -743,12 +728,11 @@ export class RemoteControlService {
     title: string,
     contextToken?: string,
   ) {
-    const thread = await this.workspace.createBackgroundThread(title);
     return await this.upsertBinding({
       channel,
       accountId,
       peerId,
-      threadId: thread.id,
+      threadId: "",
       title,
       contextToken,
       updatedAt: Date.now(),
@@ -789,36 +773,6 @@ export class RemoteControlService {
     this.runtimes[channel].lastError = error instanceof Error ? error.message : String(error);
   }
 
-  private async waitForThreadOutcome(threadId: string, timeoutMs: number) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const progress = await this.workspace.getThreadProgress(threadId).catch(() => ({
-        busy: false,
-        blockedOnQuestion: false,
-      }));
-      if (progress.blockedOnQuestion) {
-        return "question" as const;
-      }
-      if (!progress.busy) {
-        return "done" as const;
-      }
-      await this.delay(1_000);
-    }
-    return "timeout" as const;
-  }
-
-  private collectAssistantReply(messages: ChatMessage[], previousMessageIds: Set<string>) {
-    return messages
-      .filter(
-        (item) =>
-          item.role === "assistant" &&
-          !previousMessageIds.has(item.id) &&
-          item.text.trim(),
-      )
-      .map((item) => item.text.trim())
-      .join("\n\n");
-  }
-
   private async saveState() {
     await writeJsonFile(this.statePath, this.state);
   }
@@ -840,3 +794,4 @@ export class RemoteControlService {
     });
   }
 }
+

@@ -27,6 +27,11 @@ type ActiveLogin = {
   qrCodeUrl: string;
   startedAt: number;
   currentApiBaseUrl: string;
+  abortController: AbortController;
+};
+
+type WaitForWechatQrLoginOptions = {
+  onQrCodeRefresh?: (qrCodeUrl: string) => void;
 };
 
 type WechatCdnMedia = {
@@ -95,6 +100,26 @@ function ensureTrailingSlash(value: string) {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
+function normalizeWechatQrCodeUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (
+    trimmed.startsWith("data:") ||
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("blob:")
+  ) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("//")) {
+    return `https:${trimmed}`;
+  }
+  if (trimmed.startsWith("<svg")) {
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(trimmed)}`;
+  }
+  return `data:image/png;base64,${trimmed}`;
+}
+
 function buildCommonHeaders() {
   return {
     "iLink-App-Id": WECHAT_APP_ID,
@@ -117,9 +142,18 @@ async function fetchTextWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs: number,
+  signal?: AbortSignal,
 ) {
   const controller = new AbortController();
+  const abort = () => controller.abort();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener("abort", abort, { once: true });
+    }
+  }
   try {
     const response = await fetch(url, {
       ...init,
@@ -132,10 +166,11 @@ async function fetchTextWithTimeout(
     return text;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
   }
 }
 
-async function apiGet(baseUrl: string, endpoint: string, timeoutMs = DEFAULT_API_TIMEOUT_MS) {
+async function apiGet(baseUrl: string, endpoint: string, timeoutMs = DEFAULT_API_TIMEOUT_MS, signal?: AbortSignal) {
   const url = new URL(endpoint, ensureTrailingSlash(baseUrl));
   return await fetchTextWithTimeout(
     url.toString(),
@@ -144,6 +179,7 @@ async function apiGet(baseUrl: string, endpoint: string, timeoutMs = DEFAULT_API
       headers: buildCommonHeaders(),
     },
     timeoutMs,
+    signal,
   );
 }
 
@@ -182,21 +218,42 @@ async function fetchQrCode() {
     WECHAT_LOGIN_BASE_URL,
     `ilink/bot/get_bot_qrcode?bot_type=${encodeURIComponent(WECHAT_BOT_TYPE)}`,
   );
-  return JSON.parse(text) as {
+  const payload = JSON.parse(text) as {
     qrcode: string;
     qrcode_img_content: string;
   };
+  return {
+    ...payload,
+    qrcode_img_content: normalizeWechatQrCodeUrl(payload.qrcode_img_content),
+  };
 }
 
-async function pollQrStatus(baseUrl: string, qrcode: string) {
+export function cancelWechatQrLogin(sessionKey?: string) {
+  if (sessionKey?.trim()) {
+    const active = activeLogins.get(sessionKey);
+    if (active) {
+      active.abortController.abort();
+      activeLogins.delete(sessionKey);
+    }
+    return;
+  }
+
+  for (const [key, active] of activeLogins) {
+    active.abortController.abort();
+    activeLogins.delete(key);
+  }
+}
+
+async function pollQrStatus(baseUrl: string, qrcode: string, signal?: AbortSignal) {
   try {
     const text = await apiGet(
       baseUrl,
       `ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`,
       DEFAULT_LONG_POLL_TIMEOUT_MS,
+      signal,
     );
     return JSON.parse(text) as {
-      status: "wait" | "scaned" | "confirmed" | "expired" | "scaned_but_redirect";
+      status: "wait" | "scaned" | "confirmed" | "expired" | "scaned_but_redirect" | "cancelled";
       bot_token?: string;
       ilink_bot_id?: string;
       ilink_user_id?: string;
@@ -205,6 +262,9 @@ async function pollQrStatus(baseUrl: string, qrcode: string) {
     };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
+      if (signal?.aborted) {
+        return { status: "cancelled" as const };
+      }
       return { status: "wait" as const };
     }
     return { status: "wait" as const };
@@ -215,12 +275,14 @@ export async function startWechatQrLogin(): Promise<WechatLoginStartResult> {
   purgeExpiredLogins();
   const sessionKey = randomUUID();
   const qr = await fetchQrCode();
+  const abortController = new AbortController();
   activeLogins.set(sessionKey, {
     sessionKey,
     qrcode: qr.qrcode,
     qrCodeUrl: qr.qrcode_img_content,
     startedAt: Date.now(),
     currentApiBaseUrl: WECHAT_LOGIN_BASE_URL,
+    abortController,
   });
   return {
     sessionKey,
@@ -232,6 +294,7 @@ export async function startWechatQrLogin(): Promise<WechatLoginStartResult> {
 export async function waitForWechatQrLogin(
   sessionKey: string,
   timeoutMs = 480_000,
+  options: WaitForWechatQrLoginOptions = {},
 ): Promise<WechatLoginWaitResult & { profile?: WechatAccountProfile }> {
   const login = activeLogins.get(sessionKey);
   if (!login) {
@@ -245,7 +308,23 @@ export async function waitForWechatQrLogin(
   const deadline = Date.now() + Math.max(timeoutMs, 1_000);
 
   while (Date.now() < deadline) {
-    const status = await pollQrStatus(login.currentApiBaseUrl, login.qrcode);
+    if (login.abortController.signal.aborted) {
+      activeLogins.delete(sessionKey);
+      return {
+        connected: false,
+        message: "微信连接已取消。",
+      };
+    }
+
+    const status = await pollQrStatus(login.currentApiBaseUrl, login.qrcode, login.abortController.signal);
+
+    if (status.status === "cancelled") {
+      activeLogins.delete(sessionKey);
+      return {
+        connected: false,
+        message: "微信连接已取消。",
+      };
+    }
 
     if (status.status === "scaned_but_redirect" && status.redirect_host) {
       login.currentApiBaseUrl = `https://${status.redirect_host}`;
@@ -265,6 +344,7 @@ export async function waitForWechatQrLogin(
       login.qrcode = qr.qrcode;
       login.qrCodeUrl = qr.qrcode_img_content;
       login.startedAt = Date.now();
+      options.onQrCodeRefresh?.(qr.qrcode_img_content);
       continue;
     }
 

@@ -33,6 +33,10 @@ import {
   type OpencodeSessionStatus,
   type OpencodeToolPart,
 } from "./opencode-runtime";
+import { getDesktopClientCapabilities } from "./acp/client-capabilities";
+import { createDesktopAcpClient, type DesktopAcpPermissionDecision } from "./acp/client-factory";
+import { getDesktopSessionMode } from "./acp/session-mode";
+import { AcpTerminalManager } from "./acp/terminal-manager";
 
 const execFileAsync = promisify(execFile);
 
@@ -64,6 +68,8 @@ interface SessionCache {
   messages: OpencodeSessionMessage[];
   messageIndex: Map<string, OpencodeSessionMessage>;
   toolIndex: Map<string, ToolCallRecord>;
+  lastChunkRole: OpencodeRole | null;
+  lastChunkMessageId: string | null;
   status: OpencodeSessionStatus;
   loaded: boolean;
   hydratingHistory: boolean;
@@ -99,7 +105,7 @@ function shouldUseLegacyRuntime(config: AppConfig) {
 }
 
 function getSessionDirectory(config: AppConfig) {
-  const configured = config.opencodeRoot.trim();
+  const configured = config.workspaceRoot.trim();
   if (!configured) return process.cwd();
   return path.isAbsolute(configured) ? configured : path.resolve(process.cwd(), configured);
 }
@@ -198,7 +204,7 @@ function contentBlockToText(content: acp.ContentBlock) {
     case "image":
       return content.uri || `[image:${content.mimeType}]`;
     case "audio":
-      return content.uri || "[audio]";
+      return "[audio]";
     default:
       return "";
   }
@@ -237,7 +243,7 @@ function contentBlockToFilePart(content: acp.ContentBlock): OpencodeFilePart | n
     };
   }
 
-  if ("text" in content.resource) {
+  if (content.type === "resource" && "text" in content.resource) {
     const mimeType = content.resource.mimeType || "text/plain";
     const uri = content.resource.uri || "";
     return {
@@ -252,6 +258,13 @@ function contentBlockToFilePart(content: acp.ContentBlock): OpencodeFilePart | n
           : { type: "resource" as const, uri }
         : { type: "resource" as const, uri: "embedded:text" },
     };
+  }
+
+  if (content.type !== "resource") {
+    return null;
+  }
+  if (!("blob" in content.resource)) {
+    return null;
   }
 
   const mimeType = content.resource.mimeType || "application/octet-stream";
@@ -446,6 +459,8 @@ function createSessionCache(sessionID: string, directory: string, title?: string
     messages: [],
     messageIndex: new Map(),
     toolIndex: new Map(),
+    lastChunkRole: null,
+    lastChunkMessageId: null,
     status: { type: "idle" },
     loaded: false,
     hydratingHistory: false,
@@ -457,14 +472,28 @@ function createSessionCache(sessionID: string, directory: string, title?: string
 }
 
 function getDesiredSessionMode(config: AppConfig, modeState: acp.SessionModeState | null) {
-  if (!modeState) return null;
-  const available = new Set(modeState.availableModes.map((mode) => mode.id));
-  if (config.defaultAgentMode === "build") {
-    return available.has("build") ? "build" : modeState.currentModeId;
+  return getDesktopSessionMode(config, modeState);
+}
+
+function resetChunkTracking(session: SessionCache) {
+  session.lastChunkRole = null;
+  session.lastChunkMessageId = null;
+}
+
+function isGenericSessionTitle(title: string | null | undefined) {
+  const normalized = title?.trim().toLowerCase() ?? "";
+  return !normalized || normalized === "new chat" || normalized.startsWith("new session");
+}
+
+function pickPreferredSessionTitle(currentTitle: string, nextTitle: string | null | undefined) {
+  const normalizedNextTitle = nextTitle?.trim() ?? "";
+  if (!normalizedNextTitle) {
+    return currentTitle;
   }
-  if (available.has("plan")) return "plan";
-  if (available.has("build")) return "build";
-  return modeState.currentModeId;
+  if (isGenericSessionTitle(normalizedNextTitle) && currentTitle.trim() && !isGenericSessionTitle(currentTitle)) {
+    return currentTitle;
+  }
+  return normalizedNextTitle;
 }
 
 function buildDesiredSessionModelValue(config: AppConfig) {
@@ -486,10 +515,11 @@ function getDesiredSessionModelValue(config: AppConfig, configOptions: acp.Sessi
   const modelOption = getModelConfigOption(configOptions);
   if (!modelOption) return desiredModel;
 
-  const exactOption = modelOption.options.find((item) => item.value === desiredModel);
+  const selectOptions = modelOption.options.flatMap((item) => ("value" in item ? [item] : item.options));
+  const exactOption = selectOptions.find((item) => item.value === desiredModel);
   if (exactOption) return exactOption.value;
 
-  const variantOption = modelOption.options.find((item) => item.value.startsWith(`${desiredModel}/`));
+  const variantOption = selectOptions.find((item) => item.value.startsWith(`${desiredModel}/`));
   return variantOption?.value ?? null;
 }
 
@@ -515,12 +545,14 @@ async function killRuntime(handle: RuntimeHandle | null) {
 
 export class OpencodeRuntime {
   private readonly legacyRuntime = new LegacyOpencodeRuntime();
+  private readonly terminalManager = new AcpTerminalManager();
   private handle: RuntimeHandle | null = null;
   private startupPromise: Promise<RuntimeHandle> | null = null;
   private readonly sessions = new Map<string, SessionCache>();
   private readonly pendingPermissionRequests = new Map<string, PendingPermissionRequest>();
   private availableSkills: RuntimeSkill[] = [];
   private readonly legacyFallbackSignatures = new Set<string>();
+  private activeAcpConfig: AppConfig | null = null;
 
   private resetSessionRuntimeState() {
     for (const session of this.sessions.values()) {
@@ -531,6 +563,7 @@ export class OpencodeRuntime {
       session.modeState = null;
       session.configOptions = [];
       session.availableSkills = [];
+      resetChunkTracking(session);
     }
     this.availableSkills = [];
   }
@@ -565,9 +598,11 @@ export class OpencodeRuntime {
       request.resolve({ outcome: { outcome: "cancelled" } });
     }
     this.pendingPermissionRequests.clear();
+    await this.terminalManager.dispose();
     this.resetSessionRuntimeState();
     await killRuntime(this.handle);
     this.handle = null;
+    this.activeAcpConfig = null;
   }
 
   private async withLegacyFallback<T>(
@@ -594,6 +629,101 @@ export class OpencodeRuntime {
   async dispose() {
     await this.legacyRuntime.dispose();
     await this.resetAcpRuntime();
+  }
+
+  private getSessionWorkspaceRoot(sessionID: string) {
+    const sessionDirectory = this.sessions.get(sessionID)?.info.directory?.trim();
+    if (sessionDirectory) {
+      return sessionDirectory;
+    }
+
+    if (this.activeAcpConfig) {
+      return getSessionDirectory(this.activeAcpConfig);
+    }
+
+    throw new Error(`Unable to resolve an active workspace for ACP session ${sessionID}.`);
+  }
+
+  private recordPermissionDecision(event: DesktopAcpPermissionDecision) {
+    const session = this.sessions.get(event.sessionId);
+    if (!session) {
+      return;
+    }
+
+    const record = session.toolIndex.get(event.toolCall.toolCallId);
+    if (!record) {
+      return;
+    }
+
+    const visibilityLabel = event.selectedOption
+      ? `Permission: ${event.selectedOption.name}`
+      : "Permission: cancelled";
+
+    if (!record.title.includes(visibilityLabel)) {
+      record.title = record.title.trim() ? `${record.title} | ${visibilityLabel}` : visibilityLabel;
+    }
+
+    record.metadata = {
+      ...(record.metadata ?? {}),
+      permission: {
+        optionId: event.selectedOption?.optionId ?? null,
+        optionName: event.selectedOption?.name ?? null,
+        outcome: event.response.outcome.outcome,
+      },
+    };
+
+    const message = session.messageIndex.get(`tool:${event.toolCall.toolCallId}`);
+    if (!message) {
+      return;
+    }
+
+    message.parts = message.parts.filter((part) => part.type !== "tool" || part.callID !== event.toolCall.toolCallId);
+    message.parts.push(makeToolPart(record));
+  }
+
+  private async handleSessionUpdate({ sessionId, update }: acp.SessionNotification) {
+    const session = this.ensureSession(sessionId);
+    if (!session.hydratingHistory) {
+      session.info.time.updated = Date.now();
+    }
+
+    switch (update.sessionUpdate) {
+      case "user_message_chunk":
+        this.appendChunk(session, "user", update, "text");
+        break;
+      case "agent_message_chunk":
+        this.appendChunk(session, "assistant", update, "text");
+        break;
+      case "agent_thought_chunk":
+        this.appendChunk(session, "assistant", update, "reasoning");
+        break;
+      case "tool_call":
+      case "tool_call_update":
+        this.upsertToolCall(session, update);
+        break;
+      case "available_commands_update":
+        session.availableSkills = update.availableCommands.map(runtimeSkillFromCommand);
+        this.availableSkills = session.availableSkills;
+        break;
+      case "current_mode_update":
+        session.modeState = session.modeState
+          ? { ...session.modeState, currentModeId: update.currentModeId }
+          : { availableModes: [], currentModeId: update.currentModeId };
+        break;
+      case "config_option_update":
+        session.configOptions = update.configOptions;
+        break;
+      case "session_info_update":
+        if (update.title !== undefined && update.title !== null) {
+          session.info.title = pickPreferredSessionTitle(session.info.title, update.title);
+        }
+        if (update.updatedAt !== undefined) {
+          session.info.time.updated = timestampFromIso(update.updatedAt, session.info.time.updated);
+        }
+        break;
+      default:
+        break;
+    }
   }
 
   private ensureSession(sessionID: string, directory = "", title?: string) {
@@ -634,7 +764,7 @@ export class OpencodeRuntime {
     timestamp: number,
   ) {
     const lastPart = message.parts[message.parts.length - 1];
-    if (lastPart && lastPart.type === type) {
+    if (lastPart && lastPart.type === type && "time" in lastPart && lastPart.time) {
       lastPart.text += text;
       lastPart.time.end = timestamp;
       return;
@@ -650,8 +780,13 @@ export class OpencodeRuntime {
 
   private appendChunk(session: SessionCache, role: OpencodeRole, update: acp.ContentChunk, partType: "text" | "reasoning") {
     const createdAt = Date.now();
-    const messageID = update.messageId || `${role}:${createdAt}:${randomUUID()}`;
+    const messageID =
+      update.messageId?.trim() ||
+      (session.lastChunkRole === role ? session.lastChunkMessageId : null) ||
+      `${role}:${createdAt}:${randomUUID()}`;
     const message = this.ensureMessage(session, messageID, role, createdAt);
+    session.lastChunkRole = role;
+    session.lastChunkMessageId = messageID;
 
     const filePart = contentBlockToFilePart(update.content);
     if (filePart) {
@@ -756,6 +891,7 @@ export class OpencodeRuntime {
     };
     message.info.time.completed = now;
     session.info.time.updated = now;
+    resetChunkTracking(session);
   }
 
   private recordPromptError(session: SessionCache, error: unknown) {
@@ -767,6 +903,7 @@ export class OpencodeRuntime {
       },
     };
     message.info.time.completed = now;
+    resetChunkTracking(session);
   }
 
   private async syncSessionRuntimeOptions(
@@ -802,89 +939,16 @@ export class OpencodeRuntime {
   }
 
   private makeClient(): acp.Client {
-    return {
-      requestPermission: async (params) => {
-        const requestID = randomUUID();
-        const optionsByLabel = new Map<string, acp.PermissionOption>();
-        for (const option of params.options) {
-          optionsByLabel.set(option.name.trim().toLowerCase(), option);
-        }
-
-        const request: OpencodeQuestionRequest = {
-          id: requestID,
-          sessionID: params.sessionId,
-          questions: [
-            {
-              header: "Permission",
-              question: params.toolCall.title || "Choose how to handle this action.",
-              options: params.options.map((option) => ({
-                label: option.name,
-                description: permissionOptionDescription(option),
-              })),
-              multiple: false,
-              custom: false,
-            },
-          ],
-          tool: {
-            messageID: `tool:${params.toolCall.toolCallId}`,
-            callID: params.toolCall.toolCallId,
-          },
-        };
-
-        return await new Promise<acp.RequestPermissionResponse>((resolve) => {
-          this.pendingPermissionRequests.set(requestID, {
-            request,
-            sessionID: params.sessionId,
-            optionsByLabel,
-            resolve,
-          });
-        });
+    return createDesktopAcpClient({
+      resolveWorkspaceRoot: (sessionId) => this.getSessionWorkspaceRoot(sessionId),
+      terminalManager: this.terminalManager,
+      onPermissionDecision: async (event) => {
+        this.recordPermissionDecision(event);
       },
-      sessionUpdate: async ({ sessionId, update }) => {
-        const session = this.ensureSession(sessionId);
-        if (!session.hydratingHistory) {
-          session.info.time.updated = Date.now();
-        }
-
-        switch (update.sessionUpdate) {
-          case "user_message_chunk":
-            this.appendChunk(session, "user", update, "text");
-            break;
-          case "agent_message_chunk":
-            this.appendChunk(session, "assistant", update, "text");
-            break;
-          case "agent_thought_chunk":
-            this.appendChunk(session, "assistant", update, "reasoning");
-            break;
-          case "tool_call":
-          case "tool_call_update":
-            this.upsertToolCall(session, update);
-            break;
-          case "available_commands_update":
-            session.availableSkills = update.availableCommands.map(runtimeSkillFromCommand);
-            this.availableSkills = session.availableSkills;
-            break;
-          case "current_mode_update":
-            session.modeState = session.modeState
-              ? { ...session.modeState, currentModeId: update.currentModeId }
-              : { availableModes: [], currentModeId: update.currentModeId };
-            break;
-          case "config_option_update":
-            session.configOptions = update.configOptions;
-            break;
-          case "session_info_update":
-            if (update.title !== undefined && update.title !== null) {
-              session.info.title = update.title.trim() || session.info.title;
-            }
-            if (update.updatedAt !== undefined) {
-              session.info.time.updated = timestampFromIso(update.updatedAt, session.info.time.updated);
-            }
-            break;
-          default:
-            break;
-        }
+      onSessionUpdate: async (payload) => {
+        await this.handleSessionUpdate(payload);
       },
-    };
+    });
   }
 
   private async ensureStarted(config: AppConfig) {
@@ -917,6 +981,7 @@ export class OpencodeRuntime {
     }
 
     await this.dispose();
+    this.activeAcpConfig = runtimeConfig;
 
     const configDir = await syncGeneratedCommands(runtimeConfig);
     const resolvedMcpServers = await resolveMcpServers(getRuntimeMcpServers(runtimeConfig), configDir);
@@ -963,7 +1028,9 @@ export class OpencodeRuntime {
         request.resolve({ outcome: { outcome: "cancelled" } });
       }
       this.pendingPermissionRequests.clear();
+      void this.terminalManager.dispose();
       this.resetSessionRuntimeState();
+      this.activeAcpConfig = null;
     });
 
     try {
@@ -974,6 +1041,7 @@ export class OpencodeRuntime {
             name: "super-agents",
             version: "0.1.0",
           },
+          clientCapabilities: getDesktopClientCapabilities(),
         }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("Timed out initializing ACP runtime.")), 20_000),
@@ -1003,6 +1071,7 @@ export class OpencodeRuntime {
       session.messages = [];
       session.messageIndex.clear();
       session.toolIndex.clear();
+      resetChunkTracking(session);
       session.hydratingHistory = true;
 
       try {
@@ -1048,7 +1117,7 @@ export class OpencodeRuntime {
           for (const item of page.sessions) {
             const session = this.ensureSession(item.sessionId, item.cwd, item.title ?? undefined);
             session.info.directory = item.cwd;
-            session.info.title = item.title?.trim() || session.info.title;
+            session.info.title = pickPreferredSessionTitle(session.info.title, item.title);
             session.info.time.updated = timestampFromIso(item.updatedAt, session.info.time.updated);
             result.push(session.info);
           }
@@ -1065,7 +1134,7 @@ export class OpencodeRuntime {
       config,
       async () => {
         const listed = await this.listSessions(config);
-        const match = listed.find((session) => session.id === sessionID);
+        const match = listed.find((session: OpencodeSessionInfo) => session.id === sessionID);
         if (match) return match;
         return (await this.ensureSessionLoaded(config, sessionID)).info;
       },
@@ -1114,9 +1183,10 @@ export class OpencodeRuntime {
         session.modeState = response.modes ?? session.modeState;
         session.configOptions = response.configOptions ?? session.configOptions;
         await this.syncSessionRuntimeOptions(handle, config, response.sessionId, session);
-        session.info.title = title?.trim() || session.info.title;
+        session.info.title = pickPreferredSessionTitle(session.info.title, title);
         session.info.time.created = Date.now();
         session.info.time.updated = Date.now();
+        resetChunkTracking(session);
         return session.info;
       },
       async () => await this.legacyRuntime.createSession(config, title),
@@ -1185,6 +1255,7 @@ export class OpencodeRuntime {
       ),
     ];
     const visibleOutputStartIndex = session.messages.length;
+    resetChunkTracking(session);
 
     session.status = { type: "busy" };
 
@@ -1196,6 +1267,7 @@ export class OpencodeRuntime {
       })
       .then((result) => {
         session.status = { type: "idle" };
+        resetChunkTracking(session);
         if (result.stopReason !== "cancelled") {
           if (!this.hasRenderableAssistantOutputSince(session, visibleOutputStartIndex)) {
             this.recordEmptyPromptResult(session, result.stopReason);
@@ -1205,6 +1277,7 @@ export class OpencodeRuntime {
       })
       .catch(async (error) => {
         session.status = { type: "idle" };
+        resetChunkTracking(session);
         if (this.isRecoverableAcpTransportError(error)) {
           try {
             this.enableLegacyFallback(config);

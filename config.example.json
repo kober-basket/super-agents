@@ -1,5 +1,5 @@
 {
-  "opencodeRoot": "F:/work/github/opencode",
+  "workspaceRoot": "F:/work/github/super-agents",
   "bridgeUrl": "",
   "environment": "local",
   "defaultAgentMode": "general",

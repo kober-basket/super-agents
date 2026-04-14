@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import clsx from "clsx";
 import {
   Brain,
-  ChevronDown,
   Eye,
   Globe,
   LoaderCircle,
@@ -15,19 +14,17 @@ import {
 } from "lucide-react";
 
 import { compareModelGroupNames, enrichProviderModel } from "../../lib/model-metadata";
-import type { AppConfig, ModelProviderConfig, RuntimeModelOption } from "../../types";
+import type { ModelProviderConfig, RuntimeModelOption } from "../../types";
 import { ProviderModelPickerModal } from "./ProviderModelPickerModal";
 
 interface AssistantSettingsProps {
   activeModel: RuntimeModelOption | null;
   composerModelId: string;
-  defaultAgentMode: AppConfig["defaultAgentMode"];
   modelProviders: ModelProviderConfig[];
   providerRefreshingId: string | null;
   selectedModelProviderId: string;
   selectableModels: RuntimeModelOption[];
   onAddModelProvider: () => void;
-  onDefaultAgentModeChange: (mode: AppConfig["defaultAgentMode"]) => void;
   onModelChange: (modelId: string) => void;
   onRefreshProviderModels: (providerId: string) => void | Promise<void>;
   onRemoveModelProvider: (providerId: string) => void;
@@ -55,13 +52,11 @@ function tagItems(model: EnrichedProviderModel) {
 export function AssistantSettings({
   activeModel,
   composerModelId,
-  defaultAgentMode,
   modelProviders,
   providerRefreshingId,
   selectedModelProviderId,
   selectableModels,
   onAddModelProvider,
-  onDefaultAgentModeChange,
   onModelChange,
   onRefreshProviderModels,
   onRemoveModelProvider,
@@ -74,11 +69,6 @@ export function AssistantSettings({
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
 
-  const totalModelCount = modelProviders.reduce((sum, provider) => sum + provider.models.length, 0);
-  const enabledModelCount = modelProviders.reduce(
-    (sum, provider) => sum + provider.models.filter((model) => model.enabled !== false).length,
-    0,
-  );
   const currentProvider =
     modelProviders.find((provider) => provider.id === selectedModelProviderId) ??
     modelProviders[0] ??
@@ -141,38 +131,13 @@ export function AssistantSettings({
       <header className="settings-stage-header">
         <div className="settings-stage-heading">
           <h1>模型</h1>
+          <p className="field-note">会话运行时已经移除，这里保留模型来源与模型清单管理。</p>
         </div>
         <button className="secondary-button" onClick={onAddModelProvider}>
           <Plus size={14} />
           添加提供商
         </button>
       </header>
-
-      <div className="settings-block">
-        <div className="settings-stage-grid">
-          <article className="panel-card form-card settings-surface">
-            <h3>默认助手模式</h3>
-            <label>
-              <span>新对话默认角色</span>
-              <div className="select-shell field-select full-width">
-                <select
-                  value={defaultAgentMode}
-                  onChange={(event) =>
-                    onDefaultAgentModeChange(event.target.value as AppConfig["defaultAgentMode"])
-                  }
-                >
-                  <option value="general">通用办公助手</option>
-                  <option value="build">编程助手</option>
-                </select>
-                <ChevronDown size={16} />
-              </div>
-            </label>
-            <p className="field-note">
-              选择“通用办公助手”后，新消息会默认按日常办公、写作、总结和资料处理来响应。
-            </p>
-          </article>
-        </div>
-      </div>
 
       <div className="settings-block">
         {modelProviders.length > 0 ? (
@@ -200,7 +165,7 @@ export function AssistantSettings({
                           <small>
                             {activeModel?.providerId === provider.id
                               ? "默认来源"
-                              : provider.baseUrl || "还没有设置接口地址"}
+                              : provider.baseUrl || "还没设置接口地址"}
                           </small>
                         </div>
                       </button>
@@ -321,10 +286,6 @@ export function AssistantSettings({
                                 type="button"
                               >
                                 <div className="model-group-copy">
-                                  <ChevronDown
-                                    size={16}
-                                    className={clsx("model-group-arrow", collapsed && "collapsed")}
-                                  />
                                   <strong>{groupName}</strong>
                                   <span className="model-group-count">{models.length}</span>
                                 </div>
