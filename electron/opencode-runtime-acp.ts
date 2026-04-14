@@ -465,6 +465,32 @@ function getDesiredSessionMode(config: AppConfig, modeState: acp.SessionModeStat
   return modeState.currentModeId;
 }
 
+function buildDesiredSessionModelValue(config: AppConfig) {
+  const activeModel = getActiveModelOption(config.modelProviders, config.activeModelId);
+  if (!activeModel) return null;
+  return `desktop-${sanitizeId(activeModel.providerId)}/${activeModel.modelId}`;
+}
+
+function getModelConfigOption(configOptions: acp.SessionConfigOption[]) {
+  const option = configOptions.find((item) => item.id === "model");
+  if (!option || option.type !== "select") return null;
+  return option;
+}
+
+function getDesiredSessionModelValue(config: AppConfig, configOptions: acp.SessionConfigOption[]) {
+  const desiredModel = buildDesiredSessionModelValue(config);
+  if (!desiredModel) return null;
+
+  const modelOption = getModelConfigOption(configOptions);
+  if (!modelOption) return desiredModel;
+
+  const exactOption = modelOption.options.find((item) => item.value === desiredModel);
+  if (exactOption) return exactOption.value;
+
+  const variantOption = modelOption.options.find((item) => item.value.startsWith(`${desiredModel}/`));
+  return variantOption?.value ?? null;
+}
+
 async function fileExists(filePath: string) {
   try {
     await access(filePath);
@@ -493,17 +519,26 @@ export class OpencodeRuntime {
   private readonly pendingPermissionRequests = new Map<string, PendingPermissionRequest>();
   private availableSkills: RuntimeSkill[] = [];
 
+  private resetSessionRuntimeState() {
+    for (const session of this.sessions.values()) {
+      session.status = { type: "idle" };
+      session.loaded = false;
+      session.loadPromise = null;
+      session.modeState = null;
+      session.configOptions = [];
+      session.availableSkills = [];
+    }
+    this.availableSkills = [];
+  }
+
   async dispose() {
     await this.legacyRuntime.dispose();
     this.startupPromise = null;
-    this.availableSkills = [];
     for (const request of this.pendingPermissionRequests.values()) {
       request.resolve({ outcome: { outcome: "cancelled" } });
     }
     this.pendingPermissionRequests.clear();
-    for (const session of this.sessions.values()) {
-      session.status = { type: "idle" };
-    }
+    this.resetSessionRuntimeState();
     await killRuntime(this.handle);
     this.handle = null;
   }
@@ -648,6 +683,38 @@ export class OpencodeRuntime {
       },
     };
     message.info.time.completed = now;
+  }
+
+  private async syncSessionRuntimeOptions(
+    handle: RuntimeHandle,
+    config: AppConfig,
+    sessionID: string,
+    session: SessionCache,
+  ) {
+    const desiredMode = getDesiredSessionMode(config, session.modeState);
+    if (desiredMode && desiredMode !== session.modeState?.currentModeId) {
+      await handle.connection.setSessionMode({
+        sessionId: sessionID,
+        modeId: desiredMode,
+      });
+      if (session.modeState) {
+        session.modeState = {
+          ...session.modeState,
+          currentModeId: desiredMode,
+        };
+      }
+    }
+
+    const desiredModel = getDesiredSessionModelValue(config, session.configOptions);
+    const currentModel = getModelConfigOption(session.configOptions)?.currentValue ?? null;
+    if (desiredModel && desiredModel !== currentModel) {
+      const response = await handle.connection.setSessionConfigOption({
+        sessionId: sessionID,
+        configId: "model",
+        value: desiredModel,
+      });
+      session.configOptions = response.configOptions;
+    }
   }
 
   private makeClient(): acp.Client {
@@ -810,9 +877,7 @@ export class OpencodeRuntime {
         request.resolve({ outcome: { outcome: "cancelled" } });
       }
       this.pendingPermissionRequests.clear();
-      for (const session of this.sessions.values()) {
-        session.status = { type: "idle" };
-      }
+      this.resetSessionRuntimeState();
     });
 
     try {
@@ -861,19 +926,7 @@ export class OpencodeRuntime {
 
       session.modeState = response.modes ?? session.modeState;
       session.configOptions = response.configOptions ?? session.configOptions;
-      const desiredMode = getDesiredSessionMode(config, session.modeState);
-      if (desiredMode && desiredMode !== session.modeState?.currentModeId) {
-        await handle.connection.setSessionMode({
-          sessionId: sessionID,
-          modeId: desiredMode,
-        });
-        if (session.modeState) {
-          session.modeState = {
-            ...session.modeState,
-            currentModeId: desiredMode,
-          };
-        }
-      }
+      await this.syncSessionRuntimeOptions(handle, config, sessionID, session);
       session.loaded = true;
       this.finalizeAssistantMessages(session);
     })();
@@ -962,19 +1015,7 @@ export class OpencodeRuntime {
     session.status = { type: "idle" };
     session.modeState = response.modes ?? session.modeState;
     session.configOptions = response.configOptions ?? session.configOptions;
-    const desiredMode = getDesiredSessionMode(config, session.modeState);
-    if (desiredMode && desiredMode !== session.modeState?.currentModeId) {
-      await handle.connection.setSessionMode({
-        sessionId: response.sessionId,
-        modeId: desiredMode,
-      });
-      if (session.modeState) {
-        session.modeState = {
-          ...session.modeState,
-          currentModeId: desiredMode,
-        };
-      }
-    }
+    await this.syncSessionRuntimeOptions(handle, config, response.sessionId, session);
     session.info.title = title?.trim() || session.info.title;
     session.info.time.created = Date.now();
     session.info.time.updated = Date.now();
@@ -1016,21 +1057,9 @@ export class OpencodeRuntime {
       throw new Error("No available model configured. Configure and enable a model before sending messages.");
     }
 
-    const session = await this.ensureSessionLoaded(config, sessionID);
     const handle = await this.ensureStarted(config);
-    const desiredMode = getDesiredSessionMode(config, session.modeState);
-    if (desiredMode && desiredMode !== session.modeState?.currentModeId) {
-      await handle.connection.setSessionMode({
-        sessionId: sessionID,
-        modeId: desiredMode,
-      });
-      if (session.modeState) {
-        session.modeState = {
-          ...session.modeState,
-          currentModeId: desiredMode,
-        };
-      }
-    }
+    const session = await this.ensureSessionLoaded(config, sessionID);
+    await this.syncSessionRuntimeOptions(handle, config, sessionID, session);
     const prompt = [
       {
         type: "text" as const,
