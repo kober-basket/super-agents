@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { describePreviewItem, formatMcpStatusLabel } from "../../src/features/shared/utils";
 import {
-  DEFAULT_CHAT_TITLE,
+  DEFAULT_WORKSPACE_TITLE,
   NO_WORKSPACE_SELECTED_LABEL,
   workspaceLabel,
 } from "../../src/features/workspace/labels";
@@ -18,7 +18,7 @@ test("preview item labels use Chinese copy", () => {
 });
 
 test("workspace labels default to Chinese copy", () => {
-  assert.equal(DEFAULT_CHAT_TITLE, "当前对话");
+  assert.equal(DEFAULT_WORKSPACE_TITLE, "工作台");
   assert.equal(NO_WORKSPACE_SELECTED_LABEL, "未选择工作区");
   assert.equal(workspaceLabel(""), "未选择工作区");
   assert.equal(workspaceLabel("F:/work/github/super-agents"), "super-agents");

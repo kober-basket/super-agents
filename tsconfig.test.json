@@ -10,14 +10,8 @@
     "declarationMap": false
   },
   "include": [
-    "electron/acp/**/*.ts",
-    "electron/opencode-runtime.ts",
-    "electron/opencode-runtime-acp.ts",
     "electron/workspace-service.ts",
-    "src/features/chat/ChatView.tsx",
-    "src/features/chat/MessageBlock.tsx",
     "src/features/navigation/AppTitleBar.tsx",
-    "src/features/chat/FileCard.tsx",
     "src/features/shared/utils.ts",
     "src/features/workspace/labels.ts",
     "tests/electron/**/*.ts",

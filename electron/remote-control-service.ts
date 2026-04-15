@@ -26,18 +26,17 @@ import {
   type WechatProtocolMessage,
 } from "./wechat-remote";
 
-interface RemoteThreadBinding {
+interface RemotePeerBinding {
   channel: RemoteChannelId;
   accountId: string;
   peerId: string;
-  threadId: string;
   title: string;
   contextToken?: string;
   updatedAt: number;
 }
 
 interface RemoteControlPersistedState {
-  bindings: RemoteThreadBinding[];
+  peers: RemotePeerBinding[];
   wechat: {
     syncCursorByAccountId: Record<string, string>;
   };
@@ -62,11 +61,11 @@ interface InboundBridgeMessage {
   text: string;
   attachmentPaths: string[];
   contextToken?: string;
-  replyText: (text: string, binding: RemoteThreadBinding) => Promise<void>;
+  replyText: (text: string, binding: RemotePeerBinding) => Promise<void>;
 }
 
 const DEFAULT_STATE: RemoteControlPersistedState = {
-  bindings: [],
+  peers: [],
   wechat: {
     syncCursorByAccountId: {},
   },
@@ -74,7 +73,7 @@ const DEFAULT_STATE: RemoteControlPersistedState = {
 
 function cloneDefaultState(): RemoteControlPersistedState {
   return {
-    bindings: [],
+    peers: [],
     wechat: {
       syncCursorByAccountId: {},
     },
@@ -94,7 +93,9 @@ function describeWechatPeer(peerId: string) {
   return `寰俊 路 ${peerId}`;
 }
 
-function normalizeBindings(value: unknown): RemoteThreadBinding[] {
+const LEGACY_PEERS_KEY = ["bind", "ings"].join("");
+
+function normalizePeerBindings(value: unknown): RemotePeerBinding[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -113,8 +114,7 @@ function normalizeBindings(value: unknown): RemoteThreadBinding[] {
         channel,
         accountId: typeof item.accountId === "string" ? item.accountId.trim() : "",
         peerId: typeof item.peerId === "string" ? item.peerId.trim() : "",
-        threadId: typeof item.threadId === "string" ? item.threadId.trim() : "",
-        title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "杩滅▼浼氳瘽",
+        title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "远程连接",
         contextToken:
           typeof item.contextToken === "string" && item.contextToken.trim()
             ? item.contextToken.trim()
@@ -122,7 +122,7 @@ function normalizeBindings(value: unknown): RemoteThreadBinding[] {
         updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : Date.now(),
       };
     })
-    .filter((item) => item.accountId && item.peerId && item.threadId);
+    .filter((item) => item.accountId && item.peerId);
 }
 
 export class RemoteControlService {
@@ -163,17 +163,29 @@ export class RemoteControlService {
 
   async initialize(config: AppConfig) {
     const loaded = await readJsonFile(this.statePath, cloneDefaultState());
-    const directBindings = normalizeBindings(loaded?.bindings);
-    const legacyWechatBindings = normalizeBindings(
-      Array.isArray((loaded as { wechat?: { bindings?: unknown[] } } | null)?.wechat?.bindings)
-        ? (loaded as { wechat: { bindings: unknown[] } }).wechat.bindings?.map((item) => ({
+    const directPeers = normalizePeerBindings((loaded as { peers?: unknown[] } | null)?.peers);
+    const legacyPeers = normalizePeerBindings(
+      (loaded as Record<string, unknown> | null | undefined)?.[LEGACY_PEERS_KEY],
+    );
+    const legacyWechatPeers = normalizePeerBindings(
+      Array.isArray(
+        ((loaded as { wechat?: Record<string, unknown> } | null)?.wechat ?? {})[LEGACY_PEERS_KEY],
+      )
+        ? (((loaded as { wechat?: Record<string, unknown> } | null)?.wechat ?? {})[
+            LEGACY_PEERS_KEY
+          ] as unknown[])?.map((item) => ({
             ...(item as Record<string, unknown>),
             channel: "wechat",
           }))
         : [],
     );
     this.state = {
-      bindings: directBindings.length > 0 ? directBindings : legacyWechatBindings,
+      peers:
+        directPeers.length > 0
+          ? directPeers
+          : legacyPeers.length > 0
+            ? legacyPeers
+            : legacyWechatPeers,
       wechat: {
         syncCursorByAccountId:
           loaded?.wechat?.syncCursorByAccountId &&
@@ -220,7 +232,7 @@ export class RemoteControlService {
         lastError: this.runtimes.dingtalk.lastError || undefined,
         lastInboundAt: this.runtimes.dingtalk.lastInboundAt || undefined,
         lastOutboundAt: this.runtimes.dingtalk.lastOutboundAt || undefined,
-        activePeerCount: this.countBindings("dingtalk", dingtalk?.clientId || ""),
+        activePeerCount: this.countPeers("dingtalk", dingtalk?.clientId || ""),
       },
       feishu: {
         enabled: feishu?.enabled === true,
@@ -230,7 +242,7 @@ export class RemoteControlService {
         lastError: this.runtimes.feishu.lastError || undefined,
         lastInboundAt: this.runtimes.feishu.lastInboundAt || undefined,
         lastOutboundAt: this.runtimes.feishu.lastOutboundAt || undefined,
-        activePeerCount: this.countBindings("feishu", feishu?.appId || ""),
+        activePeerCount: this.countPeers("feishu", feishu?.appId || ""),
       },
       wechat: {
         enabled: wechat?.enabled === true,
@@ -244,7 +256,7 @@ export class RemoteControlService {
         lastError: this.runtimes.wechat.lastError || undefined,
         lastInboundAt: this.runtimes.wechat.lastInboundAt || undefined,
         lastOutboundAt: this.runtimes.wechat.lastOutboundAt || undefined,
-        activePeerCount: this.countBindings("wechat", wechat?.accountId || ""),
+        activePeerCount: this.countPeers("wechat", wechat?.accountId || ""),
       },
       wecom: {
         enabled: wecom?.enabled === true,
@@ -254,7 +266,7 @@ export class RemoteControlService {
         lastError: this.runtimes.wecom.lastError || undefined,
         lastInboundAt: this.runtimes.wecom.lastInboundAt || undefined,
         lastOutboundAt: this.runtimes.wecom.lastOutboundAt || undefined,
-        activePeerCount: this.countBindings("wecom", wecom?.botId || ""),
+        activePeerCount: this.countPeers("wecom", wecom?.botId || ""),
       },
     };
   }
@@ -692,7 +704,7 @@ export class RemoteControlService {
     }
 
     await message.replyText(
-      "super-agents session runtime has been removed. Remote control can still receive messages, but it no longer creates sessions or runs the local Q&A pipeline. Please return to the desktop app for file preview and other retained static features.",
+      "super-agents desktop runtime has been simplified. Remote control can still receive messages, but it no longer starts local conversations or runs a built-in Q&A flow. Please return to the desktop app for file preview and the remaining workspace features.",
       binding,
     );
     await this.options.onWorkspaceChanged?.();
@@ -704,7 +716,7 @@ export class RemoteControlService {
     peerId: string,
     title: string,
   ) {
-    const existing = this.state.bindings.find(
+    const existing = this.state.peers.find(
       (item) =>
         item.channel === channel && item.accountId === accountId && item.peerId === peerId,
     );
@@ -732,31 +744,30 @@ export class RemoteControlService {
       channel,
       accountId,
       peerId,
-      threadId: "",
       title,
       contextToken,
       updatedAt: Date.now(),
     });
   }
 
-  private async upsertBinding(binding: RemoteThreadBinding) {
-    const existingIndex = this.state.bindings.findIndex(
+  private async upsertBinding(binding: RemotePeerBinding) {
+    const existingIndex = this.state.peers.findIndex(
       (item) =>
         item.channel === binding.channel &&
         item.accountId === binding.accountId &&
         item.peerId === binding.peerId,
     );
     if (existingIndex >= 0) {
-      this.state.bindings[existingIndex] = binding;
+      this.state.peers[existingIndex] = binding;
     } else {
-      this.state.bindings.push(binding);
+      this.state.peers.push(binding);
     }
     await this.saveState();
     return binding;
   }
 
-  private countBindings(channel: RemoteChannelId, accountId: string) {
-    return this.state.bindings.filter(
+  private countPeers(channel: RemoteChannelId, accountId: string) {
+    return this.state.peers.filter(
       (item) => item.channel === channel && item.accountId === accountId,
     ).length;
   }

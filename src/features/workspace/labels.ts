@@ -1,4 +1,4 @@
-export const DEFAULT_CHAT_TITLE = "当前对话";
+export const DEFAULT_WORKSPACE_TITLE = "工作台";
 export const NO_WORKSPACE_SELECTED_LABEL = "未选择工作区";
 
 export function workspaceLabel(value: string) {

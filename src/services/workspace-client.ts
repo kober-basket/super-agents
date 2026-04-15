@@ -1,13 +1,10 @@
 export const workspaceClient = {
   bootstrap: () => window.desktopAgent.bootstrap(),
-  sendMessage: (payload: Parameters<typeof window.desktopAgent.sendMessage>[0]) =>
-    window.desktopAgent.sendMessage(payload),
-  selectCurrentChatSession: (sessionId: string) => window.desktopAgent.selectCurrentChatSession(sessionId),
-  resetCurrentChat: () => window.desktopAgent.resetCurrentChat(),
-  archiveChatSession: (sessionId: string) => window.desktopAgent.archiveChatSession(sessionId),
-  unarchiveChatSession: (sessionId: string) => window.desktopAgent.unarchiveChatSession(sessionId),
-  deleteChatSession: (sessionId: string) => window.desktopAgent.deleteChatSession(sessionId),
-  abortCurrentChat: () => window.desktopAgent.abortCurrentChat(),
+  listConversations: () => window.desktopAgent.listConversations(),
+  getConversation: (conversationId: string) => window.desktopAgent.getConversation(conversationId),
+  sendChatMessage: (payload: Parameters<typeof window.desktopAgent.sendChatMessage>[0]) =>
+    window.desktopAgent.sendChatMessage(payload),
+  deleteConversation: (conversationId: string) => window.desktopAgent.deleteConversation(conversationId),
   listKnowledgeBases: () => window.desktopAgent.listKnowledgeBases(),
   createKnowledgeBase: (payload: Parameters<typeof window.desktopAgent.createKnowledgeBase>[0]) =>
     window.desktopAgent.createKnowledgeBase(payload),

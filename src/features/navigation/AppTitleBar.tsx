@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import type { CSSProperties } from "react";
 import { Copy, Minus, Square, X } from "lucide-react";
 
 import type { AppSection, DesktopWindowState } from "../../types";
@@ -11,69 +12,9 @@ const SECTION_LABELS: Record<AppSection, string> = {
   settings: "设置",
 };
 
-export interface RuntimeEngineStatusSummary {
-  title: string;
-  engineLabel: string;
-  label: string;
-  detail: string;
-  tone: "idle" | "active" | "warning";
-}
-
-interface DescribeRuntimeEngineStatusInput {
-  engineLabel?: string;
-  hasSession: boolean;
-  busy: boolean;
-  blockedOnQuestion: boolean;
-}
-
-export function describeRuntimeEngineStatus({
-  engineLabel = "OpenCode",
-  hasSession,
-  busy,
-  blockedOnQuestion,
-}: DescribeRuntimeEngineStatusInput): RuntimeEngineStatusSummary {
-  if (busy) {
-    return {
-      title: "运行引擎",
-      engineLabel,
-      label: "运行中",
-      detail: "会话正在执行",
-      tone: "active",
-    };
-  }
-
-  if (blockedOnQuestion) {
-    return {
-      title: "运行引擎",
-      engineLabel,
-      label: "待处理",
-      detail: "需要继续答复",
-      tone: "warning",
-    };
-  }
-
-  if (hasSession) {
-    return {
-      title: "运行引擎",
-      engineLabel,
-      label: "空闲中",
-      detail: "会话已就绪",
-      tone: "idle",
-    };
-  }
-
-  return {
-    title: "运行引擎",
-    engineLabel,
-    label: "未启动",
-    detail: "等待新建会话",
-    tone: "idle",
-  };
-}
-
 interface AppTitleBarProps {
   view: AppSection;
-  runtimeStatus: RuntimeEngineStatusSummary;
+  sidebarWidth: number;
   windowState: DesktopWindowState | null;
   onClose: () => void | Promise<void>;
   onMinimize: () => void | Promise<void>;
@@ -82,29 +23,29 @@ interface AppTitleBarProps {
 
 export function AppTitleBar({
   view,
-  runtimeStatus,
+  sidebarWidth,
   windowState,
   onClose,
   onMinimize,
   onToggleMaximize,
 }: AppTitleBarProps) {
   const isMac = windowState?.platform === "darwin";
+  const style = {
+    "--titlebar-sidebar-width": `${sidebarWidth}px`,
+  } as CSSProperties;
 
   return (
-    <header className={clsx("window-titlebar", isMac && "mac")}>
+    <header className={clsx("window-titlebar", isMac && "mac")} style={style}>
       <div className="window-titlebar-copy">
         <strong>super-agents</strong>
         <span>{SECTION_LABELS[view]}</span>
       </div>
 
       <div className="window-titlebar-status-wrap">
-        <div className={clsx("window-titlebar-status", runtimeStatus.tone)} aria-label="运行引擎状态">
+        <div className={clsx("window-titlebar-status", "idle")} aria-label="当前状态">
           <span className="window-titlebar-status-dot" aria-hidden="true" />
           <div className="window-titlebar-status-copy">
-            <strong>{runtimeStatus.title}</strong>
-            <span>
-              {runtimeStatus.engineLabel} {runtimeStatus.label} · {runtimeStatus.detail}
-            </span>
+            <span>OpenCode 空闲中 · 会话已就绪</span>
           </div>
         </div>
       </div>

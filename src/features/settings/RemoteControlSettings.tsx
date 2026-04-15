@@ -565,7 +565,7 @@ export function RemoteControlSettings({
                 label="账号"
                 value={maskValue(remoteStatus?.wechat?.accountId || remoteControl.wechat.accountId)}
               />
-              <Metric label="会话" value={String(remoteStatus?.wechat?.activePeerCount ?? 0)} />
+              <Metric label="活跃连接" value={String(remoteStatus?.wechat?.activePeerCount ?? 0)} />
               <Metric label="最近入站" value={formatTime(remoteStatus?.wechat?.lastInboundAt)} />
               <Metric label="最近出站" value={formatTime(remoteStatus?.wechat?.lastOutboundAt)} />
             </>
@@ -595,7 +595,7 @@ export function RemoteControlSettings({
                 label="凭据"
                 value={remoteStatus?.dingtalk?.configured ? maskValue(remoteControl.dingtalk.clientId) : "未配置"}
               />
-              <Metric label="会话" value={String(remoteStatus?.dingtalk?.activePeerCount ?? 0)} />
+              <Metric label="活跃连接" value={String(remoteStatus?.dingtalk?.activePeerCount ?? 0)} />
               <Metric label="最近入站" value={formatTime(remoteStatus?.dingtalk?.lastInboundAt)} />
               <Metric label="最近出站" value={formatTime(remoteStatus?.dingtalk?.lastOutboundAt)} />
             </>
@@ -625,7 +625,7 @@ export function RemoteControlSettings({
                 label="凭据"
                 value={remoteStatus?.feishu?.configured ? maskValue(remoteControl.feishu.appId) : "未配置"}
               />
-              <Metric label="会话" value={String(remoteStatus?.feishu?.activePeerCount ?? 0)} />
+              <Metric label="活跃连接" value={String(remoteStatus?.feishu?.activePeerCount ?? 0)} />
               <Metric label="最近入站" value={formatTime(remoteStatus?.feishu?.lastInboundAt)} />
               <Metric label="最近出站" value={formatTime(remoteStatus?.feishu?.lastOutboundAt)} />
             </>
@@ -655,7 +655,7 @@ export function RemoteControlSettings({
                 label="凭据"
                 value={remoteStatus?.wecom?.configured ? maskValue(remoteControl.wecom.botId) : "未配置"}
               />
-              <Metric label="会话" value={String(remoteStatus?.wecom?.activePeerCount ?? 0)} />
+              <Metric label="活跃连接" value={String(remoteStatus?.wecom?.activePeerCount ?? 0)} />
               <Metric label="最近入站" value={formatTime(remoteStatus?.wecom?.lastInboundAt)} />
               <Metric label="最近出站" value={formatTime(remoteStatus?.wecom?.lastOutboundAt)} />
             </>

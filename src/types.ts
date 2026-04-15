@@ -11,7 +11,6 @@ export type AppearanceThemeId =
 export type ContextTier = "low" | "medium" | "high";
 export type EnvironmentMode = "local" | "cloud";
 export type DefaultAgentMode = "general" | "build";
-export type MessageRole = "user" | "assistant" | "tool";
 export type PreviewKind = "text" | "code" | "markdown" | "image" | "pdf" | "html" | "web" | "binary";
 export type McpTransport = "local" | "remote";
 export type McpConnectionStatus = "connected" | "disabled" | "failed" | "needs_auth" | "needs_client_registration";
@@ -401,49 +400,6 @@ export interface DesktopWindowState {
   maximized: boolean;
 }
 
-export interface MessageAttachment {
-  id: string;
-  name: string;
-  path: string;
-  size: number;
-  mimeType: string;
-  kind: PreviewKind;
-  url?: string;
-  content?: string;
-  dataUrl?: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  role: MessageRole;
-  text: string;
-  displayText?: string;
-  createdAt: number;
-  status?: "loading" | "paused" | "done" | "error";
-  attachments?: MessageAttachment[];
-  toolName?: string;
-  skillName?: string;
-  knowledge?: KnowledgeInjectionMeta;
-}
-
-export interface CurrentChatState {
-  sessionId: string | null;
-  title: string;
-  messages: ChatMessage[];
-  busy: boolean;
-  blockedOnQuestion: boolean;
-  workspaceRoot?: string;
-}
-
-export interface ChatSessionSummary {
-  id: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  archivedAt?: number;
-  workspaceRoot?: string;
-}
-
 export interface FilePreviewPayload {
   title: string;
   path: string | null;
@@ -466,13 +422,45 @@ export interface FileDropEntry {
   dataUrl?: string;
 }
 
-export interface SendMessageInput {
-  message: string;
-  attachments: FileDropEntry[];
+export type ChatMessageRole = "user" | "assistant";
+
+export interface ChatMessage {
+  id: string;
+  role: ChatMessageRole;
+  content: string;
+  attachments?: FileDropEntry[];
+  createdAt: number;
+  updatedAt: number;
 }
 
-export interface SendMessageResult {
-  currentChat: CurrentChatState;
+export interface ChatConversationSummary {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  lastMessageAt: number;
+  preview: string;
+  messageCount: number;
+}
+
+export interface ChatConversation extends ChatConversationSummary {
+  messages: ChatMessage[];
+}
+
+export interface ChatConversationListPayload {
+  fetchedAt: number;
+  conversations: ChatConversationSummary[];
+}
+
+export interface ChatSendInput {
+  conversationId?: string | null;
+  content: string;
+  attachments?: FileDropEntry[];
+}
+
+export interface ChatSendResult {
+  createdConversation: boolean;
+  conversation: ChatConversation;
 }
 
 export interface BootstrapPayload {
@@ -480,6 +468,4 @@ export interface BootstrapPayload {
   config: AppConfig;
   availableSkills: RuntimeSkill[];
   mcpStatuses: McpServerStatus[];
-  chatSessions: ChatSessionSummary[];
-  currentChat: CurrentChatState;
 }

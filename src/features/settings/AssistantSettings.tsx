@@ -131,7 +131,7 @@ export function AssistantSettings({
       <header className="settings-stage-header">
         <div className="settings-stage-heading">
           <h1>模型</h1>
-          <p className="field-note">会话运行时已经移除，这里保留模型来源与模型清单管理。</p>
+          <p className="field-note">桌面入口已收敛为静态工作台，这里只保留模型来源与模型清单管理。</p>
         </div>
         <button className="secondary-button" onClick={onAddModelProvider}>
           <Plus size={14} />

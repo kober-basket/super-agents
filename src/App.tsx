@@ -12,6 +12,9 @@ import {
 import type {
   AppConfig,
   AppSection,
+  ChatConversation,
+  ChatMessage,
+  ChatConversationSummary,
   DesktopWindowState,
   FileDropEntry,
   FilePreviewPayload,
@@ -23,14 +26,13 @@ import type {
   WorkspaceTool,
 } from "./types";
 import { workspaceClient } from "./services/workspace-client";
-import { ChatView } from "./features/chat/ChatView";
-import { CHAT_HOME_QUICK_PROMPTS, shouldShowChatHome } from "./features/chat/home-state";
 import { PrimarySidebar } from "./features/navigation/PrimarySidebar";
-import { AppTitleBar, describeRuntimeEngineStatus } from "./features/navigation/AppTitleBar";
+import { AppTitleBar } from "./features/navigation/AppTitleBar";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
 import { useWorkspaceController } from "./features/workspace/useWorkspaceController";
 import { fileKind, sanitizeMcpName } from "./features/shared/utils";
+import { ChatWorkspace } from "./features/chat/ChatWorkspace";
 
 const PreviewPane = lazy(async () => {
   const module = await import("./features/chat/PreviewPane");
@@ -115,6 +117,11 @@ function LazyViewFallback() {
 
 export default function App() {
   const [view, setView] = useState<AppSection>("chat");
+  const [conversations, setConversations] = useState<ChatConversationSummary[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversation, setActiveConversation] = useState<ChatConversation | null>(null);
+  const [generatingConversationId, setGeneratingConversationId] = useState<string | null>(null);
+  const [draftMessage, setDraftMessage] = useState("");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("assistant");
   const [preview, setPreview] = useState<FilePreviewPayload | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -152,41 +159,25 @@ export default function App() {
     appendAttachments,
     attachments,
     availableSkills,
-    chatSessions,
     commitConfig,
-    composer,
-    composerComposing,
     composerModelId,
     config,
-    currentChat,
     currentWorkspaceLabel,
     currentWorkspacePath,
-    chatBusy,
     dragActive,
     mcpStatusMap,
-    messageListRef,
-    abortCurrentChat,
-    archiveChatSession,
     pickFiles,
     prepareSkillDraft,
     refreshWorkspaceSnapshot,
     removeAttachment,
-    resetCurrentChat,
     scheduleConfigPersist,
-    selectCurrentChatSession,
     selectableModels,
-    sendCurrentMessage,
     setAttachments,
-    setComposer,
-    setComposerComposing,
     setDragActive,
     uninstallSkill,
-    unarchiveChatSession,
-    deleteChatSession,
     updateConfigField,
     useReferenceSkill,
   } = useWorkspaceController({
-    onOpenChat: () => setView("chat"),
     onToast: (message) => setToast(message),
   });
   const toolsLoadedRef = useRef(false);
@@ -220,22 +211,6 @@ export default function App() {
       ),
     [availableSkills, skillQuery],
   );
-  const canSendMessage =
-    !chatBusy &&
-    !composerComposing &&
-    selectableModels.length > 0 &&
-    (composer.trim().length > 0 || attachments.length > 0);
-  const runtimeStatus = useMemo(
-    () =>
-      describeRuntimeEngineStatus({
-        engineLabel: "OpenCode",
-        hasSession: Boolean(currentChat.sessionId),
-        busy: currentChat.busy,
-        blockedOnQuestion: currentChat.blockedOnQuestion,
-      }),
-    [currentChat.blockedOnQuestion, currentChat.busy, currentChat.sessionId],
-  );
-  const showChatHome = shouldShowChatHome(currentChat);
   useEffect(() => {
     if (!toast) return undefined;
     const timer = window.setTimeout(() => setToast(null), 1800);
@@ -431,6 +406,54 @@ export default function App() {
 
     updateKnowledgeBaseConfig({ embeddingModel: embeddingModels[0].id });
   }, [config.knowledgeBase.embeddingModel, config.knowledgeBase.embeddingProviderId, config.modelProviders]);
+
+  function toConversationSummary(conversation: ChatConversation): ChatConversationSummary {
+    return {
+      id: conversation.id,
+      title: conversation.title,
+      createdAt: conversation.createdAt,
+      updatedAt: conversation.updatedAt,
+      lastMessageAt: conversation.lastMessageAt,
+      preview: conversation.preview,
+      messageCount: conversation.messageCount,
+    };
+  }
+
+  function upsertConversationSummary(summary: ChatConversationSummary) {
+    setConversations((current) =>
+      [summary, ...current.filter((conversation) => conversation.id !== summary.id)].sort(
+        (left, right) => right.lastMessageAt - left.lastMessageAt || right.createdAt - left.createdAt,
+      ),
+    );
+  }
+
+  function syncConversationState(conversation: ChatConversation) {
+    setActiveConversation(conversation);
+    setActiveConversationId(conversation.id);
+    upsertConversationSummary(toConversationSummary(conversation));
+  }
+
+  useEffect(() => {
+    let mounted = true;
+
+    void workspaceClient
+      .listConversations()
+      .then((payload) => {
+        if (!mounted) {
+          return;
+        }
+        setConversations(payload.conversations);
+      })
+      .catch(() => {
+        if (mounted) {
+          setToast("加载会话列表失败");
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   function updateInstalledSkill(skillId: string, patch: Partial<SkillConfig>) {
     const skills = config.skills.map((item) => (item.id === skillId ? { ...item, ...patch } : item));
@@ -1132,7 +1155,94 @@ export default function App() {
     }
   }
 
-  const showPreviewPane = view === "chat" && preview && previewOpen;
+  function createDraftConversation() {
+    setView("chat");
+    setActiveConversation(null);
+    setActiveConversationId(null);
+    setGeneratingConversationId(null);
+    setDraftMessage("");
+    setAttachments([]);
+  }
+
+  async function openConversation(conversationId: string) {
+    setView("chat");
+    setActiveConversationId(conversationId);
+    setGeneratingConversationId(null);
+    setDraftMessage("");
+    setAttachments([]);
+    setActiveConversation(null);
+
+    try {
+      const conversation = await workspaceClient.getConversation(conversationId);
+      syncConversationState(conversation);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "加载会话失败");
+      setActiveConversationId(null);
+    }
+  }
+
+  async function deleteConversation(conversationId: string) {
+    try {
+      const payload = await workspaceClient.deleteConversation(conversationId);
+      setConversations(payload.conversations);
+
+      if (activeConversationId === conversationId) {
+        setActiveConversation(null);
+        setActiveConversationId(null);
+        setGeneratingConversationId(null);
+        setDraftMessage("");
+        setAttachments([]);
+      }
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "删除会话失败");
+    }
+  }
+
+  function buildMockAssistantMessage(userContent: string): ChatMessage {
+    return {
+      id: uid(),
+      role: "assistant",
+      content: `好的，你发送的是：${userContent}`,
+    };
+  }
+
+  function buildAssistantEchoMessage(userContent: string): ChatMessage {
+    return {
+      id: uid(),
+      role: "assistant",
+      content: `\u597d\u7684\uff0c\u4f60\u53d1\u9001\u7684\u662f\uff1a${userContent}`,
+    };
+  }
+
+  async function sendChatMessage() {
+    const content = draftMessage.trim();
+    const pendingAttachments = attachments.map((attachment) => ({ ...attachment }));
+    if (!content && pendingAttachments.length === 0) return;
+
+    const targetConversationId = activeConversationId;
+    if (targetConversationId) {
+      setGeneratingConversationId(targetConversationId);
+    }
+
+    try {
+      const result = await workspaceClient.sendChatMessage({
+        conversationId: activeConversationId,
+        content,
+        attachments: pendingAttachments,
+      });
+
+      syncConversationState(result.conversation);
+      setView("chat");
+      setDraftMessage("");
+      setAttachments([]);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "发送消息失败");
+    } finally {
+      setGeneratingConversationId((current) => (current === targetConversationId ? null : current));
+    }
+  }
+
+  const showPreviewPane = preview && previewOpen;
   const canResizePanels = viewportWidth > 840;
   const showInlinePreviewPane = Boolean(showPreviewPane) && viewportWidth > 1400;
   const activeSidebarWidth = view === "settings" ? settingsSidebarWidth : sidebarWidth;
@@ -1234,6 +1344,21 @@ export default function App() {
   }
 
   function renderMainView() {
+    if (view === "chat") {
+      return (
+        <ChatWorkspace
+          activeConversation={activeConversation}
+          attachments={attachments}
+          draftMessage={draftMessage}
+          onDraftMessageChange={setDraftMessage}
+          onOpenAttachment={openPreview}
+          onPickFiles={() => void pickFiles()}
+          onRemoveAttachment={removeAttachment}
+          onSendMessage={sendChatMessage}
+        />
+      );
+    }
+
     if (view === "skills") {
       return (
         <Suspense fallback={<LazyViewFallback />}>
@@ -1319,68 +1444,17 @@ export default function App() {
     }
 
     return (
-      <ChatView
-        attachments={attachments}
-        canSend={canSendMessage}
-        chatBusy={chatBusy}
-        composer={composer}
-        composerKnowledgeBaseIds={config.knowledgeBase.selectedBaseIds}
-        composerModelId={composerModelId}
-        composing={composerComposing}
-        currentWorkspaceLabel={currentWorkspaceLabel}
-        currentWorkspacePath={currentWorkspacePath}
-        dragActive={dragActive}
-        knowledgeBaseOptions={knowledgeBases.map((item) => ({ id: item.id, name: item.name }))}
-        messageListRef={messageListRef}
-        messages={currentChat.messages}
-        modelOptions={selectableModels.map((item) => ({ id: item.id, label: item.label }))}
-        previewAvailable={Boolean(preview)}
-        previewOpen={previewOpen}
-        quickPrompts={CHAT_HOME_QUICK_PROMPTS}
-        showHome={showChatHome}
-        title={currentChat.title}
-        onChooseWorkspace={async () => {
-          try {
-            const selected = await workspaceClient.selectWorkspaceFolder();
-            if (!selected) return;
-            await commitConfig(
-              {
-                ...cloneConfig(config),
-                workspaceRoot: selected,
-              },
-              `工作区已切换到 ${selected}`,
-            );
-          } catch {
-            setToast("切换工作区失败");
-          }
-        }}
-        onComposerChange={setComposer}
-        onComposerKnowledgeBaseIdsChange={(selectedBaseIds) =>
-          updateKnowledgeBaseConfig({
-            enabled: selectedBaseIds.length > 0,
-            selectedBaseIds,
-          })
-        }
-        onComposerModelChange={(value) => updateConfigField("activeModelId", value)}
-        onDragActiveChange={setDragActive}
-        onFilesDropped={appendAttachments}
-        onCompositionChange={setComposerComposing}
-        onOpenFile={openPreview}
-        onOpenLink={openPreviewLink}
-        onPickFiles={pickFiles}
-        onQuickPrompt={setComposer}
-        onRemoveAttachment={removeAttachment}
-        onSend={sendCurrentMessage}
-        onStop={abortCurrentChat}
-        onTogglePreviewPane={() => setPreviewOpen((value) => !value)}
-      />
+      <div className="empty-panel">
+        <strong>选择一个功能开始使用</strong>
+        <span>左侧提供技能、工具、知识库和设置入口。</span>
+      </div>
     );
   }
 
   return (
     <div className={clsx("window-frame", windowState?.maximized && "maximized")}>
       <AppTitleBar
-        runtimeStatus={runtimeStatus}
+        sidebarWidth={activeSidebarWidth}
         view={view}
         windowState={windowState}
         onClose={closeWindow}
@@ -1395,43 +1469,21 @@ export default function App() {
         {view === "settings" ? (
           <SettingsSidebar
             settingsSection={settingsSection}
-            onBack={() => setView("chat")}
+            onBack={() => setView("skills")}
             onSelect={setSettingsSection}
           />
         ) : (
           <PrimarySidebar
-            activeChatSessionId={currentChat.sessionId}
-            chatSessions={chatSessions}
-            view={view}
-            onNewChat={() => {
-              setView("chat");
-              setComposer("");
-              setAttachments([]);
-              setDragActive(false);
-              setPreview(null);
-              setPreviewOpen(false);
-              void resetCurrentChat();
-            }}
-            onSelectChatSession={(sessionId) => {
-              setView("chat");
-              setPreview(null);
-              setPreviewOpen(false);
-              void selectCurrentChatSession(sessionId);
-            }}
-            onArchiveChatSession={(sessionId) => {
-              setPreview(null);
-              setPreviewOpen(false);
-              void archiveChatSession(sessionId);
-            }}
-            onUnarchiveChatSession={(sessionId) => {
-              void unarchiveChatSession(sessionId);
-            }}
-            onDeleteChatSession={(sessionId) => {
-              setPreview(null);
-              setPreviewOpen(false);
-              void deleteChatSession(sessionId);
-            }}
+            activeConversationId={activeConversationId}
+            conversations={conversations.map((conversation) => ({
+              ...conversation,
+              isGenerating: conversation.id === generatingConversationId,
+            }))}
+            onCreateConversation={createDraftConversation}
+            onDeleteConversation={(conversationId) => void deleteConversation(conversationId)}
+            onOpenConversation={(conversationId) => void openConversation(conversationId)}
             onSetView={setView}
+            view={view}
           />
         )}
 

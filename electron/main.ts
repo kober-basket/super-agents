@@ -7,6 +7,7 @@ import {
   APP_WINDOW_TITLE,
   migrateLegacyAppData,
 } from "./app-identity";
+import { ConversationService } from "./conversation-service";
 import { McpInspector } from "./mcp-inspector";
 import { RemoteControlService } from "./remote-control-service";
 import { WorkspaceService } from "./workspace-service";
@@ -17,11 +18,9 @@ app.setPath("userData", path.join(app.getPath("appData"), APP_DATA_DIR));
 
 let mainWindow: BrowserWindow | null = null;
 let service: WorkspaceService | null = null;
+let conversationService: ConversationService | null = null;
 let remoteControlService: RemoteControlService | null = null;
 const mcpInspector = new McpInspector();
-let currentChatMonitor: ReturnType<typeof setTimeout> | null = null;
-let currentChatActivityVersion = 0;
-let currentChatAbortingStartedAt = 0;
 
 function createWindow() {
   const isMac = process.platform === "darwin";
@@ -105,7 +104,10 @@ function getWindowState(): DesktopWindowState {
 app.whenReady().then(async () => {
   await migrateLegacyAppData(app.getPath("appData"));
   const statePath = path.join(app.getPath("userData"), "workspace.json");
+  const conversationDatabasePath = path.join(app.getPath("userData"), "data", "app.db");
   service = new WorkspaceService(statePath);
+  conversationService = new ConversationService(conversationDatabasePath);
+  await conversationService.initialize();
   remoteControlService = new RemoteControlService(statePath, service, {
     onWorkspaceChanged: async () => {
       await broadcastState();
@@ -121,174 +123,24 @@ app.whenReady().then(async () => {
     mainWindow.webContents.send("desktop:workspace-changed", payload);
   }
 
-  function stopCurrentChatMonitor() {
-    if (!currentChatMonitor) return;
-    clearTimeout(currentChatMonitor);
-    currentChatMonitor = null;
-  }
-
-  function bumpCurrentChatActivityVersion() {
-    currentChatActivityVersion += 1;
-    return currentChatActivityVersion;
-  }
-
-  function markCurrentChatAborting() {
-    currentChatAbortingStartedAt = Date.now();
-  }
-
-  function clearCurrentChatAborting() {
-    currentChatAbortingStartedAt = 0;
-  }
-
-  function isCurrentChatAborting() {
-    if (!currentChatAbortingStartedAt) return false;
-    if (Date.now() - currentChatAbortingStartedAt > 5_000) {
-      currentChatAbortingStartedAt = 0;
-      return false;
-    }
-    return true;
-  }
-
-  async function monitorCurrentChatProgress(
-    intervalMs = 400,
-    finalPass = false,
-    activityVersion = currentChatActivityVersion,
-  ) {
-    if (!service) return;
-    if (isCurrentChatAborting() || activityVersion !== currentChatActivityVersion) {
-      stopCurrentChatMonitor();
-      return;
-    }
-
-    stopCurrentChatMonitor();
-
-    try {
-      const progress = await service.getCurrentChatProgress();
-      if (isCurrentChatAborting() || activityVersion !== currentChatActivityVersion) {
-        stopCurrentChatMonitor();
-        return;
-      }
-
-      if (!progress.busy && !progress.blockedOnQuestion && !finalPass) {
-        currentChatMonitor = setTimeout(() => {
-          void monitorCurrentChatProgress(intervalMs, true, activityVersion);
-        }, intervalMs);
-        return;
-      }
-
-      await broadcastState();
-
-      if (progress.blockedOnQuestion) {
-        stopCurrentChatMonitor();
-        return;
-      }
-
-      if (!progress.busy) {
-        if (finalPass) {
-          stopCurrentChatMonitor();
-          return;
-        }
-
-        currentChatMonitor = setTimeout(() => {
-          void monitorCurrentChatProgress(intervalMs, true, activityVersion);
-        }, intervalMs);
-        return;
-      }
-
-      currentChatMonitor = setTimeout(() => {
-        void monitorCurrentChatProgress(intervalMs, false, activityVersion);
-      }, intervalMs);
-    } catch {
-      stopCurrentChatMonitor();
-    }
-  }
-
-  async function continueMonitoringCurrentChatIfNeeded(activityVersion = currentChatActivityVersion) {
-    if (!service) return;
-    if (isCurrentChatAborting() || activityVersion !== currentChatActivityVersion) {
-      stopCurrentChatMonitor();
-      return;
-    }
-
-    try {
-      const progress = await service.getCurrentChatProgress();
-      if (isCurrentChatAborting() || activityVersion !== currentChatActivityVersion) {
-        stopCurrentChatMonitor();
-        return;
-      }
-
-      if (progress.busy || progress.blockedOnQuestion) {
-        void monitorCurrentChatProgress(400, false, activityVersion);
-      } else {
-        stopCurrentChatMonitor();
-      }
-    } catch {
-      stopCurrentChatMonitor();
-    }
-  }
-
   ipcMain.handle("desktop:bootstrap", async () => {
     return await service!.bootstrap();
   });
 
-  ipcMain.handle("desktop:send-message", async (_event, payload) => {
-    const requestedActivityVersion = bumpCurrentChatActivityVersion();
-    const result = await service!.sendMessage(payload);
-    await continueMonitoringCurrentChatIfNeeded(requestedActivityVersion);
-    await broadcastState();
-    return result;
+  ipcMain.handle("desktop:list-conversations", async () => {
+    return await conversationService!.listConversations();
   });
 
-  ipcMain.handle("desktop:select-current-chat-session", async (_event, sessionId: string) => {
-    bumpCurrentChatActivityVersion();
-    stopCurrentChatMonitor();
-    const payload = await service!.selectCurrentChatSession(sessionId);
-    await continueMonitoringCurrentChatIfNeeded();
-    await broadcastState();
-    return payload;
+  ipcMain.handle("desktop:get-conversation", async (_event, conversationId: string) => {
+    return await conversationService!.getConversation(conversationId);
   });
 
-  ipcMain.handle("desktop:reset-current-chat", async () => {
-    bumpCurrentChatActivityVersion();
-    stopCurrentChatMonitor();
-    const payload = await service!.resetCurrentChat();
-    await broadcastState();
-    return payload;
+  ipcMain.handle("desktop:send-chat-message", async (_event, payload) => {
+    return await conversationService!.sendMessage(payload);
   });
 
-  ipcMain.handle("desktop:archive-chat-session", async (_event, sessionId: string) => {
-    bumpCurrentChatActivityVersion();
-    stopCurrentChatMonitor();
-    const payload = await service!.archiveChatSession(sessionId);
-    await broadcastState();
-    return payload;
-  });
-
-  ipcMain.handle("desktop:unarchive-chat-session", async (_event, sessionId: string) => {
-    const payload = await service!.unarchiveChatSession(sessionId);
-    await broadcastState();
-    return payload;
-  });
-
-  ipcMain.handle("desktop:delete-chat-session", async (_event, sessionId: string) => {
-    bumpCurrentChatActivityVersion();
-    stopCurrentChatMonitor();
-    const payload = await service!.deleteChatSession(sessionId);
-    await broadcastState();
-    return payload;
-  });
-
-  ipcMain.handle("desktop:abort-current-chat", async () => {
-    bumpCurrentChatActivityVersion();
-    stopCurrentChatMonitor();
-    markCurrentChatAborting();
-    try {
-      const payload = await service!.abortCurrentChat();
-      await broadcastState();
-      return payload;
-    } finally {
-      clearCurrentChatAborting();
-    }
+  ipcMain.handle("desktop:delete-conversation", async (_event, conversationId: string) => {
+    return await conversationService!.deleteConversation(conversationId);
   });
 
   ipcMain.handle("desktop:list-knowledge-bases", async () => {
@@ -586,7 +438,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", async () => {
-  stopCurrentChatMonitor();
   await remoteControlService?.shutdown();
+  await conversationService?.shutdown();
   await service?.shutdown();
 });

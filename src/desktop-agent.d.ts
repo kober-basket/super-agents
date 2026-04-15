@@ -1,5 +1,9 @@
 import type {
   AppConfig,
+  ChatConversation,
+  ChatConversationListPayload,
+  ChatSendInput,
+  ChatSendResult,
   BootstrapPayload,
   DesktopWindowState,
   FileDropEntry,
@@ -19,8 +23,6 @@ import type {
   ModelProviderFetchInput,
   ModelProviderFetchResult,
   RemoteControlStatus,
-  SendMessageInput,
-  SendMessageResult,
   WechatLoginStartResult,
   WechatLoginWaitResult,
   WorkspaceToolCatalog,
@@ -30,21 +32,18 @@ declare global {
   interface Window {
     desktopAgent: {
       bootstrap: () => Promise<BootstrapPayload>;
-      sendMessage: (payload: SendMessageInput) => Promise<SendMessageResult>;
-      selectCurrentChatSession: (sessionId: string) => Promise<BootstrapPayload>;
-      resetCurrentChat: () => Promise<BootstrapPayload>;
-      archiveChatSession: (sessionId: string) => Promise<BootstrapPayload>;
-      unarchiveChatSession: (sessionId: string) => Promise<BootstrapPayload>;
-      deleteChatSession: (sessionId: string) => Promise<BootstrapPayload>;
-      abortCurrentChat: () => Promise<BootstrapPayload>;
+      listConversations: () => Promise<ChatConversationListPayload>;
+      getConversation: (conversationId: string) => Promise<ChatConversation>;
+      sendChatMessage: (payload: ChatSendInput) => Promise<ChatSendResult>;
+      deleteConversation: (conversationId: string) => Promise<ChatConversationListPayload>;
       listKnowledgeBases: () => Promise<KnowledgeCatalogPayload>;
       createKnowledgeBase: (payload: KnowledgeBaseCreateInput) => Promise<KnowledgeCatalogPayload>;
-      deleteKnowledgeBase: (baseId: string) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeFiles: (payload: KnowledgeAddFilesInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeDirectory: (payload: KnowledgeAddDirectoryInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeNote: (payload: KnowledgeAddNoteInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeUrl: (payload: KnowledgeAddUrlInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeWebsite: (payload: KnowledgeAddUrlInput) => Promise<KnowledgeCatalogPayload>;
+      deleteKnowledgeBase: (baseId: string) => Promise<KnowledgeCatalogPayload>;
       deleteKnowledgeItem: (payload: KnowledgeDeleteItemInput) => Promise<KnowledgeCatalogPayload>;
       searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) => Promise<KnowledgeSearchPayload>;
       uninstallSkill: (skillId: string) => Promise<BootstrapPayload>;

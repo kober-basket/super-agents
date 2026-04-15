@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import type {
   AppConfig,
+  ChatConversation,
+  ChatConversationListPayload,
+  ChatSendInput,
+  ChatSendResult,
   BootstrapPayload,
   DesktopWindowState,
   FileDropEntry,
@@ -21,8 +25,6 @@ import type {
   ModelProviderFetchInput,
   ModelProviderFetchResult,
   RemoteControlStatus,
-  SendMessageInput,
-  SendMessageResult,
   WechatLoginStartResult,
   WechatLoginWaitResult,
   WorkspaceToolCatalog,
@@ -30,20 +32,14 @@ import type {
 
 const desktopAgent = {
   bootstrap: () => ipcRenderer.invoke("desktop:bootstrap") as Promise<BootstrapPayload>,
-  sendMessage: (payload: SendMessageInput) =>
-    ipcRenderer.invoke("desktop:send-message", payload) as Promise<SendMessageResult>,
-  selectCurrentChatSession: (sessionId: string) =>
-    ipcRenderer.invoke("desktop:select-current-chat-session", sessionId) as Promise<BootstrapPayload>,
-  resetCurrentChat: () =>
-    ipcRenderer.invoke("desktop:reset-current-chat") as Promise<BootstrapPayload>,
-  archiveChatSession: (sessionId: string) =>
-    ipcRenderer.invoke("desktop:archive-chat-session", sessionId) as Promise<BootstrapPayload>,
-  unarchiveChatSession: (sessionId: string) =>
-    ipcRenderer.invoke("desktop:unarchive-chat-session", sessionId) as Promise<BootstrapPayload>,
-  deleteChatSession: (sessionId: string) =>
-    ipcRenderer.invoke("desktop:delete-chat-session", sessionId) as Promise<BootstrapPayload>,
-  abortCurrentChat: () =>
-    ipcRenderer.invoke("desktop:abort-current-chat") as Promise<BootstrapPayload>,
+  listConversations: () =>
+    ipcRenderer.invoke("desktop:list-conversations") as Promise<ChatConversationListPayload>,
+  getConversation: (conversationId: string) =>
+    ipcRenderer.invoke("desktop:get-conversation", conversationId) as Promise<ChatConversation>,
+  sendChatMessage: (payload: ChatSendInput) =>
+    ipcRenderer.invoke("desktop:send-chat-message", payload) as Promise<ChatSendResult>,
+  deleteConversation: (conversationId: string) =>
+    ipcRenderer.invoke("desktop:delete-conversation", conversationId) as Promise<ChatConversationListPayload>,
   listKnowledgeBases: () =>
     ipcRenderer.invoke("desktop:list-knowledge-bases") as Promise<KnowledgeCatalogPayload>,
   createKnowledgeBase: (payload: KnowledgeBaseCreateInput) =>
