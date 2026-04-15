@@ -113,15 +113,6 @@ app.whenReady().then(async () => {
   conversationService = new ConversationService(conversationDatabasePath);
   await conversationService.initialize();
   acpRuntimeManager = new AcpRuntimeManager(app.getPath("appData"));
-  remoteControlService = new RemoteControlService(statePath, service, {
-    onWorkspaceChanged: async () => {
-      await broadcastState();
-    },
-  });
-  await remoteControlService.initialize(await service.getConfigSnapshot());
-
-  createWindow();
-
   const emitChatEvent = (event: ChatEvent) => {
     if (!mainWindow || mainWindow.isDestroyed()) {
       return;
@@ -135,6 +126,14 @@ app.whenReady().then(async () => {
     acpRuntimeManager,
     emitChatEvent,
   );
+  remoteControlService = new RemoteControlService(statePath, service, chatOrchestrator, {
+    onWorkspaceChanged: async () => {
+      await broadcastState();
+    },
+  });
+  await remoteControlService.initialize(await service.getConfigSnapshot());
+
+  createWindow();
 
   async function broadcastState() {
     if (!mainWindow || mainWindow.isDestroyed() || !service) return;

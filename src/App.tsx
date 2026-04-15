@@ -33,6 +33,7 @@ import type { SettingsSection } from "./features/settings/types";
 import { useWorkspaceController } from "./features/workspace/useWorkspaceController";
 import { fileKind, sanitizeMcpName } from "./features/shared/utils";
 import { ChatWorkspace } from "./features/chat/ChatWorkspace";
+import { useGlobalSmoothScroll } from "./lib/useGlobalSmoothScroll";
 
 const PreviewPane = lazy(async () => {
   const module = await import("./features/chat/PreviewPane");
@@ -126,7 +127,32 @@ function createConversationRuntimeState(
   };
 }
 
+function isConversationTurnActive(status?: ChatConversationRuntimeState["status"]) {
+  return status === "running" || status === "cancelling";
+}
+
+function preserveActiveTurnStatus(status?: ChatConversationRuntimeState["status"]) {
+  return status === "cancelling" ? "cancelling" : "running";
+}
+
+function looksLikeTurnCancellation(value?: string) {
+  return Boolean(value && /(cancel|abort|interrupt|stop(ped)?)/i.test(value));
+}
+
+function normalizeTurnStopReason(
+  stopReason: string | undefined,
+  status?: ChatConversationRuntimeState["status"],
+) {
+  if (status === "cancelling" || looksLikeTurnCancellation(stopReason)) {
+    return "cancelled";
+  }
+
+  return stopReason;
+}
+
 export default function App() {
+  useGlobalSmoothScroll();
+
   const [view, setView] = useState<AppSection>("chat");
   const [conversations, setConversations] = useState<ChatConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -475,6 +501,41 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+    const unsubscribe = workspaceClient.onWorkspaceChanged(() => {
+      void (async () => {
+        try {
+          const [listPayload, conversation] = await Promise.all([
+            workspaceClient.listConversations(),
+            activeConversationId
+              ? workspaceClient.getConversation(activeConversationId).catch(() => null)
+              : Promise.resolve(null),
+          ]);
+
+          if (!mounted) {
+            return;
+          }
+
+          setConversations(listPayload.conversations);
+
+          if (conversation) {
+            setActiveConversation((current) =>
+              !current || current.id === conversation.id ? conversation : current,
+            );
+          }
+        } catch {
+          return;
+        }
+      })();
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, [activeConversationId]);
+
+  useEffect(() => {
     return workspaceClient.onChatEvent((event) => {
       if (event.type === "message_delta") {
         const now = Date.now();
@@ -522,16 +583,19 @@ export default function App() {
       }
 
       if (event.type === "plan_updated") {
-        setConversationRuntimeStates((current) => ({
-          ...current,
-          [event.conversationId]: {
-            ...(current[event.conversationId] ?? createConversationRuntimeState("running")),
-            status: "running",
-            error: undefined,
-            stopReason: undefined,
-            planEntries: event.entries,
-          },
-        }));
+        setConversationRuntimeStates((current) => {
+          const previous = current[event.conversationId] ?? createConversationRuntimeState("running");
+          return {
+            ...current,
+            [event.conversationId]: {
+              ...previous,
+              status: preserveActiveTurnStatus(previous.status),
+              error: undefined,
+              stopReason: undefined,
+              planEntries: event.entries,
+            },
+          };
+        });
         return;
       }
 
@@ -542,7 +606,7 @@ export default function App() {
             ...current,
             [event.conversationId]: {
               ...previous,
-              status: "running",
+              status: preserveActiveTurnStatus(previous.status),
               error: undefined,
               stopReason: undefined,
               toolCalls: [
@@ -562,7 +626,7 @@ export default function App() {
             ...current,
             [event.conversationId]: {
               ...previous,
-              status: "running",
+              status: preserveActiveTurnStatus(previous.status),
               error: undefined,
               stopReason: undefined,
               toolCalls: previous.toolCalls.map((toolCall) =>
@@ -588,7 +652,8 @@ export default function App() {
             ...current,
             [event.conversationId]: {
               ...previous,
-              status: "running",
+              status: preserveActiveTurnStatus(previous.status),
+              error: undefined,
               terminalOutputs: {
                 ...previous.terminalOutputs,
                 [event.terminal.terminalId]: event.terminal,
@@ -600,27 +665,50 @@ export default function App() {
       }
 
       if (event.type === "turn_finished") {
-        setConversationRuntimeStates((current) => ({
-          ...current,
-          [event.conversationId]: {
-            ...(current[event.conversationId] ?? createConversationRuntimeState()),
-            status: "idle",
-            stopReason: event.stopReason,
-            error: undefined,
-          },
-        }));
+        setConversationRuntimeStates((current) => {
+          const previous = current[event.conversationId] ?? createConversationRuntimeState();
+          return {
+            ...current,
+            [event.conversationId]: {
+              ...previous,
+              status: "idle",
+              stopReason: normalizeTurnStopReason(event.stopReason, previous.status),
+              error: undefined,
+            },
+          };
+        });
         return;
       }
 
-      setConversationRuntimeStates((current) => ({
-        ...current,
-        [event.conversationId]: {
-          ...(current[event.conversationId] ?? createConversationRuntimeState()),
-          status: "failed",
-          error: event.error,
-        },
-      }));
-      setToast(event.error);
+      let shouldToast = true;
+      setConversationRuntimeStates((current) => {
+        const previous = current[event.conversationId] ?? createConversationRuntimeState();
+        if (previous.status === "cancelling" && looksLikeTurnCancellation(event.error)) {
+          shouldToast = false;
+          return {
+            ...current,
+            [event.conversationId]: {
+              ...previous,
+              status: "idle",
+              stopReason: "cancelled",
+              error: undefined,
+            },
+          };
+        }
+
+        return {
+          ...current,
+          [event.conversationId]: {
+            ...previous,
+            status: "failed",
+            stopReason: undefined,
+            error: event.error,
+          },
+        };
+      });
+      if (shouldToast) {
+        setToast(event.error);
+      }
     });
   }, []);
 
@@ -1432,6 +1520,59 @@ export default function App() {
     }
   }
 
+  async function cancelActiveChatTurn() {
+    const conversationId = activeConversationId;
+    if (!conversationId) {
+      return;
+    }
+
+    const runtimeState = conversationRuntimeStates[conversationId];
+    if (!runtimeState || !isConversationTurnActive(runtimeState.status)) {
+      return;
+    }
+
+    if (runtimeState.status === "cancelling") {
+      return;
+    }
+
+    setConversationRuntimeStates((current) => {
+      const previous = current[conversationId];
+      if (!previous || !isConversationTurnActive(previous.status)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [conversationId]: {
+          ...previous,
+          status: "cancelling",
+          error: undefined,
+          stopReason: undefined,
+        },
+      };
+    });
+
+    try {
+      await workspaceClient.cancelChatTurn(conversationId);
+    } catch (error) {
+      setConversationRuntimeStates((current) => {
+        const previous = current[conversationId];
+        if (!previous || previous.status !== "cancelling") {
+          return current;
+        }
+
+        return {
+          ...current,
+          [conversationId]: {
+            ...previous,
+            status: "running",
+          },
+        };
+      });
+      setToast(error instanceof Error ? error.message : "停止生成失败");
+    }
+  }
+
   const showPreviewPane = preview && previewOpen;
   const canResizePanels = viewportWidth > 840;
   const showInlinePreviewPane = Boolean(showPreviewPane) && viewportWidth > 1400;
@@ -1448,8 +1589,16 @@ export default function App() {
     filteredInstalledSkills.length > 0 || filteredReferenceSkills.length > 0;
   const activeConversationRuntimeState =
     (activeConversationId ? conversationRuntimeStates[activeConversationId] : null) ?? null;
+  const activeConversationCancelling =
+    activeConversationRuntimeState?.status === "cancelling";
+  const activeConversationCanCancel =
+    Boolean(
+      activeConversationId &&
+        activeConversationRuntimeState &&
+        isConversationTurnActive(activeConversationRuntimeState.status),
+    );
   const activeConversationBusy =
-    startingChatTurn || activeConversationRuntimeState?.status === "running";
+    startingChatTurn || isConversationTurnActive(activeConversationRuntimeState?.status);
 
   const beginResize =
     (target: ResizeTarget, width: number) => (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -1545,6 +1694,8 @@ export default function App() {
           activeModel={activeModel}
           attachments={attachments}
           busy={activeConversationBusy}
+          canCancel={activeConversationCanCancel}
+          cancelInFlight={activeConversationCancelling}
           composerModelId={composerModelId}
           draftMessage={draftMessage}
           knowledgeBases={knowledgeBases}
@@ -1558,6 +1709,7 @@ export default function App() {
           onOpenPreviewLink={openPreviewLink}
           onPickFiles={() => void pickFiles()}
           onRemoveAttachment={removeAttachment}
+          onCancelMessage={() => void cancelActiveChatTurn()}
           onSendMessage={sendChatMessage}
           onToggleKnowledgeBase={toggleKnowledgeBaseSelection}
           runtimeState={activeConversationRuntimeState}
@@ -1687,7 +1839,7 @@ export default function App() {
             activeConversationId={activeConversationId}
             conversations={conversations.map((conversation) => ({
               ...conversation,
-              isGenerating: conversationRuntimeStates[conversation.id]?.status === "running",
+              isGenerating: isConversationTurnActive(conversationRuntimeStates[conversation.id]?.status),
             }))}
             onCreateConversation={createDraftConversation}
             onDeleteConversation={(conversationId) => void deleteConversation(conversationId)}

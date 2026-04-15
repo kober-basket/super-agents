@@ -437,7 +437,7 @@ export type ChatToolKind =
   | "other";
 export type ChatPlanEntryPriority = "high" | "medium" | "low";
 export type ChatPlanEntryStatus = "pending" | "in_progress" | "completed";
-export type ChatTurnStatus = "idle" | "running" | "failed";
+export type ChatTurnStatus = "idle" | "running" | "cancelling" | "failed";
 
 export interface ChatMessage {
   id: string;

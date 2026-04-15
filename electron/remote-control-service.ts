@@ -7,6 +7,7 @@ import type {
   WechatLoginStartResult,
   WechatLoginWaitResult,
 } from "../src/types";
+import type { ChatOrchestrator } from "./chat-orchestrator";
 import { readJsonFile, writeJsonFile } from "./store";
 import type { RemoteChannelMonitor } from "./remote-control-common";
 import type { WorkspaceService } from "./workspace-service";
@@ -31,6 +32,7 @@ interface RemotePeerBinding {
   accountId: string;
   peerId: string;
   title: string;
+  conversationId?: string;
   contextToken?: string;
   updatedAt: number;
 }
@@ -93,6 +95,22 @@ function describeWechatPeer(peerId: string) {
   return `寰俊 路 ${peerId}`;
 }
 
+function buildRemoteAssistantReply(text: string) {
+  const trimmed = text.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  return "The agent finished without a text reply. Please open the desktop app to review tool output and files.";
+}
+
+function buildRemoteFailureReply(error: unknown) {
+  const message = error instanceof Error ? error.message.trim() : String(error ?? "").trim();
+  if (!message) {
+    return "The remote turn failed. Please retry from the remote channel or continue in the desktop app.";
+  }
+  return `The remote turn failed: ${message}`;
+}
+
 const LEGACY_PEERS_KEY = ["bind", "ings"].join("");
 
 function normalizePeerBindings(value: unknown): RemotePeerBinding[] {
@@ -115,6 +133,10 @@ function normalizePeerBindings(value: unknown): RemotePeerBinding[] {
         accountId: typeof item.accountId === "string" ? item.accountId.trim() : "",
         peerId: typeof item.peerId === "string" ? item.peerId.trim() : "",
         title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : "远程连接",
+        conversationId:
+          typeof item.conversationId === "string" && item.conversationId.trim()
+            ? item.conversationId.trim()
+            : undefined,
         contextToken:
           typeof item.contextToken === "string" && item.contextToken.trim()
             ? item.contextToken.trim()
@@ -155,6 +177,7 @@ export class RemoteControlService {
   constructor(
     workspaceStatePath: string,
     private readonly workspace: WorkspaceService,
+    private readonly chatOrchestrator: ChatOrchestrator,
     private readonly options: RemoteControlServiceOptions = {},
   ) {
     this.statePath = path.join(path.dirname(workspaceStatePath), "remote-control.json");
@@ -703,11 +726,37 @@ export class RemoteControlService {
       return;
     }
 
-    await message.replyText(
-      "super-agents desktop runtime has been simplified. Remote control can still receive messages, but it no longer starts local conversations or runs a built-in Q&A flow. Please return to the desktop app for file preview and the remaining workspace features.",
-      binding,
-    );
-    await this.options.onWorkspaceChanged?.();
+    try {
+      const turn = await this.chatOrchestrator.startTurnWithCompletion({
+        conversationId: binding.conversationId,
+        content: message.text,
+        attachments,
+      });
+
+      if (binding.conversationId !== turn.result.conversation.id) {
+        binding = await this.upsertBinding({
+          ...binding,
+          conversationId: turn.result.conversation.id,
+          title: message.title,
+          updatedAt: Date.now(),
+        });
+      }
+
+      await this.options.onWorkspaceChanged?.();
+
+      const completed = await turn.completion;
+      await message.replyText(
+        buildRemoteAssistantReply(completed.assistantMessage.content),
+        binding,
+      );
+      await this.options.onWorkspaceChanged?.();
+    } catch (error) {
+      this.noteError(message.channel, error);
+      await message
+        .replyText(buildRemoteFailureReply(error), binding)
+        .catch((replyError) => this.noteError(message.channel, replyError));
+      await this.options.onWorkspaceChanged?.();
+    }
   }
 
   private async ensureBinding(

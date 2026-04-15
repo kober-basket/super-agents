@@ -5,7 +5,9 @@ import type * as acp from "@agentclientprotocol/sdk";
 
 import type {
   AppConfig,
+  ChatConversation,
   ChatEvent,
+  ChatMessage,
   ChatPlanEntry,
   ChatSendInput,
   ChatTerminalOutput,
@@ -28,6 +30,7 @@ interface ActiveTurn {
   sessionId: string;
   assistantMessageId: string;
   assistantText: string;
+  completion: Deferred<ChatTurnCompletionResult>;
   unregisterSessionHandlers: () => void;
   closed: boolean;
 }
@@ -37,6 +40,33 @@ interface PreparedPrompt {
   additionalDirectories: string[];
   mcpServers: acp.McpServer[];
   prompt: acp.ContentBlock[];
+}
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+}
+
+export interface ChatTurnCompletionResult {
+  conversation: ChatConversation;
+  assistantMessage: ChatMessage;
+  stopReason: string;
+}
+
+export interface ChatTurnExecution {
+  result: ChatTurnStartResult;
+  completion: Promise<ChatTurnCompletionResult>;
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
 }
 
 function uniquePaths(values: string[]) {
@@ -200,6 +230,14 @@ export class ChatOrchestrator {
   ) {}
 
   async startTurn(input: ChatSendInput): Promise<ChatTurnStartResult> {
+    return (await this.startTurnWithCompletion(input)).result;
+  }
+
+  async startTurnAndWait(input: ChatSendInput): Promise<ChatTurnCompletionResult> {
+    return await (await this.startTurnWithCompletion(input)).completion;
+  }
+
+  async startTurnWithCompletion(input: ChatSendInput): Promise<ChatTurnExecution> {
     const existingConversationId = input.conversationId?.trim();
     if (existingConversationId && this.activeTurns.has(existingConversationId)) {
       throw new Error("This conversation is already running.");
@@ -213,6 +251,8 @@ export class ChatOrchestrator {
       ...started.conversation,
       agentCore: this.agentCore,
     };
+    const completion = createDeferred<ChatTurnCompletionResult>();
+    void completion.promise.catch(() => undefined);
 
     try {
       await this.runtime.ensureInitialized();
@@ -242,6 +282,7 @@ export class ChatOrchestrator {
         sessionId,
         assistantMessageId: started.assistantMessage.id,
         assistantText: started.assistantMessage.content,
+        completion,
         unregisterSessionHandlers: () => undefined,
         closed: false,
       };
@@ -273,14 +314,18 @@ export class ChatOrchestrator {
       });
 
       return {
-        createdConversation: started.createdConversation,
-        turnId,
-        conversation: {
-          ...baseConversation,
-          agentSessionId: sessionId,
+        result: {
+          createdConversation: started.createdConversation,
+          turnId,
+          conversation: {
+            ...baseConversation,
+            agentSessionId: sessionId,
+          },
         },
+        completion: completion.promise,
       };
     } catch (error) {
+      completion.reject(error);
       queueMicrotask(() => {
         this.emitEvent({
           type: "turn_failed",
@@ -291,9 +336,12 @@ export class ChatOrchestrator {
       });
 
       return {
-        createdConversation: started.createdConversation,
-        turnId,
-        conversation: baseConversation,
+        result: {
+          createdConversation: started.createdConversation,
+          turnId,
+          conversation: baseConversation,
+        },
+        completion: completion.promise,
       };
     }
   }
@@ -361,6 +409,23 @@ export class ChatOrchestrator {
         messageId: userMessageId,
         prompt,
       });
+      const conversation = await this.conversationService.getConversation(activeTurn.conversationId);
+      const assistantMessage =
+        conversation.messages.find((message) => message.id === activeTurn.assistantMessageId) ??
+        ({
+          id: activeTurn.assistantMessageId,
+          role: "assistant",
+          content: activeTurn.assistantText,
+          attachments: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } satisfies ChatMessage);
+
+      activeTurn.completion.resolve({
+        conversation,
+        assistantMessage,
+        stopReason: response.stopReason,
+      });
 
       this.emitEvent({
         type: "turn_finished",
@@ -369,6 +434,7 @@ export class ChatOrchestrator {
         stopReason: response.stopReason,
       });
     } catch (error) {
+      activeTurn.completion.reject(error);
       this.emitEvent({
         type: "turn_failed",
         conversationId: activeTurn.conversationId,

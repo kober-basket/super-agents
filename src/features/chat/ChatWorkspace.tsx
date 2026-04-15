@@ -8,6 +8,7 @@ import {
   LoaderCircle,
   Mic,
   Paperclip,
+  Square,
   Sparkles,
   TerminalSquare,
   Wrench,
@@ -38,6 +39,8 @@ interface ChatWorkspaceProps {
   activeModel: RuntimeModelOption | null;
   attachments: FileDropEntry[];
   busy: boolean;
+  canCancel: boolean;
+  cancelInFlight: boolean;
   composerModelId: string;
   draftMessage: string;
   knowledgeBases: KnowledgeBaseSummary[];
@@ -54,6 +57,7 @@ interface ChatWorkspaceProps {
   onOpenPreviewLink: (url: string) => void;
   onPickFiles: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
+  onCancelMessage: () => void;
   onSendMessage: () => void;
   onToggleKnowledgeBase: (baseId: string) => void;
   onVoiceInput: () => void;
@@ -124,6 +128,88 @@ function hasVisibleText(value?: string | null) {
   return Boolean(value && value.trim());
 }
 
+function isTurnActiveStatus(status?: ChatConversationRuntimeState["status"]) {
+  return status === "running" || status === "cancelling";
+}
+
+function parseJsonValue(value?: string | null) {
+  if (!hasVisibleText(value)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeInlineText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function extractCommandCandidates(value: unknown, depth = 0): string[] {
+  if (depth > 4 || value === null || value === undefined) {
+    return [];
+  }
+
+  if (typeof value === "string") {
+    const normalized = normalizeInlineText(value);
+    return normalized ? [normalized] : [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => extractCommandCandidates(entry, depth + 1));
+  }
+
+  if (typeof value !== "object") {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  const directMatches = ["command", "cmd", "script"].flatMap((key) =>
+    extractCommandCandidates(record[key], depth + 1),
+  );
+  if (directMatches.length > 0) {
+    return directMatches;
+  }
+
+  const parameters = record.parameters;
+  if (parameters && typeof parameters === "object") {
+    const parameterRecord = parameters as Record<string, unknown>;
+    const parameterMatches = ["command", "cmd", "script"].flatMap((key) =>
+      extractCommandCandidates(parameterRecord[key], depth + 1),
+    );
+    if (parameterMatches.length > 0) {
+      return parameterMatches;
+    }
+  }
+
+  return [];
+}
+
+function extractExecuteLabel(toolCall: ChatToolCall) {
+  const inlineText = toolCall.content.find(
+    (content) =>
+      content.type === "text" &&
+      hasVisibleText(content.text) &&
+      !content.text.includes("\n") &&
+      !content.text.trim().startsWith("{") &&
+      !content.text.trim().startsWith("["),
+  );
+  if (inlineText?.type === "text") {
+    return normalizeInlineText(inlineText.text);
+  }
+
+  const parsedInput = parseJsonValue(toolCall.rawInputJson);
+  const commandCandidate = extractCommandCandidates(parsedInput)[0];
+  if (commandCandidate) {
+    return commandCandidate;
+  }
+
+  return hasVisibleText(toolCall.title) ? toolCall.title : toolSummary(toolCall);
+}
+
 function shouldRenderToolTextAsMarkdown(toolCall: ChatToolCall, text: string) {
   if (toolCall.kind === "execute") {
     return false;
@@ -137,6 +223,8 @@ export function ChatWorkspace({
   activeModel,
   attachments,
   busy,
+  canCancel,
+  cancelInFlight,
   composerModelId,
   draftMessage,
   knowledgeBases,
@@ -153,6 +241,7 @@ export function ChatWorkspace({
   onOpenPreviewLink,
   onPickFiles,
   onRemoveAttachment,
+  onCancelMessage,
   onSendMessage,
   onToggleKnowledgeBase,
   onVoiceInput,
@@ -162,6 +251,15 @@ export function ChatWorkspace({
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const knowledgePickerRef = useRef<HTMLDivElement | null>(null);
   const modelPickerRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollStateRef = useRef<{
+    activeConversationId: string | null;
+    messageCount: number;
+    scrollRequest: number;
+  }>({
+    activeConversationId: null,
+    messageCount: 0,
+    scrollRequest: 0,
+  });
   const [knowledgePickerOpen, setKnowledgePickerOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
 
@@ -215,6 +313,7 @@ export function ChatWorkspace({
   const activeModelLabel = formatCompactModelLabel(activeModelOption?.modelLabel ?? "");
   const selectedKnowledgeBases = knowledgeBases.filter((base) => selectedKnowledgeBaseIds.includes(base.id));
   const selectedKnowledgeCount = knowledgeEnabled ? selectedKnowledgeBaseIds.length : 0;
+  const runtimeInProgress = isTurnActiveStatus(runtimeState?.status);
   const runtimeFingerprint = JSON.stringify({
     status: runtimeState?.status,
     stopReason: runtimeState?.stopReason,
@@ -233,8 +332,19 @@ export function ChatWorkspace({
       exitCode: terminal.exitCode,
     })),
   });
+  const runtimeToolCalls = runtimeState?.toolCalls ?? [];
+  const executeToolCalls = runtimeToolCalls.filter((toolCall) => toolCall.kind === "execute");
+  const nonExecuteToolCalls = runtimeToolCalls.filter((toolCall) => toolCall.kind !== "execute");
+  const executeToolCallByTerminalId = new Map<string, ChatToolCall>();
+  executeToolCalls.forEach((toolCall) => {
+    toolCall.content.forEach((content) => {
+      if (content.type === "terminal") {
+        executeToolCallByTerminalId.set(content.terminalId, toolCall);
+      }
+    });
+  });
   const selectedTerminalIds = new Set(
-    (runtimeState?.toolCalls ?? []).flatMap((toolCall) =>
+    nonExecuteToolCalls.flatMap((toolCall) =>
       toolCall.content
         .filter((content) => content.type === "terminal")
         .map((content) => content.terminalId),
@@ -263,10 +373,34 @@ export function ChatWorkspace({
 
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
-    if (!messageList || !activeConversationId) return undefined;
+    if (!messageList || !activeConversationId) {
+      autoScrollStateRef.current = {
+        activeConversationId,
+        messageCount,
+        scrollRequest: scrollToBottomRequest,
+      };
+      return undefined;
+    }
+
+    const previousScrollState = autoScrollStateRef.current;
+    const conversationChanged = previousScrollState.activeConversationId !== activeConversationId;
+    const hasNewMessage =
+      previousScrollState.activeConversationId === activeConversationId &&
+      messageCount > previousScrollState.messageCount;
+    const requestedManualScroll = previousScrollState.scrollRequest !== scrollToBottomRequest;
+    const behavior: ScrollBehavior = !conversationChanged && (hasNewMessage || requestedManualScroll) ? "smooth" : "auto";
+
+    autoScrollStateRef.current = {
+      activeConversationId,
+      messageCount,
+      scrollRequest: scrollToBottomRequest,
+    };
 
     const scrollToBottom = () => {
-      messageList.scrollTop = messageList.scrollHeight;
+      messageList.scrollTo({
+        top: messageList.scrollHeight,
+        behavior,
+      });
     };
 
     scrollToBottom();
@@ -417,11 +551,12 @@ export function ChatWorkspace({
 
   function renderModelPicker() {
     const disabled = busy || selectableModels.length === 0;
+    const activeModelFullLabel = activeModelOption?.modelLabel?.trim() || activeModelLabel;
 
     return (
       <div ref={modelPickerRef} className="chat-model-picker">
         <button
-          aria-label={disabled ? "未配置模型" : `当前模型 ${activeModelOption?.label ?? activeModelLabel}`}
+          aria-label={disabled ? "未配置模型" : `当前模型 ${activeModelFullLabel}`}
           className={`chat-model-trigger ${modelPickerOpen ? "open" : ""}`}
           disabled={disabled}
           onClick={() => {
@@ -429,7 +564,7 @@ export function ChatWorkspace({
             setModelPickerOpen((current) => !current);
             setKnowledgePickerOpen(false);
           }}
-          title={activeModelOption?.label ?? "选择模型"}
+          title={activeModelFullLabel || "选择模型"}
           type="button"
         >
           <span className="chat-model-trigger-text">
@@ -442,17 +577,12 @@ export function ChatWorkspace({
           <div className="chat-model-panel">
             <div className="chat-model-panel-head">
               <strong>选择模型</strong>
-              <span>{selectableModels.length} 个可用模型</span>
             </div>
 
             <div className="chat-model-list">
               {selectableModels.map((model) => {
                 const selected = model.id === activeModelId;
-                const compactLabel = formatCompactModelLabel(model.modelLabel);
-                const meta =
-                  model.providerName && model.providerName !== compactLabel
-                    ? `${model.providerName} · ${model.modelLabel}`
-                    : model.modelLabel;
+                const fullLabel = model.modelLabel.trim() || model.label;
 
                 return (
                   <button
@@ -465,8 +595,7 @@ export function ChatWorkspace({
                     type="button"
                   >
                     <div className="chat-model-option-copy">
-                      <strong>{compactLabel}</strong>
-                      <span>{meta}</span>
+                      <strong title={fullLabel}>{fullLabel}</strong>
                     </div>
                     <span className={`chat-model-option-check ${selected ? "selected" : ""}`}>
                       <Check size={13} />
@@ -600,6 +729,44 @@ export function ChatWorkspace({
     );
   }
 
+  function renderExecuteToolGroup() {
+    if (executeToolCalls.length === 0) {
+      return null;
+    }
+
+    return (
+      <details className="activity-card tool-message-card codex-command-group" open>
+        <summary className="codex-command-group-summary">
+          <span className="codex-command-group-title">
+            Ran {executeToolCalls.length} command{executeToolCalls.length === 1 ? "" : "s"}
+          </span>
+          <ChevronDown size={14} className="codex-command-group-chevron" />
+        </summary>
+        <div className="codex-command-group-body">
+          {executeToolCalls.map((toolCall) => {
+            const label = extractExecuteLabel(toolCall);
+            const rowStatus = statusClassName(toolCall.status);
+            const rowPrefix =
+              toolCall.status === "failed"
+                ? "Failed"
+                : toolCall.status === "pending"
+                  ? "Queued"
+                  : toolCall.status === "in_progress"
+                    ? "Running"
+                    : "Executed";
+
+            return (
+              <div key={toolCall.toolCallId} className={`codex-command-row ${rowStatus}`} title={label}>
+                <span className="codex-command-row-prefix">{rowPrefix}</span>
+                <span className="codex-command-row-command">{label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </details>
+    );
+  }
+
   function renderToolCard(toolCall: ChatToolCall) {
     const visibleContent = toolCall.content.filter((content) => {
       if (content.type === "text") {
@@ -612,7 +779,7 @@ export function ChatWorkspace({
 
       const terminal = runtimeState?.terminalOutputs[content.terminalId];
       if (!terminal) {
-        return runtimeState?.status === "running";
+        return runtimeInProgress;
       }
 
       return hasVisibleText(terminal.output) || terminal.exitCode !== null || terminal.signal !== null;
@@ -724,24 +891,35 @@ export function ChatWorkspace({
       <details key={terminal.terminalId} className="activity-card tool-message-card" open>
         <summary className="activity-summary">
           <div className="activity-summary-main">
-            <div className="activity-summary-title">
-              <span className="activity-tool-icon">
-                <TerminalSquare size={14} />
-              </span>
-              <strong>Terminal {terminal.terminalId.slice(0, 8)}</strong>
-              <span
-                className={`activity-status-pill ${
-                  terminal.exitCode === null && terminal.signal === null ? "loading" : "default"
-                }`}
-              >
-                {terminal.exitCode === null && terminal.signal === null ? (
-                  <LoaderCircle size={12} className="spin" />
-                ) : (
-                  <CheckCircle2 size={12} />
-                )}
-                {terminal.exitCode === null && terminal.signal === null ? "Running" : "Finished"}
-              </span>
-            </div>
+            {(() => {
+              const linkedExecuteToolCall = executeToolCallByTerminalId.get(terminal.terminalId);
+              const title = linkedExecuteToolCall ? "Command output" : `Terminal ${terminal.terminalId.slice(0, 8)}`;
+              const description = linkedExecuteToolCall ? extractExecuteLabel(linkedExecuteToolCall) : null;
+
+              return (
+                <>
+                  <div className="activity-summary-title">
+                    <span className="activity-tool-icon">
+                      <TerminalSquare size={14} />
+                    </span>
+                    <strong>{title}</strong>
+                    <span
+                      className={`activity-status-pill ${
+                        terminal.exitCode === null && terminal.signal === null ? "loading" : "default"
+                      }`}
+                    >
+                      {terminal.exitCode === null && terminal.signal === null ? (
+                        <LoaderCircle size={12} className="spin" />
+                      ) : (
+                        <CheckCircle2 size={12} />
+                      )}
+                      {terminal.exitCode === null && terminal.signal === null ? "Running" : "Finished"}
+                    </span>
+                  </div>
+                  {description ? <p>{description}</p> : null}
+                </>
+              );
+            })()}
           </div>
           <div className="activity-summary-side">
             <ChevronDown size={14} />
@@ -758,6 +936,14 @@ export function ChatWorkspace({
   }
 
   function renderComposer(home = false) {
+    const composerPlaceholder = cancelInFlight
+      ? "Stopping the current response..."
+      : busy
+        ? "Agent is working..."
+        : home
+          ? "Type a message and press Enter"
+          : "Continue the conversation";
+
     return (
       <div className={`chat-composer-card ${home ? "chat-composer-home" : ""}`}>
         {renderAttachmentList(attachments, true)}
@@ -767,7 +953,7 @@ export function ChatWorkspace({
           disabled={busy}
           onChange={(event) => onDraftMessageChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={busy ? "Agent 正在执行..." : home ? "输入消息，Enter 发送" : "继续输入消息"}
+          placeholder={composerPlaceholder}
           rows={1}
           value={draftMessage}
         />
@@ -786,15 +972,28 @@ export function ChatWorkspace({
               <Mic size={16} />
             </button>
 
-            <button
-              className="chat-send-button"
-              disabled={!canSend}
-              onClick={onSendMessage}
-              title="发送消息"
-              type="button"
-            >
-              <ArrowUp size={16} />
-            </button>
+            {canCancel ? (
+              <button
+                aria-label={cancelInFlight ? "Stopping current response" : "Stop current response"}
+                className="chat-send-button stop"
+                disabled={cancelInFlight}
+                onClick={onCancelMessage}
+                title={cancelInFlight ? "Stopping..." : "Stop response"}
+                type="button"
+              >
+                {cancelInFlight ? <LoaderCircle size={16} className="spin" /> : <Square size={15} />}
+              </button>
+            ) : (
+              <button
+                className="chat-send-button"
+                disabled={!canSend}
+                onClick={onSendMessage}
+                title="Send message"
+                type="button"
+              >
+                <ArrowUp size={16} />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -806,7 +1005,11 @@ export function ChatWorkspace({
       return null;
     }
 
-    const showLoadingBubble = busy && (!lastMessage || lastMessage.role !== "assistant" || !lastMessage.content);
+    const hasRuntimeActivity = (runtimeState?.planEntries.length ?? 0) > 0 || runtimeToolCalls.length > 0;
+    const showLoadingBubble =
+      runtimeInProgress &&
+      !hasRuntimeActivity &&
+      (!lastMessage || lastMessage.role !== "assistant" || !lastMessage.content);
 
     return (
       <div className="chat-thread-layout">
@@ -834,13 +1037,14 @@ export function ChatWorkspace({
             <div className="message-row">
               <div className="message-loading">
                 <LoaderCircle size={14} className="spin" />
-                <span>Agent is working...</span>
+                <span>{cancelInFlight ? "Stopping..." : "Agent is working..."}</span>
               </div>
             </div>
           ) : null}
 
           {renderPlanCard()}
-          {(runtimeState?.toolCalls ?? []).map(renderToolCard)}
+          {renderExecuteToolGroup()}
+          {nonExecuteToolCalls.map(renderToolCard)}
           {renderUnlinkedTerminals()}
 
           {runtimeState?.status === "failed" && runtimeState.error ? (
