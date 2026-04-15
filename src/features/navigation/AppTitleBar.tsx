@@ -45,7 +45,7 @@ export function AppTitleBar({
         <div className={clsx("window-titlebar-status", "idle")} aria-label="当前状态">
           <span className="window-titlebar-status-dot" aria-hidden="true" />
           <div className="window-titlebar-status-copy">
-            <span>OpenCode 空闲中 · 会话已就绪</span>
+            <span>本地智能体空闲中 · 会话已就绪</span>
           </div>
         </div>
       </div>

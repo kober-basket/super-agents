@@ -439,10 +439,31 @@ export type ChatPlanEntryPriority = "high" | "medium" | "low";
 export type ChatPlanEntryStatus = "pending" | "in_progress" | "completed";
 export type ChatTurnStatus = "idle" | "running" | "cancelling" | "failed";
 
+export interface ChatVisualBase {
+  id: string;
+  title?: string;
+  description?: string;
+}
+
+export interface ChatChartVisual extends ChatVisualBase {
+  type: "chart";
+  library: "vega-lite";
+  spec: Record<string, unknown>;
+}
+
+export interface ChatDiagramVisual extends ChatVisualBase {
+  type: "diagram";
+  style: "mermaid";
+  code: string;
+}
+
+export type ChatVisual = ChatChartVisual | ChatDiagramVisual;
+
 export interface ChatMessage {
   id: string;
   role: ChatMessageRole;
   content: string;
+  visuals?: ChatVisual[];
   attachments?: FileDropEntry[];
   createdAt: number;
   updatedAt: number;
@@ -511,6 +532,7 @@ export interface ChatConversationSummary {
   lastMessageAt: number;
   preview: string;
   messageCount: number;
+  selectedKnowledgeBaseIds: string[];
   agentCore?: string;
   agentSessionId?: string;
 }
@@ -528,6 +550,7 @@ export interface ChatSendInput {
   conversationId?: string | null;
   content: string;
   attachments?: FileDropEntry[];
+  selectedKnowledgeBaseIds?: string[];
 }
 
 export interface ChatSendResult {

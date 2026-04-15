@@ -78,6 +78,32 @@ function matchQuery(query: string, values: Array<string | undefined>) {
   return values.some((value) => value?.toLowerCase().includes(normalized));
 }
 
+function normalizeKnowledgeBaseSelection(value: string[] | undefined) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return [];
+  }
+
+  return Array.from(new Set(value.map((item) => item.trim()).filter(Boolean)));
+}
+
+function filterKnowledgeBaseSelection(value: string[] | undefined, knowledgeBases: KnowledgeBaseSummary[]) {
+  const validIds = new Set(knowledgeBases.map((base) => base.id));
+  return normalizeKnowledgeBaseSelection(value).filter((item) => validIds.has(item));
+}
+
+function resolveConversationKnowledgeBaseSelection(
+  conversationId: string | null,
+  conversation: ChatConversation | null,
+  draftKnowledgeBaseIds: string[],
+  conversationKnowledgeBaseIds: Record<string, string[]>,
+) {
+  if (!conversationId) {
+    return draftKnowledgeBaseIds;
+  }
+
+  return conversationKnowledgeBaseIds[conversationId] ?? conversation?.selectedKnowledgeBaseIds ?? [];
+}
+
 const SIDEBAR_WIDTH_STORAGE_KEY = "super-agents:sidebar-width";
 const SETTINGS_SIDEBAR_WIDTH_STORAGE_KEY = "super-agents:settings-sidebar-width";
 const PREVIEW_PANE_WIDTH_STORAGE_KEY = "super-agents:preview-pane-width";
@@ -111,7 +137,7 @@ function readStoredWidth(key: string, fallback: number) {
 function LazyViewFallback() {
   return (
     <div className="empty-panel">
-      <strong>Loading...</strong>
+      <strong>正在加载...</strong>
     </div>
   );
 }
@@ -162,6 +188,7 @@ export default function App() {
   >({});
   const [startingChatTurn, setStartingChatTurn] = useState(false);
   const [draftMessage, setDraftMessage] = useState("");
+  const [draftKnowledgeBaseIds, setDraftKnowledgeBaseIds] = useState<string[]>([]);
   const [messageScrollRequest, setMessageScrollRequest] = useState(0);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("assistant");
   const [preview, setPreview] = useState<FilePreviewPayload | null>(null);
@@ -172,6 +199,9 @@ export default function App() {
   const [tools, setTools] = useState<WorkspaceTool[]>([]);
   const [toolsRefreshing, setToolsRefreshing] = useState(false);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseSummary[]>([]);
+  const [conversationKnowledgeBaseIds, setConversationKnowledgeBaseIds] = useState<
+    Record<string, string[]>
+  >({});
   const [knowledgeRefreshing, setKnowledgeRefreshing] = useState(false);
   const [mcpRefreshing, setMcpRefreshing] = useState(false);
   const [mcpAdvancedOpen, setMcpAdvancedOpen] = useState(false);
@@ -459,6 +489,7 @@ export default function App() {
       lastMessageAt: conversation.lastMessageAt,
       preview: lastMessage?.role === "assistant" ? lastMessage.content : conversation.preview,
       messageCount: conversation.messageCount,
+      selectedKnowledgeBaseIds: conversation.selectedKnowledgeBaseIds,
       agentCore: conversation.agentCore,
       agentSessionId: conversation.agentSessionId,
     };
@@ -919,7 +950,7 @@ export default function App() {
             }
           : item,
       );
-      commitModelProviders(modelProviders, `${provider.name} models discovered`);
+      commitModelProviders(modelProviders, `${provider.name} 模型已同步`);
     } catch (error) {
       setToast(error instanceof Error ? error.message : "拉取模型列表失败");
     } finally {
@@ -1028,24 +1059,35 @@ export default function App() {
   }
 
   function toggleKnowledgeBaseSelection(baseId: string) {
-    const selected = new Set(config.knowledgeBase.selectedBaseIds);
+    const selected = new Set(activeKnowledgeBaseIds);
     if (selected.has(baseId)) {
       selected.delete(baseId);
     } else {
       selected.add(baseId);
     }
 
-    updateKnowledgeBaseConfig({
-      enabled: selected.size > 0,
-      selectedBaseIds: Array.from(selected),
-    });
+    const nextSelectedBaseIds = filterKnowledgeBaseSelection(Array.from(selected), knowledgeBases);
+    if (activeConversationId) {
+      setConversationKnowledgeBaseIds((current) => ({
+        ...current,
+        [activeConversationId]: nextSelectedBaseIds,
+      }));
+      return;
+    }
+
+    setDraftKnowledgeBaseIds(nextSelectedBaseIds);
   }
 
   function clearKnowledgeBaseSelection() {
-    updateKnowledgeBaseConfig({
-      enabled: false,
-      selectedBaseIds: [],
-    });
+    if (activeConversationId) {
+      setConversationKnowledgeBaseIds((current) => ({
+        ...current,
+        [activeConversationId]: [],
+      }));
+      return;
+    }
+
+    setDraftKnowledgeBaseIds([]);
   }
 
   async function refreshKnowledgeView(options?: { silent?: boolean }) {
@@ -1425,6 +1467,7 @@ export default function App() {
     setActiveConversation(null);
     setActiveConversationId(null);
     setDraftMessage("");
+    setDraftKnowledgeBaseIds([]);
     setAttachments([]);
   }
 
@@ -1449,6 +1492,15 @@ export default function App() {
     try {
       const payload = await workspaceClient.deleteConversation(conversationId);
       setConversations(payload.conversations);
+      setConversationKnowledgeBaseIds((current) => {
+        if (!(conversationId in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[conversationId];
+        return next;
+      });
       setConversationRuntimeStates((current) => {
         const next = { ...current };
         delete next[conversationId];
@@ -1459,6 +1511,7 @@ export default function App() {
         setActiveConversation(null);
         setActiveConversationId(null);
         setDraftMessage("");
+        setDraftKnowledgeBaseIds([]);
         setAttachments([]);
       }
     } catch (error) {
@@ -1485,6 +1538,7 @@ export default function App() {
   async function sendChatMessage() {
     const content = draftMessage.trim();
     const pendingAttachments = attachments.map((attachment) => ({ ...attachment }));
+    const selectedKnowledgeBaseIds = activeKnowledgeBaseIds;
     if (!content && pendingAttachments.length === 0) return;
 
     setMessageScrollRequest((current) => current + 1);
@@ -1496,6 +1550,7 @@ export default function App() {
         conversationId: activeConversationId,
         content,
         attachments: pendingAttachments,
+        selectedKnowledgeBaseIds,
       });
 
       syncConversationState(result.conversation);
@@ -1514,7 +1569,7 @@ export default function App() {
       fallback continued
       setToast(error instanceof Error ? error.message : "发送消息失败");
       */
-      setToast(error instanceof Error ? error.message : "Failed to send message");
+      setToast(error instanceof Error ? error.message : "发送消息失败");
     } finally {
       setStartingChatTurn(false);
     }
@@ -1589,6 +1644,25 @@ export default function App() {
     filteredInstalledSkills.length > 0 || filteredReferenceSkills.length > 0;
   const activeConversationRuntimeState =
     (activeConversationId ? conversationRuntimeStates[activeConversationId] : null) ?? null;
+  const activeKnowledgeBaseIds = useMemo(
+    () =>
+      filterKnowledgeBaseSelection(
+        resolveConversationKnowledgeBaseSelection(
+          activeConversationId,
+          activeConversation,
+          draftKnowledgeBaseIds,
+          conversationKnowledgeBaseIds,
+        ),
+        knowledgeBases,
+      ),
+    [
+      activeConversation,
+      activeConversationId,
+      conversationKnowledgeBaseIds,
+      draftKnowledgeBaseIds,
+      knowledgeBases,
+    ],
+  );
   const activeConversationCancelling =
     activeConversationRuntimeState?.status === "cancelling";
   const activeConversationCanCancel =
@@ -1699,7 +1773,7 @@ export default function App() {
           composerModelId={composerModelId}
           draftMessage={draftMessage}
           knowledgeBases={knowledgeBases}
-          knowledgeEnabled={config.knowledgeBase.enabled}
+          knowledgeEnabled={activeKnowledgeBaseIds.length > 0}
           knowledgeRefreshing={knowledgeRefreshing}
           onDraftMessageChange={setDraftMessage}
           onClearKnowledgeBases={clearKnowledgeBaseSelection}
@@ -1715,7 +1789,7 @@ export default function App() {
           runtimeState={activeConversationRuntimeState}
           onVoiceInput={() => setToast("语音输入即将支持")}
           selectableModels={selectableModels}
-          selectedKnowledgeBaseIds={config.knowledgeBase.selectedBaseIds}
+          selectedKnowledgeBaseIds={activeKnowledgeBaseIds}
           scrollToBottomRequest={messageScrollRequest}
         />
       );

@@ -77,7 +77,7 @@ export function PdfPreview({ preview }: PdfPreviewProps) {
             className="preview-toolbar-icon"
             disabled={zoomFactor <= MIN_ZOOM_FACTOR}
             onClick={zoomOut}
-            title="Zoom out"
+            title="缩小"
             type="button"
           >
             <Minus size={15} />
@@ -89,7 +89,7 @@ export function PdfPreview({ preview }: PdfPreviewProps) {
             className="preview-toolbar-icon"
             disabled={zoomFactor >= MAX_ZOOM_FACTOR}
             onClick={zoomIn}
-            title="Zoom in"
+            title="放大"
             type="button"
           >
             <Plus size={15} />
@@ -97,21 +97,21 @@ export function PdfPreview({ preview }: PdfPreviewProps) {
           <button
             className="preview-toolbar-reset"
             onClick={resetZoom}
-            title="Fit to pane"
+            title="适应面板"
             type="button"
           >
             <RotateCcw size={14} />
           </button>
         </div>
         <div className="preview-toolbar-readout compact">
-          <strong>{numPages || "--"} pages</strong>
+          <strong>{numPages || "--"} 页</strong>
         </div>
       </div>
 
       <div className="pdf-stage" ref={stageRef}>
         {loadError ? (
           <div className="pdf-state" role="alert">
-            <strong>PDF preview failed</strong>
+            <strong>PDF 预览失败</strong>
             <span>{loadError}</span>
           </div>
         ) : source ? (
@@ -119,17 +119,17 @@ export function PdfPreview({ preview }: PdfPreviewProps) {
             file={source}
             loading={
               <div className="pdf-state">
-                <strong>Loading PDF</strong>
-                <span>Preparing pages for reading...</span>
+                <strong>正在加载 PDF</strong>
+                <span>正在准备页面内容...</span>
               </div>
             }
             noData={
               <div className="pdf-state">
-                <strong>No PDF source</strong>
-                <span>The current preview payload does not include a readable file.</span>
+                <strong>没有 PDF 源文件</strong>
+                <span>当前预览数据里没有可读取的文件。</span>
               </div>
             }
-            onLoadError={(error) => setLoadError(error instanceof Error ? error.message : "Unable to load PDF")}
+            onLoadError={(error) => setLoadError(error instanceof Error ? error.message : "无法加载 PDF")}
             onLoadSuccess={({ numPages: nextNumPages }) => {
               setNumPages(nextNumPages);
             }}
@@ -142,8 +142,8 @@ export function PdfPreview({ preview }: PdfPreviewProps) {
                     devicePixelRatio={devicePixelRatio}
                     loading={
                       <div className="pdf-state compact">
-                        <strong>Rendering page {pageNumber}</strong>
-                        <span>Almost there...</span>
+                        <strong>正在渲染第 {pageNumber} 页</strong>
+                        <span>马上就好...</span>
                       </div>
                     }
                     onLoadSuccess={(page) => {
@@ -164,8 +164,8 @@ export function PdfPreview({ preview }: PdfPreviewProps) {
           </Document>
         ) : (
           <div className="pdf-state">
-            <strong>No PDF source</strong>
-            <span>The current preview payload does not include a readable file.</span>
+            <strong>没有 PDF 源文件</strong>
+            <span>当前预览数据里没有可读取的文件。</span>
           </div>
         )}
       </div>

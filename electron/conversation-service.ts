@@ -22,6 +22,7 @@ interface ConversationRow {
   last_message_at: number;
   preview: string | null;
   message_count: number;
+  selected_knowledge_base_ids_json: string | null;
   agent_core: string | null;
   agent_session_id: string | null;
 }
@@ -56,6 +57,14 @@ function normalizeAttachments(value: FileDropEntry[] | undefined): FileDropEntry
   return value.map((attachment) => ({ ...attachment }));
 }
 
+function normalizeKnowledgeBaseIds(value: string[] | undefined): string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    return [];
+  }
+
+  return Array.from(new Set(value.map((item) => String(item).trim()).filter(Boolean)));
+}
+
 function parseAttachments(value: string | null): FileDropEntry[] {
   if (!value) {
     return [];
@@ -64,6 +73,19 @@ function parseAttachments(value: string | null): FileDropEntry[] {
   try {
     const parsed = JSON.parse(value) as FileDropEntry[] | null;
     return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseKnowledgeBaseIds(value: string | null): string[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return normalizeKnowledgeBaseIds(Array.isArray(parsed) ? parsed.map((item) => String(item)) : []);
   } catch {
     return [];
   }
@@ -102,6 +124,7 @@ function mapConversationSummary(row: ConversationRow): ChatConversationSummary {
     lastMessageAt: row.last_message_at,
     preview: row.preview ?? "",
     messageCount: row.message_count,
+    selectedKnowledgeBaseIds: parseKnowledgeBaseIds(row.selected_knowledge_base_ids_json),
     agentCore: row.agent_core?.trim() || undefined,
     agentSessionId: row.agent_session_id?.trim() || undefined,
   };
@@ -161,6 +184,7 @@ export class ConversationService {
 
     this.ensureConversationColumn(database, "agent_core", "TEXT NOT NULL DEFAULT ''");
     this.ensureConversationColumn(database, "agent_session_id", "TEXT NOT NULL DEFAULT ''");
+    this.ensureConversationColumn(database, "selected_knowledge_base_ids_json", "TEXT NOT NULL DEFAULT '[]'");
 
     this.database = database;
   }
@@ -180,6 +204,7 @@ export class ConversationService {
           conversations.updated_at,
           conversations.last_message_at,
           conversations.preview,
+          conversations.selected_knowledge_base_ids_json,
           conversations.agent_core,
           conversations.agent_session_id,
           COUNT(messages.id) AS message_count
@@ -234,6 +259,9 @@ export class ConversationService {
   ): Promise<StartTurnResult> {
     const content = input.content.trim();
     const attachments = normalizeAttachments(input.attachments);
+    const selectedKnowledgeBaseIds = normalizeKnowledgeBaseIds(input.selectedKnowledgeBaseIds);
+    const selectedKnowledgeBaseIdsJson = JSON.stringify(selectedKnowledgeBaseIds);
+    const shouldUpdateKnowledgeBaseIds = input.selectedKnowledgeBaseIds !== undefined;
     if (!content && attachments.length === 0) {
       throw new Error("Message content or attachments are required");
     }
@@ -263,25 +291,39 @@ export class ConversationService {
               updated_at,
               last_message_at,
               preview,
+              selected_knowledge_base_ids_json,
               agent_core,
               agent_session_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, '')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, '')
           `)
-          .run(conversationId, title, now, now, now, preview, options.agentCore);
+          .run(
+            conversationId,
+            title,
+            now,
+            now,
+            now,
+            preview,
+            selectedKnowledgeBaseIdsJson,
+            options.agentCore,
+          );
       } else {
         const existing = this.getConversationSummary(conversationId);
         if (!existing) {
           throw new Error("Conversation not found");
         }
 
+        const nextKnowledgeBaseIdsJson = shouldUpdateKnowledgeBaseIds
+          ? selectedKnowledgeBaseIdsJson
+          : JSON.stringify(existing.selectedKnowledgeBaseIds);
+
         database
           .prepare(`
             UPDATE conversations
-            SET updated_at = ?, last_message_at = ?, preview = ?
+            SET updated_at = ?, last_message_at = ?, preview = ?, selected_knowledge_base_ids_json = ?
             WHERE id = ?
           `)
-          .run(now, now, preview, conversationId);
+          .run(now, now, preview, nextKnowledgeBaseIdsJson, conversationId);
       }
 
       database
@@ -381,6 +423,9 @@ export class ConversationService {
   async sendMessage(input: ChatSendInput): Promise<ChatSendResult> {
     const content = input.content.trim();
     const attachments = normalizeAttachments(input.attachments);
+    const selectedKnowledgeBaseIds = normalizeKnowledgeBaseIds(input.selectedKnowledgeBaseIds);
+    const selectedKnowledgeBaseIdsJson = JSON.stringify(selectedKnowledgeBaseIds);
+    const shouldUpdateKnowledgeBaseIds = input.selectedKnowledgeBaseIds !== undefined;
     if (!content && attachments.length === 0) {
       throw new Error("Message content or attachments are required");
     }
@@ -402,23 +447,35 @@ export class ConversationService {
       if (createdConversation) {
         database
           .prepare(`
-            INSERT INTO conversations (id, title, created_at, updated_at, last_message_at, preview)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO conversations (
+              id,
+              title,
+              created_at,
+              updated_at,
+              last_message_at,
+              preview,
+              selected_knowledge_base_ids_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
           `)
-          .run(conversationId, title, now, now, now, preview);
+          .run(conversationId, title, now, now, now, preview, selectedKnowledgeBaseIdsJson);
       } else {
         const existing = this.getConversationSummary(conversationId);
         if (!existing) {
           throw new Error("Conversation not found");
         }
 
+        const nextKnowledgeBaseIdsJson = shouldUpdateKnowledgeBaseIds
+          ? selectedKnowledgeBaseIdsJson
+          : JSON.stringify(existing.selectedKnowledgeBaseIds);
+
         database
           .prepare(`
             UPDATE conversations
-            SET updated_at = ?, last_message_at = ?, preview = ?
+            SET updated_at = ?, last_message_at = ?, preview = ?, selected_knowledge_base_ids_json = ?
             WHERE id = ?
           `)
-          .run(now, now, preview, conversationId);
+          .run(now, now, preview, nextKnowledgeBaseIdsJson, conversationId);
       }
 
       database
@@ -468,6 +525,7 @@ export class ConversationService {
           conversations.updated_at,
           conversations.last_message_at,
           conversations.preview,
+          conversations.selected_knowledge_base_ids_json,
           conversations.agent_core,
           conversations.agent_session_id,
           COUNT(messages.id) AS message_count

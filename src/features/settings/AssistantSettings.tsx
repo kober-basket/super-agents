@@ -245,7 +245,7 @@ export function AssistantSettings({
                     </label>
 
                     <label className="span-two">
-                      <span>API Key</span>
+                      <span>接口密钥</span>
                       <input
                         type="text"
                         value={currentProvider.apiKey}

@@ -53,3 +53,49 @@ test("conversation service persists conversations and messages", async () => {
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("conversation service keeps knowledge base selection per conversation", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-conversations-"));
+  const service = new ConversationService(path.join(tempDir, "data", "app.db"));
+
+  await service.initialize();
+
+  try {
+    const started = await service.startTurn(
+      {
+        content: "Use the product docs for this thread",
+        selectedKnowledgeBaseIds: ["kb-product", "kb-faq", "kb-product"],
+      },
+      { agentCore: "opencode" },
+    );
+
+    assert.deepEqual(started.conversation.selectedKnowledgeBaseIds, ["kb-product", "kb-faq"]);
+
+    const continued = await service.startTurn(
+      {
+        conversationId: started.conversation.id,
+        content: "Keep going without changing the knowledge bases",
+      },
+      { agentCore: "opencode" },
+    );
+
+    assert.deepEqual(continued.conversation.selectedKnowledgeBaseIds, ["kb-product", "kb-faq"]);
+
+    const switched = await service.startTurn(
+      {
+        conversationId: started.conversation.id,
+        content: "Switch this thread to another knowledge base",
+        selectedKnowledgeBaseIds: ["kb-release-notes"],
+      },
+      { agentCore: "opencode" },
+    );
+
+    assert.deepEqual(switched.conversation.selectedKnowledgeBaseIds, ["kb-release-notes"]);
+
+    const loaded = await service.getConversation(started.conversation.id);
+    assert.deepEqual(loaded.selectedKnowledgeBaseIds, ["kb-release-notes"]);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});

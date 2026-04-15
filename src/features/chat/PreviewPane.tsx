@@ -62,12 +62,12 @@ export function PreviewPane({
         </span>
         <strong>
           {officeDocument
-            ? "Office 文件暂不支持内嵌预览"
+            ? "办公文档暂不支持内嵌预览"
             : "这种文件类型暂不支持内联预览"}
         </strong>
         <p>
           {officeDocument
-            ? "目前请先使用系统应用打开；如果后续需要更丰富的内联渲染，可以再接入 Office 预览器。"
+            ? "目前请先使用系统应用打开；如果后续需要更丰富的内联渲染，可以再接入办公文档预览器。"
             : "二进制内容目前会回退为安全占位状态，避免渲染不可读文本。"}
         </p>
         {externalPayload ? (

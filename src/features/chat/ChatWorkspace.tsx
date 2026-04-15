@@ -23,6 +23,7 @@ import {
   type MouseEvent,
 } from "react";
 
+import { parseChatMessageContent } from "../../lib/chat-visuals";
 import { formatBytes, markdownToHtml } from "../../lib/format";
 import type {
   ChatConversation,
@@ -32,6 +33,7 @@ import type {
   KnowledgeBaseSummary,
   RuntimeModelOption,
 } from "../../types";
+import { ChatVisualBlock } from "./ChatVisualBlock";
 import { fileKind, getFileExtension, isOfficeDocument } from "../shared/utils";
 
 interface ChatWorkspaceProps {
@@ -98,18 +100,18 @@ function statusClassName(status?: ChatToolCall["status"]) {
 
 function statusLabel(status?: ChatToolCall["status"]) {
   if (status === "completed") {
-    return "Completed";
+    return "已完成";
   }
   if (status === "failed") {
-    return "Failed";
+    return "失败";
   }
   if (status === "pending") {
-    return "Pending";
+    return "待执行";
   }
   if (status === "in_progress") {
-    return "Running";
+    return "执行中";
   }
-  return "Working";
+  return "处理中";
 }
 
 function toolSummary(toolCall: ChatToolCall) {
@@ -121,7 +123,7 @@ function toolSummary(toolCall: ChatToolCall) {
     return toolCall.kind.replaceAll("_", " ");
   }
 
-  return "Execution details";
+  return "执行详情";
 }
 
 function hasVisibleText(value?: string | null) {
@@ -623,18 +625,18 @@ export function ChatWorkspace({
             const office = isOfficeDocument(file.name || file.path, file.mimeType);
             const categoryLabel =
               kind === "pdf"
-                ? "PDF document"
+                ? "PDF 文档"
                 : office
-                  ? "Office document"
+                  ? "办公文档"
                   : kind === "text"
-                    ? "Text document"
+                    ? "文本文件"
                     : kind === "markdown"
-                      ? "Markdown note"
+                      ? "Markdown 笔记"
                       : kind === "code"
-                        ? "Code file"
+                        ? "代码文件"
                         : kind === "image"
-                          ? "Image file"
-                          : "File";
+                          ? "图片文件"
+                          : "文件";
             const toneClass =
               kind === "pdf"
                 ? "tone-pdf"
@@ -701,9 +703,9 @@ export function ChatWorkspace({
               <span className="activity-tool-icon">
                 <Wrench size={14} />
               </span>
-              <strong>Execution plan</strong>
+              <strong>执行计划</strong>
               <span className="activity-status-pill default">
-                {runtimeState.planEntries.length} steps
+                {runtimeState.planEntries.length} 个步骤
               </span>
             </div>
           </div>
@@ -738,7 +740,7 @@ export function ChatWorkspace({
       <details className="activity-card tool-message-card codex-command-group" open>
         <summary className="codex-command-group-summary">
           <span className="codex-command-group-title">
-            Ran {executeToolCalls.length} command{executeToolCalls.length === 1 ? "" : "s"}
+            已执行 {executeToolCalls.length} 条命令
           </span>
           <ChevronDown size={14} className="codex-command-group-chevron" />
         </summary>
@@ -748,12 +750,12 @@ export function ChatWorkspace({
             const rowStatus = statusClassName(toolCall.status);
             const rowPrefix =
               toolCall.status === "failed"
-                ? "Failed"
+                ? "失败"
                 : toolCall.status === "pending"
-                  ? "Queued"
+                  ? "排队中"
                   : toolCall.status === "in_progress"
-                    ? "Running"
-                    : "Executed";
+                    ? "执行中"
+                    : "已执行";
 
             return (
               <div key={toolCall.toolCallId} className={`codex-command-row ${rowStatus}`} title={label}>
@@ -821,7 +823,7 @@ export function ChatWorkspace({
               if (shouldRenderToolTextAsMarkdown(toolCall, content.text)) {
                 return (
                   <div key={`${toolCall.toolCallId}-text-${index}`} className="activity-panel activity-panel-summary">
-                    <span className="activity-panel-label">Output</span>
+                    <span className="activity-panel-label">输出</span>
                     <div
                       className="activity-markdown"
                       dangerouslySetInnerHTML={{ __html: markdownToHtml(content.text) }}
@@ -833,7 +835,7 @@ export function ChatWorkspace({
 
               return (
                 <div key={`${toolCall.toolCallId}-text-${index}`} className="activity-panel">
-                  <span className="activity-panel-label">Output</span>
+                  <span className="activity-panel-label">输出</span>
                   <pre>{content.text}</pre>
                 </div>
               );
@@ -852,23 +854,23 @@ export function ChatWorkspace({
             return (
               <div key={`${toolCall.toolCallId}-terminal-${index}`} className="activity-panel">
                 <span className="activity-panel-label">
-                  Terminal {content.terminalId.slice(0, 8)}
+                  终端 {content.terminalId.slice(0, 8)}
                 </span>
-                <pre>{terminal?.output || "Waiting for terminal output..."}</pre>
+                <pre>{terminal?.output || "等待终端输出..."}</pre>
               </div>
             );
           })}
 
           {hasRawInput ? (
             <div className="activity-panel">
-              <span className="activity-panel-label">Input</span>
+              <span className="activity-panel-label">输入</span>
               <pre>{toolCall.rawInputJson}</pre>
             </div>
           ) : null}
 
           {hasRawOutput ? (
             <div className="activity-panel">
-              <span className="activity-panel-label">Raw output</span>
+              <span className="activity-panel-label">原始输出</span>
               <pre>{toolCall.rawOutputJson}</pre>
             </div>
           ) : null}
@@ -893,7 +895,7 @@ export function ChatWorkspace({
           <div className="activity-summary-main">
             {(() => {
               const linkedExecuteToolCall = executeToolCallByTerminalId.get(terminal.terminalId);
-              const title = linkedExecuteToolCall ? "Command output" : `Terminal ${terminal.terminalId.slice(0, 8)}`;
+              const title = linkedExecuteToolCall ? "命令输出" : `终端 ${terminal.terminalId.slice(0, 8)}`;
               const description = linkedExecuteToolCall ? extractExecuteLabel(linkedExecuteToolCall) : null;
 
               return (
@@ -913,7 +915,7 @@ export function ChatWorkspace({
                       ) : (
                         <CheckCircle2 size={12} />
                       )}
-                      {terminal.exitCode === null && terminal.signal === null ? "Running" : "Finished"}
+                      {terminal.exitCode === null && terminal.signal === null ? "执行中" : "已结束"}
                     </span>
                   </div>
                   {description ? <p>{description}</p> : null}
@@ -927,8 +929,8 @@ export function ChatWorkspace({
         </summary>
         <div className="activity-detail">
           <div className="activity-panel">
-            <span className="activity-panel-label">Output</span>
-            <pre>{terminal.output || "Waiting for terminal output..."}</pre>
+            <span className="activity-panel-label">输出</span>
+            <pre>{terminal.output || "等待终端输出..."}</pre>
           </div>
         </div>
       </details>
@@ -937,12 +939,12 @@ export function ChatWorkspace({
 
   function renderComposer(home = false) {
     const composerPlaceholder = cancelInFlight
-      ? "Stopping the current response..."
+      ? "正在停止当前回复..."
       : busy
-        ? "Agent is working..."
+        ? "智能体处理中..."
         : home
-          ? "Type a message and press Enter"
-          : "Continue the conversation";
+          ? "输入消息后按 Enter 发送"
+          : "继续这段对话";
 
     return (
       <div className={`chat-composer-card ${home ? "chat-composer-home" : ""}`}>
@@ -974,11 +976,11 @@ export function ChatWorkspace({
 
             {canCancel ? (
               <button
-                aria-label={cancelInFlight ? "Stopping current response" : "Stop current response"}
+                aria-label={cancelInFlight ? "正在停止当前回复" : "停止当前回复"}
                 className="chat-send-button stop"
                 disabled={cancelInFlight}
                 onClick={onCancelMessage}
-                title={cancelInFlight ? "Stopping..." : "Stop response"}
+                title={cancelInFlight ? "正在停止..." : "停止回复"}
                 type="button"
               >
                 {cancelInFlight ? <LoaderCircle size={16} className="spin" /> : <Square size={15} />}
@@ -988,7 +990,7 @@ export function ChatWorkspace({
                 className="chat-send-button"
                 disabled={!canSend}
                 onClick={onSendMessage}
-                title="Send message"
+                title="发送消息"
                 type="button"
               >
                 <ArrowUp size={16} />
@@ -1014,30 +1016,57 @@ export function ChatWorkspace({
     return (
       <div className="chat-thread-layout">
         <div ref={messageListRef} className="message-list">
-          {activeConversation.messages.map((message) => (
-            <div key={message.id} className={`message-row ${message.role === "user" ? "user" : ""}`}>
-              <div className={`message-bubble ${message.role === "user" ? "user" : ""}`}>
-                {message.attachments?.length ? renderAttachmentList(message.attachments) : null}
-                {message.content ? (
-                  message.role === "assistant" ? (
-                    <div
-                      className="message-text"
-                      dangerouslySetInnerHTML={{ __html: markdownToHtml(message.content) }}
-                      onClick={handleMessageClick}
-                    />
-                  ) : (
-                    <div className="message-text user">{message.content}</div>
-                  )
-                ) : null}
+          {activeConversation.messages.map((message) => {
+            const parsedMessage =
+              message.role === "assistant"
+                ? parseChatMessageContent(message.content, message.visuals)
+                : {
+                    text: message.content,
+                    visuals: message.visuals ?? [],
+                    hasPendingVisualBlock: false,
+                    invalidVisualCount: 0,
+                  };
+
+            return (
+              <div key={message.id} className={`message-row ${message.role === "user" ? "user" : ""}`}>
+                <div className={`message-bubble ${message.role === "user" ? "user" : ""}`}>
+                  {message.attachments?.length ? renderAttachmentList(message.attachments) : null}
+                  {parsedMessage.text ? (
+                    message.role === "assistant" ? (
+                      <div
+                        className="message-text"
+                        dangerouslySetInnerHTML={{ __html: markdownToHtml(parsedMessage.text) }}
+                        onClick={handleMessageClick}
+                      />
+                    ) : (
+                      <div className="message-text user">{parsedMessage.text}</div>
+                    )
+                  ) : null}
+                  {parsedMessage.visuals.length > 0 ? (
+                    <div className="message-visual-list">
+                      {parsedMessage.visuals.map((visual) => (
+                        <ChatVisualBlock key={visual.id} visual={visual} />
+                      ))}
+                    </div>
+                  ) : null}
+                  {parsedMessage.hasPendingVisualBlock ? (
+                    <div className="message-visual-pending">正在生成可视化…</div>
+                  ) : null}
+                  {message.role === "assistant" && parsedMessage.invalidVisualCount > 0 ? (
+                    <div className="message-visual-warning">
+                      已跳过 {parsedMessage.invalidVisualCount} 个无效可视化块
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {showLoadingBubble ? (
             <div className="message-row">
               <div className="message-loading">
                 <LoaderCircle size={14} className="spin" />
-                <span>{cancelInFlight ? "Stopping..." : "Agent is working..."}</span>
+                <span>{cancelInFlight ? "正在停止..." : "智能体处理中..."}</span>
               </div>
             </div>
           ) : null}
@@ -1051,7 +1080,7 @@ export function ChatWorkspace({
             <div className="message-row">
               <div className="message-bubble">
                 <div className="message-text error">
-                  <strong>Agent failed</strong>
+                  <strong>智能体执行失败</strong>
                   <p>{runtimeState.error}</p>
                 </div>
               </div>

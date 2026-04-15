@@ -175,21 +175,14 @@ function mapToolCallPatch(
   return patch;
 }
 
-function buildKnowledgeContext(
-  config: AppConfig,
-  search: {
-    query: string;
-    results: Array<{
-      pageContent: string;
-      metadata: Record<string, unknown>;
-      knowledgeBaseName: string;
-    }>;
-  },
-) {
-  if (!config.knowledgeBase.enabled || config.knowledgeBase.selectedBaseIds.length === 0) {
-    return "";
-  }
-
+function buildKnowledgeContext(search: {
+  query: string;
+  results: Array<{
+    pageContent: string;
+    metadata: Record<string, unknown>;
+    knowledgeBaseName: string;
+  }>;
+}) {
   if (search.results.length === 0) {
     return "";
   }
@@ -216,6 +209,93 @@ function collectAdditionalDirectories(cwd: string, input: ChatSendInput) {
     .map((attachmentPath) => path.dirname(attachmentPath));
 
   return uniquePaths(attachmentDirectories).filter((directoryPath) => directoryPath !== cwd);
+}
+
+function normalizeKnowledgeBaseIds(value: string[] | undefined) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return [];
+  }
+
+  return Array.from(new Set(value.map((item) => item.trim()).filter(Boolean)));
+}
+
+function shouldSuggestInlineVisual(input: ChatSendInput) {
+  const content = input.content.trim();
+  const attachmentSignal = (input.attachments ?? []).some((attachment) => {
+    const name = attachment.name.toLowerCase();
+    const mimeType = attachment.mimeType.toLowerCase();
+    return (
+      /\.(csv|tsv|json|xlsx?|md)$/i.test(name) ||
+      mimeType.includes("csv") ||
+      mimeType.includes("json") ||
+      mimeType.includes("spreadsheet")
+    );
+  });
+
+  if (attachmentSignal) {
+    return true;
+  }
+
+  return /(?:chart|diagram|timeline|flowchart|flow diagram|graph|plot|visual(?:ize|ise|ization)?|mermaid|architecture|sequence|trend|可视化|图表|流程图|架构图|时序图|关系图|画图|折线图|柱状图|趋势图)/i.test(
+    content,
+  );
+}
+
+function shouldSuggestInlineVisualStable(input: ChatSendInput) {
+  const content = input.content.trim();
+  const attachmentSignal = (input.attachments ?? []).some((attachment) => {
+    const name = attachment.name.toLowerCase();
+    const mimeType = attachment.mimeType.toLowerCase();
+    return (
+      /\.(csv|tsv|json|xlsx?|md)$/i.test(name) ||
+      mimeType.includes("csv") ||
+      mimeType.includes("json") ||
+      mimeType.includes("spreadsheet")
+    );
+  });
+
+  if (attachmentSignal) {
+    return true;
+  }
+
+  return /(?:chart|diagram|timeline|flowchart|flow diagram|graph|plot|visual(?:ize|ise|ization)?|mermaid|architecture|sequence|trend|\u53ef\u89c6\u5316|\u56fe\u8868|\u6d41\u7a0b\u56fe|\u67b6\u6784\u56fe|\u65f6\u5e8f\u56fe|\u5173\u7cfb\u56fe|\u753b\u56fe|\u6298\u7ebf\u56fe|\u67f1\u72b6\u56fe|\u8d8b\u52bf\u56fe)/i.test(
+    content,
+  );
+}
+
+function buildInlineVisualInstruction(input: ChatSendInput) {
+  if (!shouldSuggestInlineVisualStable(input)) {
+    return "";
+  }
+
+  return [
+    "If a visual would materially improve this answer, append one or more fenced code blocks after the prose using the language `super-agents-visual`.",
+    "Only emit valid JSON inside that block. Do not emit HTML, CSS, JavaScript, or SVG.",
+    "Supported payloads:",
+    '1. Mermaid diagram: {"type":"diagram","style":"mermaid","title":"Optional title","description":"Optional note","code":"graph TD; A-->B;"}',
+    '2. Vega-Lite chart: {"type":"chart","library":"vega-lite","title":"Optional title","description":"Optional note","spec":{...}}',
+    "You may output either one object or an array of objects in the fenced block.",
+    "Keep all data inline in the JSON. Do not reference remote URLs or external assets.",
+    "If no visual is needed, reply normally without a visual block.",
+  ].join("\n");
+}
+
+function buildTurnPromptContent(input: ChatSendInput) {
+  const content = input.content.trim();
+  const visualInstruction = buildInlineVisualInstruction(input);
+  if (!visualInstruction) {
+    return content;
+  }
+
+  return [content, "Additional reply-format instructions:", visualInstruction]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+const INTERRUPTED_ASSISTANT_REPLY = "已停止回复。你可以继续发送下一条消息。";
+
+function looksLikeTurnCancellation(value?: string) {
+  return Boolean(value && /(cancel|abort|interrupt|stop(ped)?)/i.test(value));
 }
 
 export class ChatOrchestrator {
@@ -256,7 +336,7 @@ export class ChatOrchestrator {
 
     try {
       await this.runtime.ensureInitialized();
-      const prepared = await this.preparePrompt(input);
+      const prepared = await this.preparePrompt(input, started.conversation.selectedKnowledgeBaseIds);
       const sessionId = started.conversation.agentSessionId?.trim()
         ? await this.runtime.ensureSession(started.conversation.agentSessionId, {
             cwd: prepared.cwd,
@@ -355,19 +435,26 @@ export class ChatOrchestrator {
     await this.runtime.cancel(activeTurn.sessionId);
   }
 
-  private async preparePrompt(input: ChatSendInput): Promise<PreparedPrompt> {
+  private async preparePrompt(
+    input: ChatSendInput,
+    selectedKnowledgeBaseIds: string[],
+  ): Promise<PreparedPrompt> {
     const config = await this.workspaceService.getConfigSnapshot();
     const cwd = path.resolve(config.workspaceRoot.trim() || process.cwd());
     const additionalDirectories = collectAdditionalDirectories(cwd, input);
     const mcpServers = mapConfigToAcpMcpServers(config.mcpServers);
-    const injectedContext = await this.resolveKnowledgeContext(config, input.content);
+    const injectedContext = await this.resolveKnowledgeContext(
+      config,
+      input.content,
+      selectedKnowledgeBaseIds,
+    );
 
     return {
       cwd,
       additionalDirectories,
       mcpServers,
       prompt: toPromptBlocks(
-        input.content,
+        buildTurnPromptContent(input),
         input.attachments ?? [],
         this.runtime.promptCapabilities,
         injectedContext,
@@ -375,8 +462,13 @@ export class ChatOrchestrator {
     };
   }
 
-  private async resolveKnowledgeContext(config: AppConfig, content: string) {
-    if (!config.knowledgeBase.enabled || config.knowledgeBase.selectedBaseIds.length === 0) {
+  private async resolveKnowledgeContext(
+    config: AppConfig,
+    content: string,
+    selectedKnowledgeBaseIds: string[],
+  ) {
+    const effectiveKnowledgeBaseIds = normalizeKnowledgeBaseIds(selectedKnowledgeBaseIds);
+    if (effectiveKnowledgeBaseIds.length === 0) {
       return "";
     }
 
@@ -388,11 +480,11 @@ export class ChatOrchestrator {
     try {
       const search = await this.workspaceService.searchKnowledgeBases({
         query,
-        knowledgeBaseIds: config.knowledgeBase.selectedBaseIds,
+        knowledgeBaseIds: effectiveKnowledgeBaseIds,
         documentCount: config.knowledgeBase.documentCount,
       });
 
-      return buildKnowledgeContext(config, search);
+      return buildKnowledgeContext(search);
     } catch {
       return "";
     }
@@ -409,6 +501,7 @@ export class ChatOrchestrator {
         messageId: userMessageId,
         prompt,
       });
+      await this.ensureInterruptedReplyHint(activeTurn, response.stopReason);
       const conversation = await this.conversationService.getConversation(activeTurn.conversationId);
       const assistantMessage =
         conversation.messages.find((message) => message.id === activeTurn.assistantMessageId) ??
@@ -434,6 +527,10 @@ export class ChatOrchestrator {
         stopReason: response.stopReason,
       });
     } catch (error) {
+      await this.ensureInterruptedReplyHint(
+        activeTurn,
+        error instanceof Error ? error.message : String(error),
+      );
       activeTurn.completion.reject(error);
       this.emitEvent({
         type: "turn_failed",
@@ -444,6 +541,26 @@ export class ChatOrchestrator {
     } finally {
       this.cleanupTurn(activeTurn);
     }
+  }
+
+  private async ensureInterruptedReplyHint(activeTurn: ActiveTurn, reason?: string) {
+    if (!looksLikeTurnCancellation(reason) || activeTurn.assistantText.trim()) {
+      return;
+    }
+
+    activeTurn.assistantText = INTERRUPTED_ASSISTANT_REPLY;
+    await this.conversationService.updateAssistantMessageContent(
+      activeTurn.conversationId,
+      activeTurn.assistantMessageId,
+      activeTurn.assistantText,
+    );
+    this.emitEvent({
+      type: "message_delta",
+      conversationId: activeTurn.conversationId,
+      turnId: activeTurn.turnId,
+      messageId: activeTurn.assistantMessageId,
+      textDelta: INTERRUPTED_ASSISTANT_REPLY,
+    });
   }
 
   private async handleSessionUpdate(activeTurn: ActiveTurn, update: acp.SessionUpdate) {

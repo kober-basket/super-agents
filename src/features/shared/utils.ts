@@ -87,10 +87,10 @@ export function describePreviewItem(input: {
     return { badge: extension ? uppercaseExtension : "CODE", label: "源代码文件", tone: "violet" } as const;
   }
   if (input.kind === "text") {
-    return { badge: extension ? uppercaseExtension : "TXT", label: "文本文档", tone: "ink" } as const;
+    return { badge: extension ? uppercaseExtension : "TXT", label: "文本文件", tone: "ink" } as const;
   }
   if (isOfficeDocument(input.path ?? input.name, input.mimeType)) {
-    return { badge: uppercaseExtension, label: "Office 文档", tone: "blue" } as const;
+    return { badge: uppercaseExtension, label: "办公文档", tone: "blue" } as const;
   }
   return { badge: uppercaseExtension, label: "二进制文件", tone: "slate" } as const;
 }

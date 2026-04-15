@@ -184,7 +184,7 @@ function ConfigModal({
   const subtitleMap: Record<ConfigChannel, string> = {
     dingtalk: "只保留必要凭据，保存后立即生效。",
     feishu: "域名和应用凭据保存后立即同步到桌面端。",
-    wecom: "填写 Bot 信息和 WebSocket 地址即可。",
+    wecom: "填写机器人信息和长连接地址即可。",
   };
 
   return (
@@ -210,7 +210,7 @@ function ConfigModal({
           {draft.channel === "dingtalk" ? (
             <div className="remote-config-grid">
               <label>
-                <span>Client ID</span>
+                <span>客户端 ID</span>
                 <input
                   value={draft.data.clientId}
                   onChange={(event) =>
@@ -222,11 +222,11 @@ function ConfigModal({
                       },
                     })
                   }
-                  placeholder="填写钉钉 Client ID"
+                  placeholder="填写钉钉客户端 ID"
                 />
               </label>
               <label>
-                <span>Client Secret</span>
+                <span>客户端密钥</span>
                 <input
                   type="password"
                   value={draft.data.clientSecret}
@@ -239,7 +239,7 @@ function ConfigModal({
                       },
                     })
                   }
-                  placeholder="填写钉钉 Client Secret"
+                  placeholder="填写钉钉客户端密钥"
                 />
               </label>
             </div>
@@ -248,7 +248,7 @@ function ConfigModal({
           {draft.channel === "feishu" ? (
             <div className="remote-config-grid">
               <label>
-                <span>Domain</span>
+                <span>域名</span>
                 <select
                   value={draft.data.domain}
                   onChange={(event) =>
@@ -261,12 +261,12 @@ function ConfigModal({
                     })
                   }
                 >
-                  <option value="feishu">Feishu</option>
-                  <option value="lark">Lark</option>
+                  <option value="feishu">飞书</option>
+                  <option value="lark">国际版</option>
                 </select>
               </label>
               <label>
-                <span>App ID</span>
+                <span>应用 ID</span>
                 <input
                   value={draft.data.appId}
                   onChange={(event) =>
@@ -278,11 +278,11 @@ function ConfigModal({
                       },
                     })
                   }
-                  placeholder="填写飞书 App ID"
+                  placeholder="填写飞书应用 ID"
                 />
               </label>
               <label className="span-two">
-                <span>App Secret</span>
+                <span>应用密钥</span>
                 <input
                   type="password"
                   value={draft.data.appSecret}
@@ -295,7 +295,7 @@ function ConfigModal({
                       },
                     })
                   }
-                  placeholder="填写飞书 App Secret"
+                  placeholder="填写飞书应用密钥"
                 />
               </label>
             </div>
@@ -304,7 +304,7 @@ function ConfigModal({
           {draft.channel === "wecom" ? (
             <div className="remote-config-grid">
               <label>
-                <span>Bot ID</span>
+                <span>机器人 ID</span>
                 <input
                   value={draft.data.botId}
                   onChange={(event) =>
@@ -316,11 +316,11 @@ function ConfigModal({
                       },
                     })
                   }
-                  placeholder="填写企微 Bot ID"
+                  placeholder="填写企微机器人 ID"
                 />
               </label>
               <label>
-                <span>Secret</span>
+                <span>密钥</span>
                 <input
                   type="password"
                   value={draft.data.secret}
@@ -333,11 +333,11 @@ function ConfigModal({
                       },
                     })
                   }
-                  placeholder="填写企微 Secret"
+                  placeholder="填写企微密钥"
                 />
               </label>
               <label className="span-two">
-                <span>WebSocket URL</span>
+                <span>长连接地址</span>
                 <input
                   value={draft.data.websocketUrl}
                   onChange={(event) =>
@@ -527,7 +527,7 @@ export function RemoteControlSettings({
           enabled={remoteControl.dingtalk.enabled}
           onToggle={(enabled) => onUpdateDingtalk?.({ enabled }, { immediate: true })}
           status={remoteStatus?.dingtalk ?? null}
-          subtitle="Stream"
+          subtitle="消息流通道"
           title="钉钉"
           actions={
             <button
@@ -557,7 +557,7 @@ export function RemoteControlSettings({
           enabled={remoteControl.feishu.enabled}
           onToggle={(enabled) => onUpdateFeishu?.({ enabled }, { immediate: true })}
           status={remoteStatus?.feishu ?? null}
-          subtitle={remoteControl.feishu.domain === "lark" ? "Lark" : "Feishu"}
+          subtitle={remoteControl.feishu.domain === "lark" ? "国际版" : "飞书版"}
           title="飞书"
           actions={
             <button
@@ -587,7 +587,7 @@ export function RemoteControlSettings({
           enabled={remoteControl.wecom.enabled}
           onToggle={(enabled) => onUpdateWecom?.({ enabled }, { immediate: true })}
           status={remoteStatus?.wecom ?? null}
-          subtitle="Bot / WebSocket"
+          subtitle="机器人 / 长连接"
           title="企微"
           actions={
             <button

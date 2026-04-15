@@ -1,28 +1,28 @@
 # super-agents
 
-Electron desktop workspace shell built with Vite, React, TypeScript, and Electron.
+基于 Vite、React、TypeScript 和 Electron 构建的桌面工作台外壳。
 
-## Development
+## 开发
 
-1. Install dependencies:
+1. 安装依赖：
 
 ```bash
 npm install
 ```
 
-2. Start the app:
+2. 启动应用：
 
 ```bash
 npm run dev
 ```
 
-## Build
+## 构建
 
 ```bash
 npm run build
 ```
 
-## Notes
+## 说明
 
-- The repository intentionally does not commit local build output, caches, or logs.
-- If you already have older local app data under `kober`, the app migrates it to `super-agents` on startup.
+- 仓库默认不会提交本地构建产物、缓存或日志。
+- 如果你本机里还保留着旧的 `kober` 应用数据，启动时会自动迁移到 `super-agents`。
