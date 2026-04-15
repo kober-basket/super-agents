@@ -13,6 +13,7 @@ import type {
   AppConfig,
   AppSection,
   ChatConversation,
+  ChatMessage,
   ChatConversationRuntimeState,
   ChatConversationSummary,
   DesktopWindowState,
@@ -34,6 +35,13 @@ import { useWorkspaceController } from "./features/workspace/useWorkspaceControl
 import { fileKind, sanitizeMcpName } from "./features/shared/utils";
 import { ChatWorkspace } from "./features/chat/ChatWorkspace";
 import { useGlobalSmoothScroll } from "./lib/useGlobalSmoothScroll";
+import {
+  arrayBufferToBase64,
+  buildVoiceRecordingFileName,
+  getPreferredAudioRecordingMimeType,
+  mergeTranscriptIntoDraft,
+  type VoiceInputState,
+} from "./lib/voice-input";
 
 const PreviewPane = lazy(async () => {
   const module = await import("./features/chat/PreviewPane");
@@ -102,6 +110,29 @@ function resolveConversationKnowledgeBaseSelection(
   }
 
   return conversationKnowledgeBaseIds[conversationId] ?? conversation?.selectedKnowledgeBaseIds ?? [];
+}
+
+function formatConversationPreview(value: string | undefined) {
+  const base = (value ?? "").replace(/\s+/g, " ").trim();
+  return base.length > 120 ? `${base.slice(0, 120)}...` : base;
+}
+
+function describeMessagePreview(message: Pick<ChatMessage, "content" | "visuals"> | null | undefined) {
+  const contentPreview = formatConversationPreview(message?.content);
+  if (contentPreview) {
+    return contentPreview;
+  }
+
+  const firstVisual = message?.visuals?.[0];
+  if (!firstVisual) {
+    return "";
+  }
+
+  return formatConversationPreview(
+    firstVisual.title?.trim() ||
+      firstVisual.description?.trim() ||
+      (firstVisual.type === "chart" ? "Data chart" : "Diagram"),
+  );
 }
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "super-agents:sidebar-width";
@@ -176,6 +207,54 @@ function normalizeTurnStopReason(
   return stopReason;
 }
 
+function formatVoiceInputError(error: string) {
+  if (error === "not-allowed" || error === "service-not-allowed") {
+    return "麦克风权限未开启，请允许访问后重试";
+  }
+
+  if (error === "audio-capture") {
+    return "没有检测到可用的麦克风";
+  }
+
+  if (error === "network") {
+    return "语音识别服务暂时不可用，请稍后再试";
+  }
+
+  if (error === "no-speech") {
+    return "没有听到语音，再试一次吧";
+  }
+
+  if (error === "language-not-supported") {
+    return "当前语言暂不支持语音识别";
+  }
+
+  if (error === "aborted") {
+    return "";
+  }
+
+  return "语音输入失败，请重试";
+}
+
+function formatVoiceRecordingError(error: unknown) {
+  if (error instanceof DOMException) {
+    if (error.name === "NotAllowedError" || error.name === "SecurityError") {
+      return "麦克风权限未开启，请允许访问后重试";
+    }
+
+    if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+      return "没有检测到可用的麦克风";
+    }
+
+    if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+      return "麦克风当前不可用，请检查是否被其他应用占用";
+    }
+  }
+
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : "语音输入失败，请重试";
+}
+
 export default function App() {
   useGlobalSmoothScroll();
 
@@ -224,7 +303,14 @@ export default function App() {
     typeof window === "undefined" ? 1440 : window.innerWidth,
   );
   const [resizeTarget, setResizeTarget] = useState<ResizeTarget | null>(null);
+  const [voiceInputState, setVoiceInputState] = useState<VoiceInputState>("idle");
   const resizeStateRef = useRef<{ startX: number; startWidth: number; target: ResizeTarget } | null>(null);
+  const voiceRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceRecorderStreamRef = useRef<MediaStream | null>(null);
+  const voiceRecorderMimeTypeRef = useRef("audio/webm");
+  const voiceRecorderChunksRef = useRef<Blob[]>([]);
+  const voiceShouldCommitRef = useRef(false);
+  const voiceRequestTokenRef = useRef(0);
   const {
     activeModel,
     appendAttachments,
@@ -254,6 +340,10 @@ export default function App() {
   const toolsLoadedRef = useRef(false);
   const knowledgeLoadedRef = useRef(false);
   const wechatLoginCancelledRef = useRef(false);
+  const voiceInputSupported =
+    typeof navigator !== "undefined" &&
+    typeof MediaRecorder !== "undefined" &&
+    Boolean(navigator.mediaDevices?.getUserMedia);
 
   const configuredSkills = useMemo(
     () =>
@@ -287,6 +377,37 @@ export default function App() {
     const timer = window.setTimeout(() => setToast(null), 1800);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    return () => {
+      voiceRequestTokenRef.current += 1;
+      voiceShouldCommitRef.current = false;
+      if (voiceRecorderRef.current && voiceRecorderRef.current.state !== "inactive") {
+        voiceRecorderRef.current.stop();
+      }
+      voiceRecorderStreamRef.current?.getTracks().forEach((track) => track.stop());
+      voiceRecorderRef.current = null;
+      voiceRecorderStreamRef.current = null;
+      voiceRecorderChunksRef.current = [];
+    };
+  }, []);
+
+  useEffect(() => {
+    if (view === "chat") {
+      return;
+    }
+
+    voiceRequestTokenRef.current += 1;
+    voiceShouldCommitRef.current = false;
+    if (voiceRecorderRef.current && voiceRecorderRef.current.state !== "inactive") {
+      voiceRecorderRef.current.stop();
+    }
+    voiceRecorderStreamRef.current?.getTracks().forEach((track) => track.stop());
+    voiceRecorderRef.current = null;
+    voiceRecorderStreamRef.current = null;
+    voiceRecorderChunksRef.current = [];
+    setVoiceInputState("idle");
+  }, [view]);
 
   useEffect(() => {
     let mounted = true;
@@ -469,7 +590,12 @@ export default function App() {
     if (!provider) return;
 
     const embeddingModels = provider.models.filter(isEmbeddingModel);
-    if (embeddingModels.length === 0) return;
+    if (embeddingModels.length === 0) {
+      if (config.knowledgeBase.embeddingModel) {
+        updateKnowledgeBaseConfig({ embeddingModel: "" });
+      }
+      return;
+    }
 
     if (embeddingModels.some((model) => model.id === config.knowledgeBase.embeddingModel)) {
       return;
@@ -487,7 +613,7 @@ export default function App() {
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
       lastMessageAt: conversation.lastMessageAt,
-      preview: lastMessage?.role === "assistant" ? lastMessage.content : conversation.preview,
+      preview: lastMessage?.role === "assistant" ? describeMessagePreview(lastMessage) : conversation.preview,
       messageCount: conversation.messageCount,
       selectedKnowledgeBaseIds: conversation.selectedKnowledgeBaseIds,
       agentCore: conversation.agentCore,
@@ -568,6 +694,56 @@ export default function App() {
 
   useEffect(() => {
     return workspaceClient.onChatEvent((event) => {
+      if (event.type === "message_updated") {
+        const now = Date.now();
+        const preview = describeMessagePreview({
+          content: event.content,
+          visuals: event.visuals,
+        });
+
+        setActiveConversation((current) => {
+          if (!current || current.id !== event.conversationId) {
+            return current;
+          }
+
+          const nextMessages = current.messages.map((message) =>
+            message.id === event.messageId
+              ? {
+                  ...message,
+                  content: event.content,
+                  visuals: event.visuals.length > 0 ? event.visuals : undefined,
+                  updatedAt: now,
+                }
+              : message,
+          );
+
+          return {
+            ...current,
+            messages: nextMessages,
+            updatedAt: now,
+            lastMessageAt: now,
+            preview: preview || current.preview,
+          };
+        });
+
+        setConversations((current) =>
+          current
+            .map((conversation) =>
+              conversation.id === event.conversationId
+                ? {
+                    ...conversation,
+                    preview: preview || conversation.preview,
+                    updatedAt: now,
+                    lastMessageAt: now,
+                  }
+                : conversation,
+            )
+            .sort((left, right) => right.lastMessageAt - left.lastMessageAt || right.createdAt - left.createdAt),
+        );
+
+        return;
+      }
+
       if (event.type === "message_delta") {
         const now = Date.now();
 
@@ -1541,6 +1717,17 @@ export default function App() {
     const selectedKnowledgeBaseIds = activeKnowledgeBaseIds;
     if (!content && pendingAttachments.length === 0) return;
 
+    voiceRequestTokenRef.current += 1;
+    voiceShouldCommitRef.current = false;
+    if (voiceRecorderRef.current && voiceRecorderRef.current.state !== "inactive") {
+      voiceRecorderRef.current.stop();
+    }
+    voiceRecorderStreamRef.current?.getTracks().forEach((track) => track.stop());
+    voiceRecorderRef.current = null;
+    voiceRecorderStreamRef.current = null;
+    voiceRecorderChunksRef.current = [];
+    setVoiceInputState("idle");
+
     setMessageScrollRequest((current) => current + 1);
 
     setStartingChatTurn(true);
@@ -1572,6 +1759,156 @@ export default function App() {
       setToast(error instanceof Error ? error.message : "发送消息失败");
     } finally {
       setStartingChatTurn(false);
+    }
+  }
+
+  function stopVoiceInput() {
+    if (voiceInputState === "transcribing") {
+      return;
+    }
+
+    if (!voiceRecorderRef.current) {
+      setVoiceInputState("idle");
+      return;
+    }
+
+    voiceShouldCommitRef.current = true;
+    setVoiceInputState("transcribing");
+    voiceRecorderRef.current.stop();
+  }
+
+  function releaseVoiceRecorder() {
+    voiceRecorderRef.current = null;
+    voiceRecorderStreamRef.current?.getTracks().forEach((track) => track.stop());
+    voiceRecorderStreamRef.current = null;
+    voiceRecorderChunksRef.current = [];
+  }
+
+  function cancelVoiceInput() {
+    voiceRequestTokenRef.current += 1;
+    voiceShouldCommitRef.current = false;
+    if (voiceRecorderRef.current && voiceRecorderRef.current.state !== "inactive") {
+      voiceRecorderRef.current.stop();
+    } else {
+      releaseVoiceRecorder();
+    }
+    setVoiceInputState("idle");
+  }
+
+  async function startVoiceInput() {
+    if (!voiceInputSupported) {
+      setToast("当前环境暂不支持语音输入");
+      return;
+    }
+
+    const requestToken = ++voiceRequestTokenRef.current;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const preferredMimeType = getPreferredAudioRecordingMimeType();
+    const recorder = preferredMimeType
+      ? new MediaRecorder(stream, { mimeType: preferredMimeType })
+      : new MediaRecorder(stream);
+
+    voiceRecorderRef.current = recorder;
+    voiceRecorderStreamRef.current = stream;
+    voiceRecorderMimeTypeRef.current = recorder.mimeType || preferredMimeType || "audio/webm";
+    voiceRecorderChunksRef.current = [];
+    voiceShouldCommitRef.current = false;
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        voiceRecorderChunksRef.current.push(event.data);
+      }
+    };
+
+    recorder.onerror = () => {
+      if (requestToken !== voiceRequestTokenRef.current) {
+        return;
+      }
+
+      releaseVoiceRecorder();
+      setVoiceInputState("idle");
+      setToast("录音失败，请重试");
+    };
+
+    recorder.onstop = () => {
+      const shouldCommit = voiceShouldCommitRef.current;
+      const activeToken = requestToken;
+      const chunks = [...voiceRecorderChunksRef.current];
+      const mimeType = voiceRecorderMimeTypeRef.current;
+      voiceShouldCommitRef.current = false;
+      releaseVoiceRecorder();
+
+      if (!shouldCommit) {
+        if (activeToken === voiceRequestTokenRef.current) {
+          setVoiceInputState("idle");
+        }
+        return;
+      }
+
+      if (chunks.length === 0) {
+        if (activeToken === voiceRequestTokenRef.current) {
+          setVoiceInputState("idle");
+          setToast("没有录到声音，再试一次吧");
+        }
+        return;
+      }
+
+      void (async () => {
+        try {
+          const blob = new Blob(chunks, { type: mimeType });
+          const result = await workspaceClient.transcribeAudio({
+            providerId: activeModel?.providerId,
+            fileName: buildVoiceRecordingFileName(mimeType),
+            mimeType,
+            audioBase64: arrayBufferToBase64(await blob.arrayBuffer()),
+            language: "zh",
+          });
+
+          if (activeToken !== voiceRequestTokenRef.current) {
+            return;
+          }
+
+          setDraftMessage((current) => mergeTranscriptIntoDraft(current, result.text));
+          setToast("语音已转成文字");
+        } catch (error) {
+          if (activeToken !== voiceRequestTokenRef.current) {
+            return;
+          }
+
+          setToast(error instanceof Error ? error.message : "语音转写失败，请重试");
+        } finally {
+          if (activeToken === voiceRequestTokenRef.current) {
+            setVoiceInputState("idle");
+          }
+        }
+      })();
+    };
+
+    recorder.start();
+    setVoiceInputState("recording");
+    setToast("正在录音，点击麦克风结束");
+  }
+
+  async function toggleVoiceInput() {
+    if (!voiceInputSupported) {
+      setToast("当前环境暂不支持语音输入");
+      return;
+    }
+
+    if (voiceInputState === "transcribing") {
+      return;
+    }
+
+    if (voiceInputState === "recording") {
+      stopVoiceInput();
+      return;
+    }
+
+    try {
+      await startVoiceInput();
+    } catch (error) {
+      cancelVoiceInput();
+      setToast(formatVoiceRecordingError(error));
     }
   }
 
@@ -1787,7 +2124,9 @@ export default function App() {
           onSendMessage={sendChatMessage}
           onToggleKnowledgeBase={toggleKnowledgeBaseSelection}
           runtimeState={activeConversationRuntimeState}
-          onVoiceInput={() => setToast("语音输入即将支持")}
+          onVoiceInput={toggleVoiceInput}
+          voiceInputState={voiceInputState}
+          voiceInputSupported={voiceInputSupported}
           selectableModels={selectableModels}
           selectedKnowledgeBaseIds={activeKnowledgeBaseIds}
           scrollToBottomRequest={messageScrollRequest}

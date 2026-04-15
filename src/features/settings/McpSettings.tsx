@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import { ChevronDown, LoaderCircle, Play, RefreshCw, Wrench, X } from "lucide-react";
+import { LoaderCircle, Play, RefreshCw, Wrench, X } from "lucide-react";
 
 import type {
   McpServerConfig,
@@ -10,6 +10,7 @@ import type {
   McpToolInfo,
   McpToolParameter,
 } from "../../types";
+import { SurfaceSelect } from "../shared/SurfaceSelect";
 import { formatMcpStatusLabel, sanitizeMcpName } from "../shared/utils";
 
 type ToolState = {
@@ -389,20 +390,21 @@ export function McpSettings({
 
               <label>
                 <span>连接方式</span>
-                <div className="select-shell field-select full-width">
-                  <select
-                    value={activeServer.transport}
-                    onChange={(event) =>
-                      onUpdateMcp(activeServer.id, {
-                        transport: event.target.value as McpServerConfig["transport"],
-                      })
-                    }
-                  >
-                    <option value="local">本地</option>
-                    <option value="remote">远程</option>
-                  </select>
-                  <ChevronDown size={13} />
-                </div>
+                <SurfaceSelect
+                  ariaLabel="选择 MCP 连接方式"
+                  className="field-select"
+                  fullWidth
+                  onChange={(value) =>
+                    onUpdateMcp(activeServer.id, {
+                      transport: value as McpServerConfig["transport"],
+                    })
+                  }
+                  options={[
+                    { value: "local", label: "本地" },
+                    { value: "remote", label: "远程" },
+                  ]}
+                  value={activeServer.transport}
+                />
               </label>
             </div>
 
@@ -599,16 +601,17 @@ export function McpSettings({
                               return (
                                 <label key={parameter.name}>
                                   <span>{parameter.name}{parameter.required ? " *" : ""}</span>
-                                  <div className="select-shell field-select full-width">
-                                    <select
-                                      value={value || "false"}
-                                      onChange={(event) => updateToolForm(key, parameter.name, event.target.value)}
-                                    >
-                                      <option value="false">否</option>
-                                      <option value="true">是</option>
-                                    </select>
-                                    <ChevronDown size={13} />
-                                  </div>
+                                  <SurfaceSelect
+                                    ariaLabel={`选择 ${parameter.name}`}
+                                    className="field-select"
+                                    fullWidth
+                                    onChange={(nextValue) => updateToolForm(key, parameter.name, nextValue)}
+                                    options={[
+                                      { value: "false", label: "否" },
+                                      { value: "true", label: "是" },
+                                    ]}
+                                    value={value || "false"}
+                                  />
                                 </label>
                               );
                             }
@@ -617,19 +620,17 @@ export function McpSettings({
                               return (
                                 <label key={parameter.name}>
                                   <span>{parameter.name}{parameter.required ? " *" : ""}</span>
-                                  <div className="select-shell field-select full-width">
-                                    <select
-                                      value={value || enumValues[0]}
-                                      onChange={(event) => updateToolForm(key, parameter.name, event.target.value)}
-                                    >
-                                      {enumValues.map((option) => (
-                                        <option key={option} value={option}>
-                                          {option}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <ChevronDown size={13} />
-                                  </div>
+                                  <SurfaceSelect
+                                    ariaLabel={`选择 ${parameter.name}`}
+                                    className="field-select"
+                                    fullWidth
+                                    onChange={(nextValue) => updateToolForm(key, parameter.name, nextValue)}
+                                    options={enumValues.map((option) => ({
+                                      value: option,
+                                      label: option,
+                                    }))}
+                                    value={value || enumValues[0]}
+                                  />
                                 </label>
                               );
                             }

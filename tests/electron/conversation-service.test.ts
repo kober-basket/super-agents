@@ -99,3 +99,46 @@ test("conversation service keeps knowledge base selection per conversation", asy
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("conversation service persists assistant visuals separately from text", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-conversations-"));
+  const service = new ConversationService(path.join(tempDir, "data", "app.db"));
+
+  await service.initialize();
+
+  try {
+    const started = await service.startTurn(
+      {
+        content: "Show me the execution flow",
+      },
+      { agentCore: "opencode" },
+    );
+
+    await service.updateAssistantMessage(
+      started.conversation.id,
+      started.assistantMessage.id,
+      "",
+      [
+        {
+          id: "vis-1",
+          type: "diagram",
+          style: "mermaid",
+          title: "Execution flow",
+          code: "graph TD; User-->API; API-->Worker;",
+        },
+      ],
+    );
+
+    const loaded = await service.getConversation(started.conversation.id);
+    const assistantMessage = loaded.messages.find((message) => message.id === started.assistantMessage.id);
+    assert.equal(assistantMessage?.content, "");
+    assert.equal(assistantMessage?.visuals?.length, 1);
+    assert.equal(assistantMessage?.visuals?.[0]?.type, "diagram");
+
+    const listed = await service.listConversations();
+    assert.equal(listed.conversations[0]?.preview, "Execution flow");
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});

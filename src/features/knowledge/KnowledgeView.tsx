@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import {
   BookOpen,
-  ChevronDown,
   FileText,
   Folder,
   Globe,
@@ -19,6 +18,7 @@ import {
 
 import { formatRelativeTime } from "../../lib/format";
 import { isEmbeddingModel } from "../../lib/model-config";
+import { SurfaceSelect } from "../shared/SurfaceSelect";
 import type {
   AppConfig,
   KnowledgeBaseSummary,
@@ -191,6 +191,36 @@ export function KnowledgeView({
   }, [embeddingProvider]);
   const activeEmbeddingModel =
     embeddingModels.find((model) => model.id === config.embeddingModel) ?? embeddingModels[0] ?? null;
+  const embeddingProviderOptions = useMemo(
+    () =>
+      modelProviders.map((provider) => {
+        const embeddingCount = provider.models.filter(isEmbeddingModel).length;
+
+        return {
+          value: provider.id,
+          label: provider.name,
+          description: embeddingCount > 0 ? `${embeddingCount} 个 Embedding 模型` : "无可用的 Embedding 模型",
+        };
+      }),
+    [modelProviders],
+  );
+  const embeddingModelOptions = useMemo(
+    () =>
+      embeddingModels.map((model) => ({
+        value: model.id,
+        label: model.label,
+        description: model.id !== model.label ? model.id : undefined,
+      })),
+    [embeddingModels],
+  );
+  const sortOptions = useMemo(
+    () =>
+      SORT_OPTIONS.map((option) => ({
+        value: option.value,
+        label: option.label,
+      })),
+    [],
+  );
 
   const currentItems = useMemo(() => {
     if (!selectedBase) return [];
@@ -568,43 +598,39 @@ export function KnowledgeView({
                           <Settings2 size={14} />
                           提供商
                         </span>
-                        <div className="select-shell knowledge-setting-select">
-                          <select
-                            value={config.embeddingProviderId}
-                            onChange={(event) => onChangeEmbeddingProvider(event.target.value)}
-                            disabled={controlsDisabled}
-                          >
-                            {modelProviders.map((provider) => (
-                              <option key={provider.id} value={provider.id}>
-                                {provider.name}
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown size={16} />
-                        </div>
+                        <SurfaceSelect
+                          align="left"
+                          ariaLabel="选择 Embedding 提供商"
+                          className="knowledge-setting-select"
+                          disabled={controlsDisabled}
+                          emptyLabel="暂无提供商"
+                          fullWidth
+                          onChange={onChangeEmbeddingProvider}
+                          options={embeddingProviderOptions}
+                          value={embeddingProvider?.id ?? config.embeddingProviderId}
+                        />
                       </label>
 
                       <label className="knowledge-setting-card grow">
                         <span className="knowledge-setting-label">模型</span>
                         {embeddingModels.length > 0 ? (
-                          <div className="select-shell knowledge-setting-select wide">
-                            <select
-                              value={activeEmbeddingModel?.id ?? ""}
-                              onChange={(event) => onChangeEmbeddingModel(event.target.value)}
-                              disabled={controlsDisabled}
-                              title={activeEmbeddingModel?.label ?? ""}
-                            >
-                              {embeddingModels.map((model) => (
-                                <option key={model.id} value={model.id}>
-                                  {model.label}
-                                </option>
-                              ))}
-                            </select>
-                            <ChevronDown size={16} />
-                          </div>
+                          <SurfaceSelect
+                            align="left"
+                            ariaLabel="选择 Embedding 模型"
+                            className="knowledge-setting-select wide"
+                            disabled={controlsDisabled}
+                            emptyLabel="无可用的 Embedding 模型"
+                            fullWidth
+                            onChange={onChangeEmbeddingModel}
+                            options={embeddingModelOptions}
+                            value={activeEmbeddingModel?.id ?? config.embeddingModel}
+                          />
                         ) : (
-                          <div className="knowledge-setting-empty" title={`${embeddingProvider?.name ?? "当前提供商"}无可用嵌入模型`}>
-                            <strong>{config.embeddingModel || "无可用嵌入模型"}</strong>
+                          <div
+                            className="knowledge-setting-empty"
+                            title={`${embeddingProvider?.name ?? "当前提供商"} 无可用的 Embedding 模型`}
+                          >
+                            <strong>无可用的 Embedding 模型</strong>
                           </div>
                         )}
                       </label>
@@ -688,19 +714,17 @@ export function KnowledgeView({
                         />
                       </label>
 
-                      <label className="knowledge-sort-field">
-                        <select
-                          value={sortKey}
-                          onChange={(event) => setSortKey(event.target.value as KnowledgeSortKey)}
+                      <div className="knowledge-sort-field">
+                        <SurfaceSelect
+                          align="right"
+                          ariaLabel="选择排序方式"
                           disabled={controlsDisabled}
-                        >
-                          {SORT_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                          fullWidth
+                          onChange={(value) => setSortKey(value as KnowledgeSortKey)}
+                          options={sortOptions}
+                          value={sortKey}
+                        />
+                      </div>
                     </div>
                   ) : null}
                 </section>

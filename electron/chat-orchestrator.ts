@@ -14,7 +14,9 @@ import type {
   ChatToolCall,
   ChatToolCallContent,
   ChatTurnStartResult,
+  ChatVisual,
 } from "../src/types";
+import { parseChatMessageContent } from "../src/lib/chat-visuals";
 import {
   AcpRuntimeManager,
   contentBlockToText,
@@ -29,7 +31,10 @@ interface ActiveTurn {
   turnId: string;
   sessionId: string;
   assistantMessageId: string;
-  assistantText: string;
+  assistantRawText: string;
+  assistantContent: string;
+  assistantVisuals: ChatVisual[];
+  assistantVisualsSignature: string;
   completion: Deferred<ChatTurnCompletionResult>;
   unregisterSessionHandlers: () => void;
   closed: boolean;
@@ -274,6 +279,7 @@ function buildInlineVisualInstruction(input: ChatSendInput) {
     "Supported payloads:",
     '1. Mermaid diagram: {"type":"diagram","style":"mermaid","title":"Optional title","description":"Optional note","code":"graph TD; A-->B;"}',
     '2. Vega-Lite chart: {"type":"chart","library":"vega-lite","title":"Optional title","description":"Optional note","spec":{...}}',
+    "For Vega-Lite charts, you may include inline interactive controls through standard `params` and `bind` fields inside `spec` when sliders, selects, or toggles help exploration.",
     "You may output either one object or an array of objects in the fenced block.",
     "Keep all data inline in the JSON. Do not reference remote URLs or external assets.",
     "If no visual is needed, reply normally without a visual block.",
@@ -292,7 +298,13 @@ function buildTurnPromptContent(input: ChatSendInput) {
     .join("\n\n");
 }
 
+function serializeVisuals(visuals: ChatVisual[]) {
+  return JSON.stringify(visuals);
+}
+
 const INTERRUPTED_ASSISTANT_REPLY = "已停止回复。你可以继续发送下一条消息。";
+
+const INTERRUPTED_ASSISTANT_REPLY_TEXT = "已停止回复。你可以继续发送下一条消息。";
 
 function looksLikeTurnCancellation(value?: string) {
   return Boolean(value && /(cancel|abort|interrupt|stop(ped)?)/i.test(value));
@@ -361,7 +373,10 @@ export class ChatOrchestrator {
         turnId,
         sessionId,
         assistantMessageId: started.assistantMessage.id,
-        assistantText: started.assistantMessage.content,
+        assistantRawText: started.assistantMessage.content,
+        assistantContent: started.assistantMessage.content,
+        assistantVisuals: started.assistantMessage.visuals ?? [],
+        assistantVisualsSignature: serializeVisuals(started.assistantMessage.visuals ?? []),
         completion,
         unregisterSessionHandlers: () => undefined,
         closed: false,
@@ -508,7 +523,8 @@ export class ChatOrchestrator {
         ({
           id: activeTurn.assistantMessageId,
           role: "assistant",
-          content: activeTurn.assistantText,
+          content: activeTurn.assistantContent,
+          visuals: activeTurn.assistantVisuals,
           attachments: [],
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -544,22 +560,43 @@ export class ChatOrchestrator {
   }
 
   private async ensureInterruptedReplyHint(activeTurn: ActiveTurn, reason?: string) {
-    if (!looksLikeTurnCancellation(reason) || activeTurn.assistantText.trim()) {
+    if (!looksLikeTurnCancellation(reason) || activeTurn.assistantRawText.trim()) {
       return;
     }
 
-    activeTurn.assistantText = INTERRUPTED_ASSISTANT_REPLY;
-    await this.conversationService.updateAssistantMessageContent(
+    activeTurn.assistantRawText = INTERRUPTED_ASSISTANT_REPLY_TEXT;
+    await this.persistAndEmitAssistantState(activeTurn);
+  }
+
+  private async persistAndEmitAssistantState(activeTurn: ActiveTurn) {
+    const parsed = parseChatMessageContent(activeTurn.assistantRawText);
+    const nextVisualsSignature = serializeVisuals(parsed.visuals);
+
+    if (
+      parsed.text === activeTurn.assistantContent &&
+      nextVisualsSignature === activeTurn.assistantVisualsSignature
+    ) {
+      return;
+    }
+
+    activeTurn.assistantContent = parsed.text;
+    activeTurn.assistantVisuals = parsed.visuals;
+    activeTurn.assistantVisualsSignature = nextVisualsSignature;
+
+    await this.conversationService.updateAssistantMessage(
       activeTurn.conversationId,
       activeTurn.assistantMessageId,
-      activeTurn.assistantText,
+      activeTurn.assistantContent,
+      activeTurn.assistantVisuals,
     );
+
     this.emitEvent({
-      type: "message_delta",
+      type: "message_updated",
       conversationId: activeTurn.conversationId,
       turnId: activeTurn.turnId,
       messageId: activeTurn.assistantMessageId,
-      textDelta: INTERRUPTED_ASSISTANT_REPLY,
+      content: activeTurn.assistantContent,
+      visuals: activeTurn.assistantVisuals,
     });
   }
 
@@ -574,19 +611,8 @@ export class ChatOrchestrator {
         return;
       }
 
-      activeTurn.assistantText += textDelta;
-      await this.conversationService.updateAssistantMessageContent(
-        activeTurn.conversationId,
-        activeTurn.assistantMessageId,
-        activeTurn.assistantText,
-      );
-      this.emitEvent({
-        type: "message_delta",
-        conversationId: activeTurn.conversationId,
-        turnId: activeTurn.turnId,
-        messageId: activeTurn.assistantMessageId,
-        textDelta,
-      });
+      activeTurn.assistantRawText += textDelta;
+      await this.persistAndEmitAssistantState(activeTurn);
       return;
     }
 

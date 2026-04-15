@@ -1,5 +1,7 @@
 import type {
   AppConfig,
+  AudioTranscriptionInput,
+  AudioTranscriptionResult,
   ChatEvent,
   ChatConversation,
   ChatConversationListPayload,
@@ -57,6 +59,7 @@ declare global {
       waitWechatLogin: (payload: { sessionKey: string; timeoutMs?: number }) => Promise<WechatLoginWaitResult>;
       disconnectWechat: () => Promise<RemoteControlStatus>;
       fetchProviderModels: (payload: ModelProviderFetchInput) => Promise<ModelProviderFetchResult>;
+      transcribeAudio: (payload: AudioTranscriptionInput) => Promise<AudioTranscriptionResult>;
       inspectMcpServer: (payload: McpInspectInput) => Promise<McpServerToolsResult>;
       debugMcpTool: (payload: McpToolDebugInput) => Promise<McpToolDebugResult>;
       listTools: () => Promise<WorkspaceToolCatalog>;

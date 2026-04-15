@@ -9,6 +9,7 @@ import mime from "mime-types";
 import {
   createRuntimeModelId,
   ensureActiveModelId,
+  getActiveModelOption,
   normalizeProviderModels,
   sanitizeModelProviderId,
 } from "../src/lib/model-config";
@@ -17,6 +18,8 @@ import { DEFAULT_REMOTE_CONTROL_CONFIG, normalizeRemoteControlConfig } from "../
 import { sanitizeMcpName } from "../src/features/shared/utils";
 import type {
   AppConfig,
+  AudioTranscriptionInput,
+  AudioTranscriptionResult,
   BootstrapPayload,
   FileDropEntry,
   FilePreviewPayload,
@@ -265,6 +268,85 @@ function createModelListUrl(baseUrl: string) {
   return normalized.endsWith("/models") ? normalized : `${normalized}/models`;
 }
 
+const DEFAULT_TRANSCRIPTION_MODEL_IDS = [
+  "gpt-4o-mini-transcribe",
+  "gpt-4o-transcribe",
+  "whisper-1",
+] as const;
+
+const TRANSCRIPTION_MODEL_REGEX =
+  /\b(?:whisper(?:-[\w.]+)?|transcribe(?:-[\w.]+)?|transcription|speech[-_ ]?to[-_ ]?text|stt)\b/i;
+
+function createOpenAiCompatibleHeaders(apiKey: string) {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (apiKey.trim()) {
+    headers.Authorization = `Bearer ${apiKey.trim()}`;
+    headers["api-key"] = apiKey.trim();
+    headers["x-api-key"] = apiKey.trim();
+  }
+  return headers;
+}
+
+function createAudioTranscriptionUrl(baseUrl: string) {
+  const normalized = normalizeBaseUrl(baseUrl);
+  if (!normalized) {
+    throw new Error("请先填写提供商接口地址");
+  }
+
+  return normalized.endsWith("/audio/transcriptions")
+    ? normalized
+    : `${normalized}/audio/transcriptions`;
+}
+
+function safeParseJson(value: string) {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function extractResponseErrorMessage(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object") {
+    return fallback;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const directMessage =
+    typeof record.message === "string"
+      ? record.message
+      : typeof record.error === "string"
+        ? record.error
+        : typeof (record.error as { message?: unknown } | undefined)?.message === "string"
+          ? String((record.error as { message?: unknown }).message)
+          : "";
+
+  return directMessage.trim() || fallback;
+}
+
+export function getAudioTranscriptionModelCandidates(provider: ModelProviderConfig) {
+  const configured = provider.models
+    .filter((model) =>
+      TRANSCRIPTION_MODEL_REGEX.test(
+        `${model.id} ${model.label} ${model.description ?? ""}`,
+      ),
+    )
+    .map((model) => model.id.trim())
+    .filter(Boolean);
+
+  return Array.from(new Set([...configured, ...DEFAULT_TRANSCRIPTION_MODEL_IDS]));
+}
+
+function shouldRetryWithAnotherTranscriptionModel(status: number, message: string) {
+  if (!(status === 400 || status === 404)) {
+    return false;
+  }
+
+  return /(model|engine).*(not found|does not exist|unsupported|invalid)|unknown model|unsupported model/i.test(
+    message,
+  );
+}
+
 function extractStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -381,12 +463,7 @@ function extractModelList(payload: unknown, providerId?: string) {
 }
 
 async function fetchOpenAiCompatibleModelsEnhanced(input: ModelProviderFetchInput) {
-  const headers: Record<string, string> = { Accept: "application/json" };
-  if (input.apiKey.trim()) {
-    headers.Authorization = `Bearer ${input.apiKey.trim()}`;
-    headers["api-key"] = input.apiKey.trim();
-    headers["x-api-key"] = input.apiKey.trim();
-  }
+  const headers = createOpenAiCompatibleHeaders(input.apiKey);
 
   const normalizedBaseUrl = normalizeBaseUrl(input.baseUrl);
   const urls = [createModelListUrl(input.baseUrl)];
@@ -670,6 +747,103 @@ export class WorkspaceService {
       providerId: input.providerId,
       models: await fetchOpenAiCompatibleModelsEnhanced(input),
     };
+  }
+
+  async transcribeAudio(input: AudioTranscriptionInput): Promise<AudioTranscriptionResult> {
+    const config = (await this.loadState()).config;
+    const requestedProviderId = input.providerId?.trim() || "";
+    const provider =
+      (requestedProviderId
+        ? config.modelProviders.find((item) => item.id === requestedProviderId)
+        : null) ??
+      (() => {
+        const activeModel = getActiveModelOption(config.modelProviders, config.activeModelId);
+        return activeModel
+          ? config.modelProviders.find((item) => item.id === activeModel.providerId)
+          : null;
+      })() ??
+      config.modelProviders.find((item) => item.enabled !== false) ??
+      null;
+
+    if (!provider || provider.enabled === false) {
+      throw new Error("请先配置可用的模型提供商，再使用语音输入");
+    }
+
+    if (provider.kind !== "openai-compatible") {
+      throw new Error("当前仅支持 OpenAI 兼容提供商的语音转写");
+    }
+
+    if (!provider.baseUrl.trim()) {
+      throw new Error("当前提供商缺少接口地址，无法进行语音转写");
+    }
+
+    const audioBase64 = input.audioBase64.trim();
+    if (!audioBase64) {
+      throw new Error("缺少语音数据，无法开始转写");
+    }
+
+    const audioBuffer = Buffer.from(audioBase64, "base64");
+    if (audioBuffer.byteLength === 0) {
+      throw new Error("语音数据为空，请重新录制");
+    }
+
+    const mimeType = input.mimeType.trim() || "audio/webm";
+    const fileName = input.fileName.trim() || "voice-input.webm";
+    const url = createAudioTranscriptionUrl(provider.baseUrl);
+    const headers = createOpenAiCompatibleHeaders(provider.apiKey);
+    const modelCandidates = getAudioTranscriptionModelCandidates(provider);
+    let retryableErrorMessage = "";
+
+    for (const modelId of modelCandidates) {
+      const formData = new FormData();
+      formData.set(
+        "file",
+        new File([audioBuffer], fileName, {
+          type: mimeType,
+        }),
+      );
+      formData.set("model", modelId);
+      formData.set("language", input.language?.trim() || "zh");
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+      const rawText = await response.text();
+      const parsed = rawText ? safeParseJson(rawText) : null;
+      const fallbackMessage = rawText.trim() || `语音转写失败 (${response.status})`;
+
+      if (!response.ok) {
+        const message = extractResponseErrorMessage(parsed, fallbackMessage);
+        if (shouldRetryWithAnotherTranscriptionModel(response.status, message)) {
+          retryableErrorMessage = message;
+          continue;
+        }
+
+        throw new Error(message);
+      }
+
+      const text =
+        typeof (parsed as { text?: unknown } | null)?.text === "string"
+          ? String((parsed as { text: string }).text).trim()
+          : rawText.trim();
+
+      if (!text) {
+        throw new Error("语音转写完成，但没有返回可用文本");
+      }
+
+      return {
+        text,
+        providerId: provider.id,
+        modelId,
+      };
+    }
+
+    throw new Error(
+      retryableErrorMessage ||
+        "当前提供商暂不支持语音转写，请在模型设置里补充 whisper-1 或 gpt-4o-mini-transcribe",
+    );
   }
 
   async listKnowledgeBases(): Promise<KnowledgeCatalogPayload> {

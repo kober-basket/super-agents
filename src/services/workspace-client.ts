@@ -36,6 +36,8 @@ export const workspaceClient = {
   disconnectWechat: () => window.desktopAgent.disconnectWechat(),
   fetchProviderModels: (payload: Parameters<typeof window.desktopAgent.fetchProviderModels>[0]) =>
     window.desktopAgent.fetchProviderModels(payload),
+  transcribeAudio: (payload: Parameters<typeof window.desktopAgent.transcribeAudio>[0]) =>
+    window.desktopAgent.transcribeAudio(payload),
   inspectMcpServer: (payload: Parameters<typeof window.desktopAgent.inspectMcpServer>[0]) =>
     window.desktopAgent.inspectMcpServer(payload),
   debugMcpTool: (payload: Parameters<typeof window.desktopAgent.debugMcpTool>[0]) =>

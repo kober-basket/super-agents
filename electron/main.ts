@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import path from "node:path";
 
 import {
@@ -25,6 +25,53 @@ let remoteControlService: RemoteControlService | null = null;
 let acpRuntimeManager: AcpRuntimeManager | null = null;
 let chatOrchestrator: ChatOrchestrator | null = null;
 const mcpInspector = new McpInspector();
+
+function isTrustedDesktopOrigin(origin: string) {
+  return (
+    origin.startsWith("file://") ||
+    /^https?:\/\/127\.0\.0\.1(?::\d+)?$/i.test(origin) ||
+    /^https?:\/\/localhost(?::\d+)?$/i.test(origin)
+  );
+}
+
+function configureMediaPermissions() {
+  session.defaultSession.setPermissionCheckHandler(
+    (_webContents, permission, requestingOrigin, details) => {
+      if (permission !== "media") {
+        return false;
+      }
+
+      const requestDetails = details as { mediaType?: string; mediaTypes?: string[] };
+      const requestsAudio =
+        requestDetails.mediaType === "audio" ||
+        requestDetails.mediaTypes?.includes("audio") === true;
+
+      return requestsAudio && isTrustedDesktopOrigin(requestingOrigin);
+    },
+  );
+
+  session.defaultSession.setPermissionRequestHandler(
+    (_webContents, permission, callback, details) => {
+      if (permission !== "media") {
+        callback(false);
+        return;
+      }
+
+      const requestDetails = details as {
+        requestingUrl?: string;
+        securityOrigin?: string;
+        mediaType?: string;
+        mediaTypes?: string[];
+      };
+      const origin = requestDetails.securityOrigin || requestDetails.requestingUrl || "";
+      const requestsAudio =
+        requestDetails.mediaType === "audio" ||
+        requestDetails.mediaTypes?.includes("audio") === true;
+
+      callback(requestsAudio && isTrustedDesktopOrigin(origin));
+    },
+  );
+}
 
 function createWindow() {
   const isMac = process.platform === "darwin";
@@ -113,6 +160,7 @@ app.whenReady().then(async () => {
   conversationService = new ConversationService(conversationDatabasePath);
   await conversationService.initialize();
   acpRuntimeManager = new AcpRuntimeManager(app.getPath("appData"));
+  configureMediaPermissions();
   const emitChatEvent = (event: ChatEvent) => {
     if (!mainWindow || mainWindow.isDestroyed()) {
       return;
@@ -297,6 +345,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("desktop:fetch-provider-models", async (_event, payload) => {
     return await service!.fetchProviderModels(payload);
+  });
+
+  ipcMain.handle("desktop:transcribe-audio", async (_event, payload) => {
+    return await service!.transcribeAudio(payload);
   });
 
   ipcMain.handle("desktop:inspect-mcp-server", async (_event, payload) => {

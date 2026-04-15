@@ -77,7 +77,7 @@ function normalizeVisual(input: unknown, fallbackId: string): ChatVisual | null 
   return null;
 }
 
-function normalizeVisualPayload(input: unknown, blockIndex: number) {
+export function normalizeChatVisualPayload(input: unknown, blockIndex = 0) {
   const items = Array.isArray(input) ? input : [input];
   const visuals: ChatVisual[] = [];
   let invalidVisualCount = 0;
@@ -126,7 +126,7 @@ export function parseChatMessageContent(content: string, existingVisuals: ChatVi
 
     try {
       const parsed = JSON.parse(payload);
-      const normalized = normalizeVisualPayload(parsed, blockIndex - 1);
+      const normalized = normalizeChatVisualPayload(parsed, blockIndex - 1);
       visuals.push(...normalized.visuals);
       invalidVisualCount += normalized.invalidVisualCount;
     } catch {

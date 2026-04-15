@@ -74,6 +74,20 @@ export interface ModelProviderFetchResult {
   models: ProviderModelConfig[];
 }
 
+export interface AudioTranscriptionInput {
+  providerId?: string;
+  fileName: string;
+  mimeType: string;
+  audioBase64: string;
+  language?: string;
+}
+
+export interface AudioTranscriptionResult {
+  text: string;
+  providerId: string;
+  modelId: string;
+}
+
 export interface McpServerConfig {
   id: string;
   name: string;
@@ -565,6 +579,14 @@ export interface ChatTurnStartResult {
 }
 
 export type ChatEvent =
+  | {
+      type: "message_updated";
+      conversationId: string;
+      turnId: string;
+      messageId: string;
+      content: string;
+      visuals: ChatVisual[];
+    }
   | {
       type: "message_delta";
       conversationId: string;

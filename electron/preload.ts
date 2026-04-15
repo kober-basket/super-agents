@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import type {
   AppConfig,
+  AudioTranscriptionInput,
+  AudioTranscriptionResult,
   ChatEvent,
   ChatConversation,
   ChatConversationListPayload,
@@ -80,6 +82,8 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:disconnect-wechat") as Promise<RemoteControlStatus>,
   fetchProviderModels: (payload: ModelProviderFetchInput) =>
     ipcRenderer.invoke("desktop:fetch-provider-models", payload) as Promise<ModelProviderFetchResult>,
+  transcribeAudio: (payload: AudioTranscriptionInput) =>
+    ipcRenderer.invoke("desktop:transcribe-audio", payload) as Promise<AudioTranscriptionResult>,
   inspectMcpServer: (payload: McpInspectInput) =>
     ipcRenderer.invoke("desktop:inspect-mcp-server", payload) as Promise<McpServerToolsResult>,
   debugMcpTool: (payload: McpToolDebugInput) =>

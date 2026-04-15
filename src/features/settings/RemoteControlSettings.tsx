@@ -8,6 +8,7 @@ import type {
   RemoteControlStatus,
   WechatRemoteRuntimeStatus,
 } from "../../types";
+import { SurfaceSelect } from "../shared/SurfaceSelect";
 
 interface RemoteControlSettingsProps {
   remoteControl: RemoteControlConfig;
@@ -249,21 +250,25 @@ function ConfigModal({
             <div className="remote-config-grid">
               <label>
                 <span>域名</span>
-                <select
-                  value={draft.data.domain}
-                  onChange={(event) =>
+                <SurfaceSelect
+                  ariaLabel="选择飞书域名"
+                  className="field-select"
+                  fullWidth
+                  onChange={(value) =>
                     onChange({
                       channel: "feishu",
                       data: {
                         ...draft.data,
-                        domain: event.target.value as RemoteControlConfig["feishu"]["domain"],
+                        domain: value as RemoteControlConfig["feishu"]["domain"],
                       },
                     })
                   }
-                >
-                  <option value="feishu">飞书</option>
-                  <option value="lark">国际版</option>
-                </select>
+                  options={[
+                    { value: "feishu", label: "飞书" },
+                    { value: "lark", label: "国际版" },
+                  ]}
+                  value={draft.data.domain}
+                />
               </label>
               <label>
                 <span>应用 ID</span>

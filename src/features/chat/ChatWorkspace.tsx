@@ -27,6 +27,7 @@ import { parseChatMessageContent } from "../../lib/chat-visuals";
 import { formatBytes, markdownToHtml } from "../../lib/format";
 import type {
   ChatConversation,
+  ChatMessage,
   ChatConversationRuntimeState,
   ChatToolCall,
   FileDropEntry,
@@ -63,6 +64,8 @@ interface ChatWorkspaceProps {
   onSendMessage: () => void;
   onToggleKnowledgeBase: (baseId: string) => void;
   onVoiceInput: () => void;
+  voiceInputState: "idle" | "recording" | "transcribing";
+  voiceInputSupported: boolean;
   scrollToBottomRequest: number;
 }
 
@@ -247,6 +250,8 @@ export function ChatWorkspace({
   onSendMessage,
   onToggleKnowledgeBase,
   onVoiceInput,
+  voiceInputState,
+  voiceInputSupported,
   scrollToBottomRequest,
 }: ChatWorkspaceProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -336,17 +341,8 @@ export function ChatWorkspace({
   });
   const runtimeToolCalls = runtimeState?.toolCalls ?? [];
   const executeToolCalls = runtimeToolCalls.filter((toolCall) => toolCall.kind === "execute");
-  const nonExecuteToolCalls = runtimeToolCalls.filter((toolCall) => toolCall.kind !== "execute");
-  const executeToolCallByTerminalId = new Map<string, ChatToolCall>();
-  executeToolCalls.forEach((toolCall) => {
-    toolCall.content.forEach((content) => {
-      if (content.type === "terminal") {
-        executeToolCallByTerminalId.set(content.terminalId, toolCall);
-      }
-    });
-  });
   const selectedTerminalIds = new Set(
-    nonExecuteToolCalls.flatMap((toolCall) =>
+    runtimeToolCalls.flatMap((toolCall) =>
       toolCall.content
         .filter((content) => content.type === "terminal")
         .map((content) => content.terminalId),
@@ -446,6 +442,28 @@ export function ChatWorkspace({
 
     event.preventDefault();
     onOpenPreviewLink(href);
+  }
+
+  function applySuggestedVisualPrompt(prompt: string) {
+    const normalizedPrompt = prompt.trim();
+    if (!normalizedPrompt) {
+      return;
+    }
+
+    const nextDraft = draftMessage.trim()
+      ? `${draftMessage.trim()}\n\n${normalizedPrompt}`
+      : normalizedPrompt;
+
+    onDraftMessageChange(nextDraft);
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) {
+        return;
+      }
+
+      textarea.focus();
+      textarea.setSelectionRange(nextDraft.length, nextDraft.length);
+    });
   }
 
   function renderKnowledgePicker() {
@@ -696,7 +714,7 @@ export function ChatWorkspace({
     }
 
     return (
-      <details className="activity-card tool-message-card" open>
+      <details key="runtime-plan" className="activity-card tool-message-card" open>
         <summary className="activity-summary">
           <div className="activity-summary-main">
             <div className="activity-summary-title">
@@ -737,7 +755,7 @@ export function ChatWorkspace({
     }
 
     return (
-      <details className="activity-card tool-message-card codex-command-group" open>
+      <details key="runtime-execute-group" className="activity-card tool-message-card codex-command-group" open>
         <summary className="codex-command-group-summary">
           <span className="codex-command-group-title">
             已执行 {executeToolCalls.length} 条命令
@@ -811,7 +829,7 @@ export function ChatWorkspace({
                 {statusLabel(toolCall.status)}
               </span>
             </div>
-            <p>{toolSummary(toolCall)}</p>
+            <p>{toolCall.kind === "execute" ? extractExecuteLabel(toolCall) : toolSummary(toolCall)}</p>
           </div>
           <div className="activity-summary-side">
             <ChevronDown size={14} />
@@ -893,35 +911,24 @@ export function ChatWorkspace({
       <details key={terminal.terminalId} className="activity-card tool-message-card" open>
         <summary className="activity-summary">
           <div className="activity-summary-main">
-            {(() => {
-              const linkedExecuteToolCall = executeToolCallByTerminalId.get(terminal.terminalId);
-              const title = linkedExecuteToolCall ? "命令输出" : `终端 ${terminal.terminalId.slice(0, 8)}`;
-              const description = linkedExecuteToolCall ? extractExecuteLabel(linkedExecuteToolCall) : null;
-
-              return (
-                <>
-                  <div className="activity-summary-title">
-                    <span className="activity-tool-icon">
-                      <TerminalSquare size={14} />
-                    </span>
-                    <strong>{title}</strong>
-                    <span
-                      className={`activity-status-pill ${
-                        terminal.exitCode === null && terminal.signal === null ? "loading" : "default"
-                      }`}
-                    >
-                      {terminal.exitCode === null && terminal.signal === null ? (
-                        <LoaderCircle size={12} className="spin" />
-                      ) : (
-                        <CheckCircle2 size={12} />
-                      )}
-                      {terminal.exitCode === null && terminal.signal === null ? "执行中" : "已结束"}
-                    </span>
-                  </div>
-                  {description ? <p>{description}</p> : null}
-                </>
-              );
-            })()}
+            <div className="activity-summary-title">
+              <span className="activity-tool-icon">
+                <TerminalSquare size={14} />
+              </span>
+              <strong>{`终端 ${terminal.terminalId.slice(0, 8)}`}</strong>
+              <span
+                className={`activity-status-pill ${
+                  terminal.exitCode === null && terminal.signal === null ? "loading" : "default"
+                }`}
+              >
+                {terminal.exitCode === null && terminal.signal === null ? (
+                  <LoaderCircle size={12} className="spin" />
+                ) : (
+                  <CheckCircle2 size={12} />
+                )}
+                {terminal.exitCode === null && terminal.signal === null ? "执行中" : "已结束"}
+              </span>
+            </div>
           </div>
           <div className="activity-summary-side">
             <ChevronDown size={14} />
@@ -937,6 +944,70 @@ export function ChatWorkspace({
     ));
   }
 
+  function renderMessage(message: ChatMessage) {
+    const parsedMessage =
+      message.role === "assistant"
+        ? parseChatMessageContent(message.content, message.visuals)
+        : {
+            text: message.content,
+            visuals: message.visuals ?? [],
+            hasPendingVisualBlock: false,
+            invalidVisualCount: 0,
+          };
+
+    return (
+      <div key={message.id} className={`message-row ${message.role === "user" ? "user" : ""}`}>
+        <div className={`message-bubble ${message.role === "user" ? "user" : ""}`}>
+          {message.attachments?.length ? renderAttachmentList(message.attachments) : null}
+          {parsedMessage.text ? (
+            message.role === "assistant" ? (
+              <div
+                className="message-text"
+                dangerouslySetInnerHTML={{ __html: markdownToHtml(parsedMessage.text) }}
+                onClick={handleMessageClick}
+              />
+            ) : (
+              <div className="message-text user">{parsedMessage.text}</div>
+            )
+          ) : null}
+          {parsedMessage.visuals.length > 0 ? (
+            <div className="message-visual-list">
+              {parsedMessage.visuals.map((visual) => (
+                <ChatVisualBlock
+                  key={visual.id}
+                  onSuggestPrompt={applySuggestedVisualPrompt}
+                  visual={visual}
+                />
+              ))}
+            </div>
+          ) : null}
+          {parsedMessage.hasPendingVisualBlock ? (
+            <div className="message-visual-pending">正在生成可视化…</div>
+          ) : null}
+          {message.role === "assistant" && parsedMessage.invalidVisualCount > 0 ? (
+            <div className="message-visual-warning">
+              已跳过 {parsedMessage.invalidVisualCount} 个无效可视化块
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  function renderRuntimeActivity(blocks: JSX.Element[]) {
+    if (blocks.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="message-row">
+        <div className="message-bubble">
+          <div className="message-runtime-stack">{blocks}</div>
+        </div>
+      </div>
+    );
+  }
+
   function renderComposer(home = false) {
     const composerPlaceholder = cancelInFlight
       ? "正在停止当前回复..."
@@ -945,6 +1016,15 @@ export function ChatWorkspace({
         : home
           ? "输入消息后按 Enter 发送"
           : "继续这段对话";
+    const voiceInputActive = voiceInputState !== "idle";
+    const voiceButtonTitle =
+      voiceInputState === "transcribing"
+        ? "正在转写语音"
+        : voiceInputState === "recording"
+          ? "结束录音并转写"
+          : voiceInputSupported
+            ? "开始语音输入"
+            : "当前环境暂不支持语音输入";
 
     return (
       <div className={`chat-composer-card ${home ? "chat-composer-home" : ""}`}>
@@ -970,8 +1050,19 @@ export function ChatWorkspace({
           <div className="chat-composer-right">
             {renderModelPicker()}
 
-            <button className="chat-voice-button" onClick={onVoiceInput} title="语音输入" type="button">
-              <Mic size={16} />
+            <button
+              aria-label={voiceButtonTitle}
+              aria-pressed={voiceInputActive}
+              className={`chat-voice-button ${voiceInputActive ? "active" : ""} ${!voiceInputSupported ? "unsupported" : ""}`}
+              onClick={onVoiceInput}
+              title={voiceButtonTitle}
+              type="button"
+            >
+              {voiceInputState === "transcribing" ? (
+                <LoaderCircle size={16} className="spin" />
+              ) : (
+                <Mic size={16} />
+              )}
             </button>
 
             {canCancel ? (
@@ -1007,7 +1098,48 @@ export function ChatWorkspace({
       return null;
     }
 
-    const hasRuntimeActivity = (runtimeState?.planEntries.length ?? 0) > 0 || runtimeToolCalls.length > 0;
+    const runtimeBlocks: JSX.Element[] = [];
+    const planCard = renderPlanCard();
+    if (planCard) {
+      runtimeBlocks.push(planCard);
+    }
+
+    const executeToolGroup = renderExecuteToolGroup();
+    if (executeToolGroup) {
+      runtimeBlocks.push(executeToolGroup);
+    }
+
+    runtimeToolCalls.forEach((toolCall) => {
+      const toolCard = renderToolCard(toolCall);
+      if (toolCard) {
+        runtimeBlocks.push(toolCard);
+      }
+    });
+
+    const unlinkedTerminalCards = renderUnlinkedTerminals();
+    if (unlinkedTerminalCards) {
+      runtimeBlocks.push(...unlinkedTerminalCards);
+    }
+
+    if (runtimeState?.status === "failed" && runtimeState.error) {
+      runtimeBlocks.push(
+        <div key="runtime-error" className="message-row">
+          <div className="message-bubble">
+            <div className="message-text error">
+              <strong>智能体执行失败</strong>
+              <p>{runtimeState.error}</p>
+            </div>
+          </div>
+        </div>,
+      );
+    }
+
+    const hasRuntimeActivity = runtimeBlocks.length > 0;
+    const inlineAssistantMessage =
+      hasRuntimeActivity && lastMessage?.role === "assistant" ? lastMessage : null;
+    const leadingMessages = inlineAssistantMessage
+      ? activeConversation.messages.slice(0, -1)
+      : activeConversation.messages;
     const showLoadingBubble =
       runtimeInProgress &&
       !hasRuntimeActivity &&
@@ -1016,51 +1148,7 @@ export function ChatWorkspace({
     return (
       <div className="chat-thread-layout">
         <div ref={messageListRef} className="message-list">
-          {activeConversation.messages.map((message) => {
-            const parsedMessage =
-              message.role === "assistant"
-                ? parseChatMessageContent(message.content, message.visuals)
-                : {
-                    text: message.content,
-                    visuals: message.visuals ?? [],
-                    hasPendingVisualBlock: false,
-                    invalidVisualCount: 0,
-                  };
-
-            return (
-              <div key={message.id} className={`message-row ${message.role === "user" ? "user" : ""}`}>
-                <div className={`message-bubble ${message.role === "user" ? "user" : ""}`}>
-                  {message.attachments?.length ? renderAttachmentList(message.attachments) : null}
-                  {parsedMessage.text ? (
-                    message.role === "assistant" ? (
-                      <div
-                        className="message-text"
-                        dangerouslySetInnerHTML={{ __html: markdownToHtml(parsedMessage.text) }}
-                        onClick={handleMessageClick}
-                      />
-                    ) : (
-                      <div className="message-text user">{parsedMessage.text}</div>
-                    )
-                  ) : null}
-                  {parsedMessage.visuals.length > 0 ? (
-                    <div className="message-visual-list">
-                      {parsedMessage.visuals.map((visual) => (
-                        <ChatVisualBlock key={visual.id} visual={visual} />
-                      ))}
-                    </div>
-                  ) : null}
-                  {parsedMessage.hasPendingVisualBlock ? (
-                    <div className="message-visual-pending">正在生成可视化…</div>
-                  ) : null}
-                  {message.role === "assistant" && parsedMessage.invalidVisualCount > 0 ? (
-                    <div className="message-visual-warning">
-                      已跳过 {parsedMessage.invalidVisualCount} 个无效可视化块
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
+          {leadingMessages.map(renderMessage)}
 
           {showLoadingBubble ? (
             <div className="message-row">
@@ -1071,21 +1159,8 @@ export function ChatWorkspace({
             </div>
           ) : null}
 
-          {renderPlanCard()}
-          {renderExecuteToolGroup()}
-          {nonExecuteToolCalls.map(renderToolCard)}
-          {renderUnlinkedTerminals()}
-
-          {runtimeState?.status === "failed" && runtimeState.error ? (
-            <div className="message-row">
-              <div className="message-bubble">
-                <div className="message-text error">
-                  <strong>智能体执行失败</strong>
-                  <p>{runtimeState.error}</p>
-                </div>
-              </div>
-            </div>
-          ) : null}
+          {renderRuntimeActivity(runtimeBlocks)}
+          {inlineAssistantMessage ? renderMessage(inlineAssistantMessage) : null}
         </div>
 
         {renderComposer(false)}

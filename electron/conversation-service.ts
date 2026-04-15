@@ -11,8 +11,13 @@ import type {
   ChatMessage,
   ChatSendInput,
   ChatSendResult,
+  ChatVisual,
   FileDropEntry,
 } from "../src/types";
+import {
+  normalizeChatVisualPayload,
+  parseChatMessageContent,
+} from "../src/lib/chat-visuals";
 
 interface ConversationRow {
   id: string;
@@ -32,6 +37,7 @@ interface MessageRow {
   role: ChatMessage["role"];
   content: string;
   attachments_json: string | null;
+  visuals_json: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -91,6 +97,19 @@ function parseKnowledgeBaseIds(value: string | null): string[] {
   }
 }
 
+function parseVisuals(value: string | null): ChatVisual[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return normalizeChatVisualPayload(parsed).visuals;
+  } catch {
+    return [];
+  }
+}
+
 function summarizeAttachments(attachments: FileDropEntry[]) {
   return attachments.map((attachment) => attachment.name).join(", ");
 }
@@ -109,6 +128,24 @@ function buildConversationPreview(content: string, attachments: FileDropEntry[])
   return base.length > 120 ? `${base.slice(0, 120)}...` : base;
 }
 
+function buildVisualPreview(visuals: ChatVisual[]) {
+  const firstVisual = visuals[0];
+  if (!firstVisual) {
+    return "";
+  }
+
+  const base =
+    firstVisual.title?.trim() ||
+    firstVisual.description?.trim() ||
+    (firstVisual.type === "chart" ? "Data chart" : "Diagram");
+  return base.length > 120 ? `${base.slice(0, 120)}...` : base;
+}
+
+function buildAssistantPreview(content: string, visuals: ChatVisual[]) {
+  const base = buildConversationPreview(content, []);
+  return base || buildVisualPreview(visuals);
+}
+
 function buildAssistantReply(content: string, attachments: FileDropEntry[]) {
   const attachmentSummary = summarizeAttachments(attachments);
   const replySource = content || (attachmentSummary ? `Attachments: ${attachmentSummary}` : "Empty message");
@@ -116,13 +153,14 @@ function buildAssistantReply(content: string, attachments: FileDropEntry[]) {
 }
 
 function mapConversationSummary(row: ConversationRow): ChatConversationSummary {
+  const parsedPreview = parseChatMessageContent(row.preview ?? "");
   return {
     id: row.id,
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastMessageAt: row.last_message_at,
-    preview: row.preview ?? "",
+    preview: buildAssistantPreview(parsedPreview.text, parsedPreview.visuals),
     messageCount: row.message_count,
     selectedKnowledgeBaseIds: parseKnowledgeBaseIds(row.selected_knowledge_base_ids_json),
     agentCore: row.agent_core?.trim() || undefined,
@@ -131,10 +169,21 @@ function mapConversationSummary(row: ConversationRow): ChatConversationSummary {
 }
 
 function mapMessage(row: MessageRow): ChatMessage {
+  const visuals = parseVisuals(row.visuals_json);
+  const parsedAssistantMessage =
+    row.role === "assistant"
+      ? parseChatMessageContent(row.content, visuals)
+      : null;
+
   return {
     id: row.id,
     role: row.role,
-    content: row.content,
+    content: parsedAssistantMessage?.text ?? row.content,
+    visuals: parsedAssistantMessage?.visuals.length
+      ? parsedAssistantMessage.visuals
+      : visuals.length
+        ? visuals
+        : undefined,
     attachments: parseAttachments(row.attachments_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -170,6 +219,7 @@ export class ConversationService {
         role TEXT NOT NULL,
         content TEXT NOT NULL,
         attachments_json TEXT,
+        visuals_json TEXT NOT NULL DEFAULT '[]',
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
@@ -185,6 +235,7 @@ export class ConversationService {
     this.ensureConversationColumn(database, "agent_core", "TEXT NOT NULL DEFAULT ''");
     this.ensureConversationColumn(database, "agent_session_id", "TEXT NOT NULL DEFAULT ''");
     this.ensureConversationColumn(database, "selected_knowledge_base_ids_json", "TEXT NOT NULL DEFAULT '[]'");
+    this.ensureMessageColumn(database, "visuals_json", "TEXT NOT NULL DEFAULT '[]'");
 
     this.database = database;
   }
@@ -234,6 +285,7 @@ export class ConversationService {
           role,
           content,
           attachments_json,
+          visuals_json,
           created_at,
           updated_at
         FROM messages
@@ -272,9 +324,10 @@ export class ConversationService {
     const createdConversation = !input.conversationId;
     const title = buildConversationTitle(content, attachments);
     const preview = buildConversationPreview(content, attachments);
-    const attachmentsJson = JSON.stringify(attachments);
-    const userMessageId = randomUUID();
-    const assistantMessageId = randomUUID();
+      const attachmentsJson = JSON.stringify(attachments);
+      const emptyVisualsJson = "[]";
+      const userMessageId = randomUUID();
+      const assistantMessageId = randomUUID();
     let transactionStarted = false;
 
     try {
@@ -328,17 +381,17 @@ export class ConversationService {
 
       database
         .prepare(`
-          INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `)
-        .run(userMessageId, conversationId, "user", content, attachmentsJson, now, now);
+        .run(userMessageId, conversationId, "user", content, attachmentsJson, emptyVisualsJson, now, now);
 
       database
         .prepare(`
-          INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `)
-        .run(assistantMessageId, conversationId, "assistant", "", "[]", now + 1, now + 1);
+        .run(assistantMessageId, conversationId, "assistant", "", "[]", emptyVisualsJson, now + 1, now + 1);
 
       database
         .prepare(`
@@ -373,22 +426,24 @@ export class ConversationService {
     };
   }
 
-  async updateAssistantMessageContent(
+  async updateAssistantMessage(
     conversationId: string,
     messageId: string,
     content: string,
+    visuals: ChatVisual[] = [],
   ): Promise<void> {
     const database = this.getDatabase();
     const now = Date.now();
-    const preview = buildConversationPreview(content, []);
+    const preview = buildAssistantPreview(content, visuals);
+    const visualsJson = JSON.stringify(visuals);
 
     database
       .prepare(`
         UPDATE messages
-        SET content = ?, updated_at = ?
+        SET content = ?, visuals_json = ?, updated_at = ?
         WHERE id = ? AND conversation_id = ? AND role = 'assistant'
       `)
-      .run(content, now, messageId, conversationId);
+      .run(content, visualsJson, now, messageId, conversationId);
 
     database
       .prepare(`
@@ -436,8 +491,9 @@ export class ConversationService {
     const createdConversation = !input.conversationId;
     const title = buildConversationTitle(content, attachments);
     const assistantContent = buildAssistantReply(content, attachments);
-    const preview = buildConversationPreview(assistantContent, []);
+    const preview = buildAssistantPreview(assistantContent, []);
     const attachmentsJson = JSON.stringify(attachments);
+    const emptyVisualsJson = "[]";
     let transactionStarted = false;
 
     try {
@@ -480,17 +536,17 @@ export class ConversationService {
 
       database
         .prepare(`
-          INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `)
-        .run(randomUUID(), conversationId, "user", content, attachmentsJson, now, now);
+        .run(randomUUID(), conversationId, "user", content, attachmentsJson, emptyVisualsJson, now, now);
 
       database
         .prepare(`
-          INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `)
-        .run(randomUUID(), conversationId, "assistant", assistantContent, "[]", now + 1, now + 1);
+        .run(randomUUID(), conversationId, "assistant", assistantContent, "[]", emptyVisualsJson, now + 1, now + 1);
 
       database
         .prepare(`
@@ -549,6 +605,18 @@ export class ConversationService {
     }
 
     database.exec(`ALTER TABLE conversations ADD COLUMN ${columnName} ${columnDefinition}`);
+  }
+
+  private ensureMessageColumn(database: DatabaseSync, columnName: string, columnDefinition: string) {
+    const columns = database
+      .prepare("PRAGMA table_info(messages)")
+      .all() as Array<{ name?: string }>;
+
+    if (columns.some((column) => column.name === columnName)) {
+      return;
+    }
+
+    database.exec(`ALTER TABLE messages ADD COLUMN ${columnName} ${columnDefinition}`);
   }
 
   private getDatabase() {
