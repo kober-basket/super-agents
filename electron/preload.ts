@@ -2,10 +2,12 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import type {
   AppConfig,
+  ChatEvent,
   ChatConversation,
   ChatConversationListPayload,
   ChatSendInput,
   ChatSendResult,
+  ChatTurnStartResult,
   BootstrapPayload,
   DesktopWindowState,
   FileDropEntry,
@@ -36,6 +38,10 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:list-conversations") as Promise<ChatConversationListPayload>,
   getConversation: (conversationId: string) =>
     ipcRenderer.invoke("desktop:get-conversation", conversationId) as Promise<ChatConversation>,
+  startChatTurn: (payload: ChatSendInput) =>
+    ipcRenderer.invoke("desktop:start-chat-turn", payload) as Promise<ChatTurnStartResult>,
+  cancelChatTurn: (conversationId: string) =>
+    ipcRenderer.invoke("desktop:cancel-chat-turn", conversationId) as Promise<void>,
   sendChatMessage: (payload: ChatSendInput) =>
     ipcRenderer.invoke("desktop:send-chat-message", payload) as Promise<ChatSendResult>,
   deleteConversation: (conversationId: string) =>
@@ -103,6 +109,11 @@ const desktopAgent = {
     const wrapped = (_event: unknown, payload: DesktopWindowState) => listener(payload);
     ipcRenderer.on("desktop:window-state", wrapped);
     return () => ipcRenderer.removeListener("desktop:window-state", wrapped);
+  },
+  onChatEvent: (listener: (event: ChatEvent) => void) => {
+    const wrapped = (_event: unknown, event: ChatEvent) => listener(event);
+    ipcRenderer.on("desktop:chat-event", wrapped);
+    return () => ipcRenderer.removeListener("desktop:chat-event", wrapped);
   },
 };
 

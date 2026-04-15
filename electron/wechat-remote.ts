@@ -2,6 +2,7 @@ import { createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import mime from "mime-types";
+import QRCode from "qrcode";
 
 import {
   DEFAULT_WECHAT_BASE_URL,
@@ -20,6 +21,11 @@ const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const DEFAULT_API_TIMEOUT_MS = 15_000;
 const ACTIVE_LOGIN_TTL_MS = 5 * 60_000;
 const MAX_QR_REFRESH_COUNT = 3;
+const WECHAT_QR_RENDER_OPTIONS = {
+  errorCorrectionLevel: "M",
+  margin: 2,
+  width: 320,
+} as const;
 
 type ActiveLogin = {
   sessionKey: string;
@@ -100,19 +106,30 @@ function ensureTrailingSlash(value: string) {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
-function normalizeWechatQrCodeUrl(value: string) {
+async function normalizeWechatQrCodeUrl(value: string): Promise<string> {
   const trimmed = value.trim();
   if (!trimmed) return "";
   if (
     trimmed.startsWith("data:") ||
-    trimmed.startsWith("http://") ||
-    trimmed.startsWith("https://") ||
     trimmed.startsWith("blob:")
   ) {
     return trimmed;
   }
-  if (trimmed.startsWith("//")) {
-    return `https:${trimmed}`;
+
+  const normalizedUrl = trimmed.startsWith("//")
+    ? `https:${trimmed}`
+    : trimmed.startsWith("http://") || trimmed.startsWith("https://")
+      ? trimmed
+      : "";
+
+  if (normalizedUrl) {
+    try {
+      // Wechat returns a QR landing page URL instead of a raw image.
+      // Render it locally so the login flow stays inside the desktop app.
+      return await QRCode.toDataURL(normalizedUrl, WECHAT_QR_RENDER_OPTIONS);
+    } catch {
+      return normalizedUrl;
+    }
   }
   if (trimmed.startsWith("<svg")) {
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(trimmed)}`;
@@ -224,7 +241,7 @@ async function fetchQrCode() {
   };
   return {
     ...payload,
-    qrcode_img_content: normalizeWechatQrCodeUrl(payload.qrcode_img_content),
+    qrcode_img_content: await normalizeWechatQrCodeUrl(payload.qrcode_img_content),
   };
 }
 

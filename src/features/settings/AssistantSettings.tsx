@@ -82,7 +82,7 @@ export function AssistantSettings({
 
     return currentProvider.models
       .filter((model) => model.enabled !== false)
-      .map((model) => enrichProviderModel(model))
+      .map((model) => enrichProviderModel(model, { providerId: currentProvider.id }))
       .sort((left, right) => {
         const leftDefault =
           activeModel?.providerId === currentProvider.id && activeModel.modelId === left.id;

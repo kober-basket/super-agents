@@ -2,6 +2,9 @@ export const workspaceClient = {
   bootstrap: () => window.desktopAgent.bootstrap(),
   listConversations: () => window.desktopAgent.listConversations(),
   getConversation: (conversationId: string) => window.desktopAgent.getConversation(conversationId),
+  startChatTurn: (payload: Parameters<typeof window.desktopAgent.startChatTurn>[0]) =>
+    window.desktopAgent.startChatTurn(payload),
+  cancelChatTurn: (conversationId: string) => window.desktopAgent.cancelChatTurn(conversationId),
   sendChatMessage: (payload: Parameters<typeof window.desktopAgent.sendChatMessage>[0]) =>
     window.desktopAgent.sendChatMessage(payload),
   deleteConversation: (conversationId: string) => window.desktopAgent.deleteConversation(conversationId),
@@ -55,4 +58,6 @@ export const workspaceClient = {
     window.desktopAgent.onWorkspaceChanged(listener),
   onWindowStateChanged: (listener: Parameters<typeof window.desktopAgent.onWindowStateChanged>[0]) =>
     window.desktopAgent.onWindowStateChanged(listener),
+  onChatEvent: (listener: Parameters<typeof window.desktopAgent.onChatEvent>[0]) =>
+    window.desktopAgent.onChatEvent(listener),
 };

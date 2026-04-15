@@ -4,6 +4,7 @@ type ProviderModelCapabilities = NonNullable<ProviderModelConfig["capabilities"]
 
 export interface ProviderModelMetadataHint {
   id: string;
+  providerId?: string;
   label?: string;
   description?: string;
   vendor?: string;
@@ -105,9 +106,6 @@ const VENDOR_RULES: VendorRule[] = [
     patterns: [/\b(?:stepfun|step-(?:1[ov]|2|3|r1)(?:-[\w.]+)?)\b/i],
   },
 ];
-
-const GROUP_PRIORITY = new Map(VENDOR_RULES.map((rule, index) => [rule.label, index]));
-const GROUP_FALLBACK_PRIORITY = 10_000;
 
 const GENERIC_GROUP_NAMES = new Set([
   "",
@@ -258,13 +256,27 @@ export function inferProviderModelVendor(hint: ProviderModelMetadataHint) {
   return "";
 }
 
-export function inferProviderModelGroup(hint: ProviderModelMetadataHint) {
-  const explicitGroup = hint.group?.trim();
-  if (explicitGroup && !isLowSignalGroup(explicitGroup)) {
-    return matchVendorRule(explicitGroup) || formatDisplayName(explicitGroup);
+export function getDefaultProviderModelGroup(id: string, providerId?: string) {
+  const trimmedId = id.trim();
+  if (!trimmedId) {
+    return providerId?.trim() || "";
   }
 
-  return inferProviderModelVendor(hint) || formatDisplayName(firstModelSegment(hint.id) || "Other");
+  const slashIndex = trimmedId.indexOf("/");
+  if (slashIndex > 0) {
+    return trimmedId.slice(0, slashIndex);
+  }
+
+  return providerId?.trim() || trimmedId;
+}
+
+export function inferProviderModelGroup(hint: ProviderModelMetadataHint) {
+  const explicitGroup = hint.group?.trim();
+  if (explicitGroup) {
+    return explicitGroup;
+  }
+
+  return getDefaultProviderModelGroup(hint.id, hint.providerId) || "other";
 }
 
 export function inferProviderModelCapabilities(hint: ProviderModelMetadataHint) {
@@ -316,11 +328,16 @@ export function inferProviderModelCapabilities(hint: ProviderModelMetadataHint) 
   return Object.values(capabilities).some(Boolean) ? capabilities : undefined;
 }
 
-export function enrichProviderModel(model: ProviderModelConfig) {
+export function enrichProviderModel(model: ProviderModelConfig, options?: { providerId?: string }) {
   const vendor = inferProviderModelVendor(model);
-  const group = inferProviderModelGroup({ ...model, vendor: vendor || model.vendor });
+  const group = inferProviderModelGroup({
+    ...model,
+    providerId: options?.providerId,
+    vendor: vendor || model.vendor,
+  });
   const capabilities = inferProviderModelCapabilities({
     ...model,
+    providerId: options?.providerId,
     vendor: vendor || model.vendor,
     group,
   });
@@ -334,14 +351,5 @@ export function enrichProviderModel(model: ProviderModelConfig) {
 }
 
 export function compareModelGroupNames(left: string, right: string) {
-  const normalizedLeft = matchVendorRule(left) || formatDisplayName(left);
-  const normalizedRight = matchVendorRule(right) || formatDisplayName(right);
-  const leftPriority = GROUP_PRIORITY.get(normalizedLeft) ?? GROUP_FALLBACK_PRIORITY;
-  const rightPriority = GROUP_PRIORITY.get(normalizedRight) ?? GROUP_FALLBACK_PRIORITY;
-
-  if (leftPriority !== rightPriority) {
-    return leftPriority - rightPriority;
-  }
-
-  return normalizedLeft.localeCompare(normalizedRight, "zh-CN", { sensitivity: "base" });
+  return left.localeCompare(right, "zh-CN", { sensitivity: "base" });
 }

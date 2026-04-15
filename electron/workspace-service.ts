@@ -188,7 +188,7 @@ function migrateLegacyModels(legacyModels: any[], legacyActiveModelId?: string) 
   return {
     providers: Array.from(groups.values()).map(({ provider }) => ({
       ...provider,
-      models: normalizeProviderModels(provider.models),
+      models: normalizeProviderModels(provider.models, provider.id),
     })),
     activeModelId: nextActiveModelId,
   };
@@ -212,7 +212,7 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
           enabled: item.enabled !== false,
           temperature: typeof item.temperature === "number" ? item.temperature : 0.2,
           maxTokens: typeof item.maxTokens === "number" ? item.maxTokens : 4096,
-          models: normalizeProviderModels(Array.isArray(item.models) ? item.models : []),
+          models: normalizeProviderModels(Array.isArray(item.models) ? item.models : [], item.id),
         }))
       : migratedLegacy.providers.length > 0
         ? migratedLegacy.providers
@@ -329,7 +329,7 @@ function inferCapabilities(
   });
 }
 
-function extractModelList(payload: unknown) {
+function extractModelList(payload: unknown, providerId?: string) {
   const source = Array.isArray(payload)
     ? payload
     : Array.isArray((payload as { data?: unknown[] })?.data)
@@ -348,7 +348,7 @@ function extractModelList(payload: unknown) {
             label: item,
             enabled: true,
             vendor: vendor || undefined,
-            group: inferProviderModelGroup({ id: item, vendor }),
+            group: inferProviderModelGroup({ id: item, providerId }),
           };
         }
         if (!item || typeof item !== "object") return null;
@@ -360,10 +360,10 @@ function extractModelList(payload: unknown) {
         const vendor = inferVendorName(record, id, label, description, String(record.group ?? "").trim());
         const group = inferProviderModelGroup({
           id,
+          providerId,
           label,
           description,
           vendor,
-          group: String(record.group ?? "").trim() || undefined,
         });
         return {
           id,
@@ -376,6 +376,7 @@ function extractModelList(payload: unknown) {
         };
       })
       .filter(Boolean) as ModelProviderConfig["models"],
+    providerId,
   );
 }
 
@@ -405,11 +406,11 @@ async function fetchOpenAiCompatibleModelsEnhanced(input: ModelProviderFetchInpu
         if (index > 0) return [];
         throw new Error(text || `Fetch models failed: ${response.status}`);
       }
-      return extractModelList(text ? JSON.parse(text) : {});
+      return extractModelList(text ? JSON.parse(text) : {}, input.providerId);
     }),
   );
 
-  const models = normalizeProviderModels(responses.flat());
+  const models = normalizeProviderModels(responses.flat(), input.providerId);
   if (models.length === 0) {
     throw new Error("Provider responded, but no usable models were returned.");
   }

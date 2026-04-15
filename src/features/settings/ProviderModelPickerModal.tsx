@@ -75,7 +75,7 @@ export function ProviderModelPickerModal({
   const [filter, setFilter] = useState<FilterKey>("all");
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
   const displayModels = useMemo(
-    () => (provider ? provider.models.map((model) => enrichProviderModel(model)) : []),
+    () => (provider ? provider.models.map((model) => enrichProviderModel(model, { providerId: provider.id })) : []),
     [provider],
   );
 

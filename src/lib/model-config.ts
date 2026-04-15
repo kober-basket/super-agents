@@ -13,7 +13,7 @@ export function createRuntimeModelId(providerId: string, modelId: string) {
   return `${sanitizeModelProviderId(providerId)}::${modelId.trim()}`;
 }
 
-export function normalizeProviderModels(models: ProviderModelConfig[]) {
+export function normalizeProviderModels(models: ProviderModelConfig[], providerId?: string) {
   const seen = new Set<string>();
   const next: ProviderModelConfig[] = [];
 
@@ -40,7 +40,7 @@ export function normalizeProviderModels(models: ProviderModelConfig[]) {
               free: item.capabilities.free === true,
             }
           : undefined,
-      }),
+      }, { providerId }),
     );
   }
 
@@ -58,7 +58,7 @@ export function isEmbeddingModel(model: ProviderModelConfig) {
 
 export function flattenModelProviders(modelProviders: ModelProviderConfig[]): RuntimeModelOption[] {
   return modelProviders.flatMap((provider) =>
-    normalizeProviderModels(provider.models).map((model) => ({
+    normalizeProviderModels(provider.models, provider.id).map((model) => ({
       id: createRuntimeModelId(provider.id, model.id),
       label: `${provider.name} / ${model.label}`,
       providerId: provider.id,

@@ -1,9 +1,11 @@
 import type {
   AppConfig,
+  ChatEvent,
   ChatConversation,
   ChatConversationListPayload,
   ChatSendInput,
   ChatSendResult,
+  ChatTurnStartResult,
   BootstrapPayload,
   DesktopWindowState,
   FileDropEntry,
@@ -34,6 +36,8 @@ declare global {
       bootstrap: () => Promise<BootstrapPayload>;
       listConversations: () => Promise<ChatConversationListPayload>;
       getConversation: (conversationId: string) => Promise<ChatConversation>;
+      startChatTurn: (payload: ChatSendInput) => Promise<ChatTurnStartResult>;
+      cancelChatTurn: (conversationId: string) => Promise<void>;
       sendChatMessage: (payload: ChatSendInput) => Promise<ChatSendResult>;
       deleteConversation: (conversationId: string) => Promise<ChatConversationListPayload>;
       listKnowledgeBases: () => Promise<KnowledgeCatalogPayload>;
@@ -69,6 +73,7 @@ declare global {
       closeWindow: () => Promise<void>;
       onWorkspaceChanged: (listener: (payload: BootstrapPayload) => void) => () => void;
       onWindowStateChanged: (listener: (payload: DesktopWindowState) => void) => () => void;
+      onChatEvent: (listener: (event: ChatEvent) => void) => () => void;
     };
   }
 }

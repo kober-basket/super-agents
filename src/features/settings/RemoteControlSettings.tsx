@@ -61,12 +61,8 @@ function maskValue(value: string, keep = 4) {
   return `${trimmed.slice(0, keep)}...${trimmed.slice(-keep)}`;
 }
 
-function latestActivityAt(status: RemoteChannelRuntimeStatus | null) {
-  return Math.max(status?.lastInboundAt ?? 0, status?.lastOutboundAt ?? 0);
-}
-
 function statusLabel(status: RemoteChannelRuntimeStatus | null) {
-  if (!status) return "等待状态";
+  if (!status) return "未就绪";
   if (!status.enabled) return "已关闭";
   if (!status.configured) return "待配置";
   if (status.connected) return "已连接";
@@ -90,23 +86,6 @@ function StatusPill({ status }: { status: RemoteChannelRuntimeStatus | null }) {
     <span className={clsx("stack-badge", tone === "success" && "active", tone === "danger" && "danger")}>
       {statusLabel(status)}
     </span>
-  );
-}
-
-function SummaryChip({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  tone?: "default" | "danger";
-}) {
-  return (
-    <div className={clsx("remote-summary-chip", tone === "danger" && "danger")}>
-      <strong>{value}</strong>
-      <span>{label}</span>
-    </div>
   );
 }
 
@@ -162,7 +141,7 @@ function ChannelCard({
 
       {status?.lastError ? (
         <div className="remote-card-error">
-          <strong>最近错误</strong>
+          <strong>错误</strong>
           <span>{status.lastError}</span>
         </div>
       ) : null}
@@ -405,26 +384,6 @@ export function RemoteControlSettings({
 }: RemoteControlSettingsProps) {
   const [configDraft, setConfigDraft] = useState<ConfigDraft | null>(null);
 
-  const channelStatuses: Array<RemoteChannelRuntimeStatus | null> = [
-    remoteStatus?.wechat ?? null,
-    remoteStatus?.dingtalk ?? null,
-    remoteStatus?.feishu ?? null,
-    remoteStatus?.wecom ?? null,
-  ];
-
-  const enabledCount = [
-    remoteControl.wechat.enabled,
-    remoteControl.dingtalk.enabled,
-    remoteControl.feishu.enabled,
-    remoteControl.wecom.enabled,
-  ].filter(Boolean).length;
-  const connectedCount = channelStatuses.filter((status) => Boolean(status?.connected)).length;
-  const issueCount = channelStatuses.filter((status) => Boolean(status?.lastError)).length;
-  const latestActivity = channelStatuses.reduce(
-    (latest, status) => Math.max(latest, latestActivityAt(status)),
-    0,
-  );
-
   const openConfig = (channel: ConfigChannel) => {
     if (channel === "dingtalk") {
       setConfigDraft({
@@ -481,20 +440,13 @@ export function RemoteControlSettings({
       <header className="settings-stage-header remote-header">
         <div className="settings-stage-heading">
           <h1>远程控制</h1>
-          <p className="field-note">开关通道，看状态，需要时点配置。</p>
+          <p className="field-note">通道状态与配置</p>
         </div>
         <button className="secondary-button" disabled={refreshing} onClick={() => void onRefresh()} type="button">
           {refreshing ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}
           刷新
         </button>
       </header>
-
-      <div className="remote-summary-row">
-        <SummaryChip label="已启用" value={`${enabledCount}/4`} />
-        <SummaryChip label="已连接" value={String(connectedCount)} />
-        <SummaryChip label="异常" tone={issueCount > 0 ? "danger" : "default"} value={String(issueCount)} />
-        <SummaryChip label="最近活动" value={formatTime(latestActivity)} />
-      </div>
 
       <div className="remote-channel-grid">
         <ChannelCard
@@ -508,9 +460,8 @@ export function RemoteControlSettings({
             remoteStatus?.wechat?.pendingLogin ? (
               <div className="wechat-login-panel">
                 <div className="wechat-login-copy">
-                  <strong>扫码登录</strong>
-                  <span>使用微信扫描下方二维码完成绑定，二维码过期后会自动刷新。</span>
-                  <span>如果这里没有显示图片，可以直接在浏览器打开。</span>
+                  <strong>扫码绑定</strong>
+                  <span>用微信扫码即可接入，二维码会自动刷新。</span>
                 </div>
                 {wechatQrCodeUrl ? (
                   <div className="wechat-login-qr-shell">
@@ -546,7 +497,7 @@ export function RemoteControlSettings({
                 type="button"
               >
                 {wechatConnecting ? <LoaderCircle size={14} className="spin" /> : <QrCode size={14} />}
-                {remoteStatus?.wechat?.pendingLogin ? "等待扫码" : "扫码登录"}
+                {remoteStatus?.wechat?.pendingLogin ? "等待扫码" : "扫码绑定"}
               </button>
               <button
                 className="ghost-text-button danger"
@@ -565,9 +516,9 @@ export function RemoteControlSettings({
                 label="账号"
                 value={maskValue(remoteStatus?.wechat?.accountId || remoteControl.wechat.accountId)}
               />
-              <Metric label="活跃连接" value={String(remoteStatus?.wechat?.activePeerCount ?? 0)} />
-              <Metric label="最近入站" value={formatTime(remoteStatus?.wechat?.lastInboundAt)} />
-              <Metric label="最近出站" value={formatTime(remoteStatus?.wechat?.lastOutboundAt)} />
+              <Metric label="连接" value={String(remoteStatus?.wechat?.activePeerCount ?? 0)} />
+              <Metric label="入站" value={formatTime(remoteStatus?.wechat?.lastInboundAt)} />
+              <Metric label="出站" value={formatTime(remoteStatus?.wechat?.lastOutboundAt)} />
             </>
           }
         />
@@ -576,7 +527,7 @@ export function RemoteControlSettings({
           enabled={remoteControl.dingtalk.enabled}
           onToggle={(enabled) => onUpdateDingtalk?.({ enabled }, { immediate: true })}
           status={remoteStatus?.dingtalk ?? null}
-          subtitle="官方 Stream"
+          subtitle="Stream"
           title="钉钉"
           actions={
             <button
@@ -595,9 +546,9 @@ export function RemoteControlSettings({
                 label="凭据"
                 value={remoteStatus?.dingtalk?.configured ? maskValue(remoteControl.dingtalk.clientId) : "未配置"}
               />
-              <Metric label="活跃连接" value={String(remoteStatus?.dingtalk?.activePeerCount ?? 0)} />
-              <Metric label="最近入站" value={formatTime(remoteStatus?.dingtalk?.lastInboundAt)} />
-              <Metric label="最近出站" value={formatTime(remoteStatus?.dingtalk?.lastOutboundAt)} />
+              <Metric label="连接" value={String(remoteStatus?.dingtalk?.activePeerCount ?? 0)} />
+              <Metric label="入站" value={formatTime(remoteStatus?.dingtalk?.lastInboundAt)} />
+              <Metric label="出站" value={formatTime(remoteStatus?.dingtalk?.lastOutboundAt)} />
             </>
           }
         />
@@ -625,9 +576,9 @@ export function RemoteControlSettings({
                 label="凭据"
                 value={remoteStatus?.feishu?.configured ? maskValue(remoteControl.feishu.appId) : "未配置"}
               />
-              <Metric label="活跃连接" value={String(remoteStatus?.feishu?.activePeerCount ?? 0)} />
-              <Metric label="最近入站" value={formatTime(remoteStatus?.feishu?.lastInboundAt)} />
-              <Metric label="最近出站" value={formatTime(remoteStatus?.feishu?.lastOutboundAt)} />
+              <Metric label="连接" value={String(remoteStatus?.feishu?.activePeerCount ?? 0)} />
+              <Metric label="入站" value={formatTime(remoteStatus?.feishu?.lastInboundAt)} />
+              <Metric label="出站" value={formatTime(remoteStatus?.feishu?.lastOutboundAt)} />
             </>
           }
         />
@@ -655,9 +606,9 @@ export function RemoteControlSettings({
                 label="凭据"
                 value={remoteStatus?.wecom?.configured ? maskValue(remoteControl.wecom.botId) : "未配置"}
               />
-              <Metric label="活跃连接" value={String(remoteStatus?.wecom?.activePeerCount ?? 0)} />
-              <Metric label="最近入站" value={formatTime(remoteStatus?.wecom?.lastInboundAt)} />
-              <Metric label="最近出站" value={formatTime(remoteStatus?.wecom?.lastOutboundAt)} />
+              <Metric label="连接" value={String(remoteStatus?.wecom?.activePeerCount ?? 0)} />
+              <Metric label="入站" value={formatTime(remoteStatus?.wecom?.lastInboundAt)} />
+              <Metric label="出站" value={formatTime(remoteStatus?.wecom?.lastOutboundAt)} />
             </>
           }
         />

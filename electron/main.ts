@@ -7,11 +7,13 @@ import {
   APP_WINDOW_TITLE,
   migrateLegacyAppData,
 } from "./app-identity";
+import { AcpRuntimeManager } from "./acp-runtime-manager";
+import { ChatOrchestrator } from "./chat-orchestrator";
 import { ConversationService } from "./conversation-service";
 import { McpInspector } from "./mcp-inspector";
 import { RemoteControlService } from "./remote-control-service";
 import { WorkspaceService } from "./workspace-service";
-import type { AppConfig, DesktopWindowState, WorkspaceTool } from "../src/types";
+import type { AppConfig, ChatEvent, DesktopWindowState, WorkspaceTool } from "../src/types";
 
 app.setName(APP_NAME);
 app.setPath("userData", path.join(app.getPath("appData"), APP_DATA_DIR));
@@ -20,6 +22,8 @@ let mainWindow: BrowserWindow | null = null;
 let service: WorkspaceService | null = null;
 let conversationService: ConversationService | null = null;
 let remoteControlService: RemoteControlService | null = null;
+let acpRuntimeManager: AcpRuntimeManager | null = null;
+let chatOrchestrator: ChatOrchestrator | null = null;
 const mcpInspector = new McpInspector();
 
 function createWindow() {
@@ -108,6 +112,7 @@ app.whenReady().then(async () => {
   service = new WorkspaceService(statePath);
   conversationService = new ConversationService(conversationDatabasePath);
   await conversationService.initialize();
+  acpRuntimeManager = new AcpRuntimeManager(app.getPath("appData"));
   remoteControlService = new RemoteControlService(statePath, service, {
     onWorkspaceChanged: async () => {
       await broadcastState();
@@ -116,6 +121,20 @@ app.whenReady().then(async () => {
   await remoteControlService.initialize(await service.getConfigSnapshot());
 
   createWindow();
+
+  const emitChatEvent = (event: ChatEvent) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    mainWindow.webContents.send("desktop:chat-event", event);
+  };
+
+  chatOrchestrator = new ChatOrchestrator(
+    conversationService,
+    service,
+    acpRuntimeManager,
+    emitChatEvent,
+  );
 
   async function broadcastState() {
     if (!mainWindow || mainWindow.isDestroyed() || !service) return;
@@ -133,6 +152,14 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("desktop:get-conversation", async (_event, conversationId: string) => {
     return await conversationService!.getConversation(conversationId);
+  });
+
+  ipcMain.handle("desktop:start-chat-turn", async (_event, payload) => {
+    return await chatOrchestrator!.startTurn(payload);
+  });
+
+  ipcMain.handle("desktop:cancel-chat-turn", async (_event, conversationId: string) => {
+    await chatOrchestrator!.cancelTurn(conversationId);
   });
 
   ipcMain.handle("desktop:send-chat-message", async (_event, payload) => {

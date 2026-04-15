@@ -423,6 +423,21 @@ export interface FileDropEntry {
 }
 
 export type ChatMessageRole = "user" | "assistant";
+export type ChatToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+export type ChatToolKind =
+  | "read"
+  | "edit"
+  | "delete"
+  | "move"
+  | "search"
+  | "execute"
+  | "think"
+  | "fetch"
+  | "switch_mode"
+  | "other";
+export type ChatPlanEntryPriority = "high" | "medium" | "low";
+export type ChatPlanEntryStatus = "pending" | "in_progress" | "completed";
+export type ChatTurnStatus = "idle" | "running" | "failed";
 
 export interface ChatMessage {
   id: string;
@@ -433,6 +448,61 @@ export interface ChatMessage {
   updatedAt: number;
 }
 
+export interface ChatToolCallLocation {
+  path: string;
+  line?: number | null;
+}
+
+export type ChatToolCallContent =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "diff";
+      path: string;
+      oldText?: string | null;
+      newText: string;
+    }
+  | {
+      type: "terminal";
+      terminalId: string;
+    };
+
+export interface ChatToolCall {
+  toolCallId: string;
+  title: string;
+  status?: ChatToolCallStatus;
+  kind?: ChatToolKind;
+  content: ChatToolCallContent[];
+  locations?: ChatToolCallLocation[];
+  rawInputJson?: string;
+  rawOutputJson?: string;
+}
+
+export interface ChatPlanEntry {
+  content: string;
+  priority: ChatPlanEntryPriority;
+  status: ChatPlanEntryStatus;
+}
+
+export interface ChatTerminalOutput {
+  terminalId: string;
+  output: string;
+  truncated: boolean;
+  exitCode?: number | null;
+  signal?: string | null;
+}
+
+export interface ChatConversationRuntimeState {
+  status: ChatTurnStatus;
+  planEntries: ChatPlanEntry[];
+  toolCalls: ChatToolCall[];
+  terminalOutputs: Record<string, ChatTerminalOutput>;
+  stopReason?: string;
+  error?: string;
+}
+
 export interface ChatConversationSummary {
   id: string;
   title: string;
@@ -441,6 +511,8 @@ export interface ChatConversationSummary {
   lastMessageAt: number;
   preview: string;
   messageCount: number;
+  agentCore?: string;
+  agentSessionId?: string;
 }
 
 export interface ChatConversation extends ChatConversationSummary {
@@ -462,6 +534,58 @@ export interface ChatSendResult {
   createdConversation: boolean;
   conversation: ChatConversation;
 }
+
+export interface ChatTurnStartResult {
+  createdConversation: boolean;
+  turnId: string;
+  conversation: ChatConversation;
+}
+
+export type ChatEvent =
+  | {
+      type: "message_delta";
+      conversationId: string;
+      turnId: string;
+      messageId: string;
+      textDelta: string;
+    }
+  | {
+      type: "plan_updated";
+      conversationId: string;
+      turnId: string;
+      entries: ChatPlanEntry[];
+    }
+  | {
+      type: "tool_call_started";
+      conversationId: string;
+      turnId: string;
+      toolCall: ChatToolCall;
+    }
+  | {
+      type: "tool_call_updated";
+      conversationId: string;
+      turnId: string;
+      toolCallId: string;
+      patch: Partial<Omit<ChatToolCall, "toolCallId">>;
+    }
+  | {
+      type: "terminal_output";
+      conversationId: string;
+      turnId: string;
+      terminal: ChatTerminalOutput;
+    }
+  | {
+      type: "turn_finished";
+      conversationId: string;
+      turnId: string;
+      stopReason: string;
+    }
+  | {
+      type: "turn_failed";
+      conversationId: string;
+      turnId: string;
+      error: string;
+    };
 
 export interface BootstrapPayload {
   snapshotAt: number;

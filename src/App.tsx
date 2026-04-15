@@ -13,7 +13,7 @@ import type {
   AppConfig,
   AppSection,
   ChatConversation,
-  ChatMessage,
+  ChatConversationRuntimeState,
   ChatConversationSummary,
   DesktopWindowState,
   FileDropEntry,
@@ -115,12 +115,26 @@ function LazyViewFallback() {
   );
 }
 
+function createConversationRuntimeState(
+  status: ChatConversationRuntimeState["status"] = "idle",
+): ChatConversationRuntimeState {
+  return {
+    status,
+    planEntries: [],
+    toolCalls: [],
+    terminalOutputs: {},
+  };
+}
+
 export default function App() {
   const [view, setView] = useState<AppSection>("chat");
   const [conversations, setConversations] = useState<ChatConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<ChatConversation | null>(null);
-  const [generatingConversationId, setGeneratingConversationId] = useState<string | null>(null);
+  const [conversationRuntimeStates, setConversationRuntimeStates] = useState<
+    Record<string, ChatConversationRuntimeState>
+  >({});
+  const [startingChatTurn, setStartingChatTurn] = useState(false);
   const [draftMessage, setDraftMessage] = useState("");
   const [messageScrollRequest, setMessageScrollRequest] = useState(0);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("assistant");
@@ -335,7 +349,7 @@ export default function App() {
   }, [toolsRefreshing, view]);
 
   useEffect(() => {
-    if (view !== "knowledge" || knowledgeRefreshing || knowledgeLoadedRef.current) {
+    if ((view !== "knowledge" && view !== "chat") || knowledgeRefreshing || knowledgeLoadedRef.current) {
       return;
     }
 
@@ -409,14 +423,18 @@ export default function App() {
   }, [config.knowledgeBase.embeddingModel, config.knowledgeBase.embeddingProviderId, config.modelProviders]);
 
   function toConversationSummary(conversation: ChatConversation): ChatConversationSummary {
+    const lastMessage = conversation.messages[conversation.messages.length - 1];
+
     return {
       id: conversation.id,
       title: conversation.title,
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
       lastMessageAt: conversation.lastMessageAt,
-      preview: conversation.preview,
+      preview: lastMessage?.role === "assistant" ? lastMessage.content : conversation.preview,
       messageCount: conversation.messageCount,
+      agentCore: conversation.agentCore,
+      agentSessionId: conversation.agentSessionId,
     };
   }
 
@@ -454,6 +472,156 @@ export default function App() {
     return () => {
       mounted = false;
     };
+  }, []);
+
+  useEffect(() => {
+    return workspaceClient.onChatEvent((event) => {
+      if (event.type === "message_delta") {
+        const now = Date.now();
+
+        setActiveConversation((current) => {
+          if (!current || current.id !== event.conversationId) {
+            return current;
+          }
+
+          const nextMessages = current.messages.map((message) =>
+            message.id === event.messageId
+              ? {
+                  ...message,
+                  content: `${message.content}${event.textDelta}`,
+                  updatedAt: now,
+                }
+              : message,
+          );
+
+          return {
+            ...current,
+            messages: nextMessages,
+            updatedAt: now,
+            lastMessageAt: now,
+            preview: nextMessages[nextMessages.length - 1]?.content ?? current.preview,
+          };
+        });
+
+        setConversations((current) =>
+          current
+            .map((conversation) =>
+              conversation.id === event.conversationId
+                ? {
+                    ...conversation,
+                    preview: `${conversation.preview}${event.textDelta}`,
+                    updatedAt: now,
+                    lastMessageAt: now,
+                  }
+                : conversation,
+            )
+            .sort((left, right) => right.lastMessageAt - left.lastMessageAt || right.createdAt - left.createdAt),
+        );
+
+        return;
+      }
+
+      if (event.type === "plan_updated") {
+        setConversationRuntimeStates((current) => ({
+          ...current,
+          [event.conversationId]: {
+            ...(current[event.conversationId] ?? createConversationRuntimeState("running")),
+            status: "running",
+            error: undefined,
+            stopReason: undefined,
+            planEntries: event.entries,
+          },
+        }));
+        return;
+      }
+
+      if (event.type === "tool_call_started") {
+        setConversationRuntimeStates((current) => {
+          const previous = current[event.conversationId] ?? createConversationRuntimeState("running");
+          return {
+            ...current,
+            [event.conversationId]: {
+              ...previous,
+              status: "running",
+              error: undefined,
+              stopReason: undefined,
+              toolCalls: [
+                ...previous.toolCalls.filter((toolCall) => toolCall.toolCallId !== event.toolCall.toolCallId),
+                event.toolCall,
+              ],
+            },
+          };
+        });
+        return;
+      }
+
+      if (event.type === "tool_call_updated") {
+        setConversationRuntimeStates((current) => {
+          const previous = current[event.conversationId] ?? createConversationRuntimeState("running");
+          return {
+            ...current,
+            [event.conversationId]: {
+              ...previous,
+              status: "running",
+              error: undefined,
+              stopReason: undefined,
+              toolCalls: previous.toolCalls.map((toolCall) =>
+                toolCall.toolCallId === event.toolCallId
+                  ? {
+                      ...toolCall,
+                      ...event.patch,
+                      content: event.patch.content ?? toolCall.content,
+                      locations: event.patch.locations ?? toolCall.locations,
+                    }
+                  : toolCall,
+              ),
+            },
+          };
+        });
+        return;
+      }
+
+      if (event.type === "terminal_output") {
+        setConversationRuntimeStates((current) => {
+          const previous = current[event.conversationId] ?? createConversationRuntimeState("running");
+          return {
+            ...current,
+            [event.conversationId]: {
+              ...previous,
+              status: "running",
+              terminalOutputs: {
+                ...previous.terminalOutputs,
+                [event.terminal.terminalId]: event.terminal,
+              },
+            },
+          };
+        });
+        return;
+      }
+
+      if (event.type === "turn_finished") {
+        setConversationRuntimeStates((current) => ({
+          ...current,
+          [event.conversationId]: {
+            ...(current[event.conversationId] ?? createConversationRuntimeState()),
+            status: "idle",
+            stopReason: event.stopReason,
+            error: undefined,
+          },
+        }));
+        return;
+      }
+
+      setConversationRuntimeStates((current) => ({
+        ...current,
+        [event.conversationId]: {
+          ...(current[event.conversationId] ?? createConversationRuntimeState()),
+          status: "failed",
+          error: event.error,
+        },
+      }));
+      setToast(event.error);
+    });
   }, []);
 
   function updateInstalledSkill(skillId: string, patch: Partial<SkillConfig>) {
@@ -653,6 +821,7 @@ export default function App() {
           ...item,
           enabled: previousEnabled.get(item.id) ?? false,
         })),
+        provider.id,
       );
       const modelProviders = config.modelProviders.map((item) =>
         item.id === providerId
@@ -781,6 +950,13 @@ export default function App() {
     updateKnowledgeBaseConfig({
       enabled: selected.size > 0,
       selectedBaseIds: Array.from(selected),
+    });
+  }
+
+  function clearKnowledgeBaseSelection() {
+    updateKnowledgeBaseConfig({
+      enabled: false,
+      selectedBaseIds: [],
     });
   }
 
@@ -1160,7 +1336,6 @@ export default function App() {
     setView("chat");
     setActiveConversation(null);
     setActiveConversationId(null);
-    setGeneratingConversationId(null);
     setDraftMessage("");
     setAttachments([]);
   }
@@ -1168,7 +1343,6 @@ export default function App() {
   async function openConversation(conversationId: string) {
     setView("chat");
     setActiveConversationId(conversationId);
-    setGeneratingConversationId(null);
     setDraftMessage("");
     setAttachments([]);
     setActiveConversation(null);
@@ -1178,6 +1352,7 @@ export default function App() {
       syncConversationState(conversation);
     } catch (error) {
       setToast(error instanceof Error ? error.message : "加载会话失败");
+      setToast(error instanceof Error ? error.message : "加载会话失败");
       setActiveConversationId(null);
     }
   }
@@ -1186,11 +1361,15 @@ export default function App() {
     try {
       const payload = await workspaceClient.deleteConversation(conversationId);
       setConversations(payload.conversations);
+      setConversationRuntimeStates((current) => {
+        const next = { ...current };
+        delete next[conversationId];
+        return next;
+      });
 
       if (activeConversationId === conversationId) {
         setActiveConversation(null);
         setActiveConversationId(null);
-        setGeneratingConversationId(null);
         setDraftMessage("");
         setAttachments([]);
       }
@@ -1199,7 +1378,7 @@ export default function App() {
     }
   }
 
-  function buildMockAssistantMessage(userContent: string): ChatMessage {
+  function buildMockAssistantMessage(userContent: string) {
     return {
       id: uid(),
       role: "assistant",
@@ -1207,7 +1386,7 @@ export default function App() {
     };
   }
 
-  function buildAssistantEchoMessage(userContent: string): ChatMessage {
+  function buildAssistantEchoMessage(userContent: string) {
     return {
       id: uid(),
       role: "assistant",
@@ -1222,26 +1401,34 @@ export default function App() {
 
     setMessageScrollRequest((current) => current + 1);
 
-    const targetConversationId = activeConversationId;
-    if (targetConversationId) {
-      setGeneratingConversationId(targetConversationId);
-    }
+    setStartingChatTurn(true);
 
     try {
-      const result = await workspaceClient.sendChatMessage({
+      const result = await workspaceClient.startChatTurn({
         conversationId: activeConversationId,
         content,
         attachments: pendingAttachments,
       });
 
       syncConversationState(result.conversation);
+      setConversationRuntimeStates((current) => ({
+        ...current,
+        [result.conversation.id]: createConversationRuntimeState("running"),
+      }));
       setView("chat");
       setDraftMessage("");
       setAttachments([]);
     } catch (error) {
+      /*
       setToast(error instanceof Error ? error.message : "发送消息失败");
+      legacy fallback
+      setToast(error instanceof Error ? error.message : "发送消息失败");
+      fallback continued
+      setToast(error instanceof Error ? error.message : "发送消息失败");
+      */
+      setToast(error instanceof Error ? error.message : "Failed to send message");
     } finally {
-      setGeneratingConversationId((current) => (current === targetConversationId ? null : current));
+      setStartingChatTurn(false);
     }
   }
 
@@ -1259,6 +1446,10 @@ export default function App() {
       : undefined;
   const hasSkillResults =
     filteredInstalledSkills.length > 0 || filteredReferenceSkills.length > 0;
+  const activeConversationRuntimeState =
+    (activeConversationId ? conversationRuntimeStates[activeConversationId] : null) ?? null;
+  const activeConversationBusy =
+    startingChatTurn || activeConversationRuntimeState?.status === "running";
 
   const beginResize =
     (target: ResizeTarget, width: number) => (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -1351,13 +1542,28 @@ export default function App() {
       return (
         <ChatWorkspace
           activeConversation={activeConversation}
+          activeModel={activeModel}
           attachments={attachments}
+          busy={activeConversationBusy}
+          composerModelId={composerModelId}
           draftMessage={draftMessage}
+          knowledgeBases={knowledgeBases}
+          knowledgeEnabled={config.knowledgeBase.enabled}
+          knowledgeRefreshing={knowledgeRefreshing}
           onDraftMessageChange={setDraftMessage}
+          onClearKnowledgeBases={clearKnowledgeBaseSelection}
+          onManageKnowledgeBases={() => setView("knowledge")}
+          onModelChange={(value) => updateConfigField("activeModelId", value)}
           onOpenAttachment={openPreview}
+          onOpenPreviewLink={openPreviewLink}
           onPickFiles={() => void pickFiles()}
           onRemoveAttachment={removeAttachment}
           onSendMessage={sendChatMessage}
+          onToggleKnowledgeBase={toggleKnowledgeBaseSelection}
+          runtimeState={activeConversationRuntimeState}
+          onVoiceInput={() => setToast("语音输入即将支持")}
+          selectableModels={selectableModels}
+          selectedKnowledgeBaseIds={config.knowledgeBase.selectedBaseIds}
           scrollToBottomRequest={messageScrollRequest}
         />
       );
@@ -1481,7 +1687,7 @@ export default function App() {
             activeConversationId={activeConversationId}
             conversations={conversations.map((conversation) => ({
               ...conversation,
-              isGenerating: conversation.id === generatingConversationId,
+              isGenerating: conversationRuntimeStates[conversation.id]?.status === "running",
             }))}
             onCreateConversation={createDraftConversation}
             onDeleteConversation={(conversationId) => void deleteConversation(conversationId)}

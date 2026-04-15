@@ -22,6 +22,8 @@ interface ConversationRow {
   last_message_at: number;
   preview: string | null;
   message_count: number;
+  agent_core: string | null;
+  agent_session_id: string | null;
 }
 
 interface MessageRow {
@@ -33,11 +35,17 @@ interface MessageRow {
   updated_at: number;
 }
 
+interface StartTurnResult {
+  createdConversation: boolean;
+  conversation: ChatConversation;
+  userMessage: ChatMessage;
+  assistantMessage: ChatMessage;
+}
+
 type SqliteModule = typeof import("node:sqlite");
 const runtimeRequire = createRequire(__filename);
 
 function loadSqliteModule(): SqliteModule {
-  // Keep the built-in module specifier intact after bundling.
   return runtimeRequire("node:sqlite") as SqliteModule;
 }
 
@@ -61,16 +69,28 @@ function parseAttachments(value: string | null): FileDropEntry[] {
   }
 }
 
+function summarizeAttachments(attachments: FileDropEntry[]) {
+  return attachments.map((attachment) => attachment.name).join(", ");
+}
+
 function buildConversationTitle(content: string, attachments: FileDropEntry[]) {
-  const attachmentSummary = attachments.map((attachment) => attachment.name).join(", ");
-  const base = (content || (attachmentSummary ? `附件：${attachmentSummary}` : "新对话")).replace(/\s+/g, " ").trim();
+  const attachmentSummary = summarizeAttachments(attachments);
+  const base = (content || (attachmentSummary ? `Attachments: ${attachmentSummary}` : "New conversation"))
+    .replace(/\s+/g, " ")
+    .trim();
   return base.length > 32 ? `${base.slice(0, 32)}...` : base;
 }
 
+function buildConversationPreview(content: string, attachments: FileDropEntry[]) {
+  const attachmentSummary = summarizeAttachments(attachments);
+  const base = (content || attachmentSummary || "").replace(/\s+/g, " ").trim();
+  return base.length > 120 ? `${base.slice(0, 120)}...` : base;
+}
+
 function buildAssistantReply(content: string, attachments: FileDropEntry[]) {
-  const attachmentSummary = attachments.map((attachment) => attachment.name).join(", ");
-  const replySource = content || (attachmentSummary ? `附件：${attachmentSummary}` : "空消息");
-  return `好的，你发送的是：${replySource}`;
+  const attachmentSummary = summarizeAttachments(attachments);
+  const replySource = content || (attachmentSummary ? `Attachments: ${attachmentSummary}` : "Empty message");
+  return `Received: ${replySource}`;
 }
 
 function mapConversationSummary(row: ConversationRow): ChatConversationSummary {
@@ -82,6 +102,8 @@ function mapConversationSummary(row: ConversationRow): ChatConversationSummary {
     lastMessageAt: row.last_message_at,
     preview: row.preview ?? "",
     messageCount: row.message_count,
+    agentCore: row.agent_core?.trim() || undefined,
+    agentSessionId: row.agent_session_id?.trim() || undefined,
   };
 }
 
@@ -137,6 +159,9 @@ export class ConversationService {
       ON messages(conversation_id, created_at ASC);
     `);
 
+    this.ensureConversationColumn(database, "agent_core", "TEXT NOT NULL DEFAULT ''");
+    this.ensureConversationColumn(database, "agent_session_id", "TEXT NOT NULL DEFAULT ''");
+
     this.database = database;
   }
 
@@ -155,6 +180,8 @@ export class ConversationService {
           conversations.updated_at,
           conversations.last_message_at,
           conversations.preview,
+          conversations.agent_core,
+          conversations.agent_session_id,
           COUNT(messages.id) AS message_count
         FROM conversations
         LEFT JOIN messages ON messages.conversation_id = conversations.id
@@ -201,6 +228,156 @@ export class ConversationService {
     return await this.listConversations();
   }
 
+  async startTurn(
+    input: ChatSendInput,
+    options: { agentCore: string },
+  ): Promise<StartTurnResult> {
+    const content = input.content.trim();
+    const attachments = normalizeAttachments(input.attachments);
+    if (!content && attachments.length === 0) {
+      throw new Error("Message content or attachments are required");
+    }
+
+    const database = this.getDatabase();
+    const now = Date.now();
+    const conversationId = input.conversationId?.trim() || randomUUID();
+    const createdConversation = !input.conversationId;
+    const title = buildConversationTitle(content, attachments);
+    const preview = buildConversationPreview(content, attachments);
+    const attachmentsJson = JSON.stringify(attachments);
+    const userMessageId = randomUUID();
+    const assistantMessageId = randomUUID();
+    let transactionStarted = false;
+
+    try {
+      database.exec("BEGIN IMMEDIATE");
+      transactionStarted = true;
+
+      if (createdConversation) {
+        database
+          .prepare(`
+            INSERT INTO conversations (
+              id,
+              title,
+              created_at,
+              updated_at,
+              last_message_at,
+              preview,
+              agent_core,
+              agent_session_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, '')
+          `)
+          .run(conversationId, title, now, now, now, preview, options.agentCore);
+      } else {
+        const existing = this.getConversationSummary(conversationId);
+        if (!existing) {
+          throw new Error("Conversation not found");
+        }
+
+        database
+          .prepare(`
+            UPDATE conversations
+            SET updated_at = ?, last_message_at = ?, preview = ?
+            WHERE id = ?
+          `)
+          .run(now, now, preview, conversationId);
+      }
+
+      database
+        .prepare(`
+          INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(userMessageId, conversationId, "user", content, attachmentsJson, now, now);
+
+      database
+        .prepare(`
+          INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(assistantMessageId, conversationId, "assistant", "", "[]", now + 1, now + 1);
+
+      database
+        .prepare(`
+          UPDATE conversations
+          SET updated_at = ?, last_message_at = ?
+          WHERE id = ?
+        `)
+        .run(now + 1, now + 1, conversationId);
+
+      database.exec("COMMIT");
+      transactionStarted = false;
+    } catch (error) {
+      if (transactionStarted) {
+        database.exec("ROLLBACK");
+      }
+      throw error;
+    }
+
+    const conversation = await this.getConversation(conversationId);
+    const userMessage = conversation.messages.find((message) => message.id === userMessageId);
+    const assistantMessage = conversation.messages.find((message) => message.id === assistantMessageId);
+
+    if (!userMessage || !assistantMessage) {
+      throw new Error("Failed to prepare conversation turn");
+    }
+
+    return {
+      createdConversation,
+      conversation,
+      userMessage,
+      assistantMessage,
+    };
+  }
+
+  async updateAssistantMessageContent(
+    conversationId: string,
+    messageId: string,
+    content: string,
+  ): Promise<void> {
+    const database = this.getDatabase();
+    const now = Date.now();
+    const preview = buildConversationPreview(content, []);
+
+    database
+      .prepare(`
+        UPDATE messages
+        SET content = ?, updated_at = ?
+        WHERE id = ? AND conversation_id = ? AND role = 'assistant'
+      `)
+      .run(content, now, messageId, conversationId);
+
+    database
+      .prepare(`
+        UPDATE conversations
+        SET updated_at = ?, last_message_at = ?, preview = ?
+        WHERE id = ?
+      `)
+      .run(now, now, preview, conversationId);
+  }
+
+  async setConversationAgentSession(
+    conversationId: string,
+    payload: { agentCore?: string; agentSessionId?: string },
+  ): Promise<void> {
+    const summary = this.getConversationSummary(conversationId);
+    if (!summary) {
+      throw new Error("Conversation not found");
+    }
+
+    const nextAgentCore = payload.agentCore ?? summary.agentCore ?? "";
+    const nextAgentSessionId = payload.agentSessionId ?? summary.agentSessionId ?? "";
+
+    this.getDatabase()
+      .prepare(`
+        UPDATE conversations
+        SET agent_core = ?, agent_session_id = ?, updated_at = ?
+        WHERE id = ?
+      `)
+      .run(nextAgentCore, nextAgentSessionId, Date.now(), conversationId);
+  }
+
   async sendMessage(input: ChatSendInput): Promise<ChatSendResult> {
     const content = input.content.trim();
     const attachments = normalizeAttachments(input.attachments);
@@ -214,7 +391,7 @@ export class ConversationService {
     const createdConversation = !input.conversationId;
     const title = buildConversationTitle(content, attachments);
     const assistantContent = buildAssistantReply(content, attachments);
-    const preview = assistantContent;
+    const preview = buildConversationPreview(assistantContent, []);
     const attachmentsJson = JSON.stringify(attachments);
     let transactionStarted = false;
 
@@ -291,6 +468,8 @@ export class ConversationService {
           conversations.updated_at,
           conversations.last_message_at,
           conversations.preview,
+          conversations.agent_core,
+          conversations.agent_session_id,
           COUNT(messages.id) AS message_count
         FROM conversations
         LEFT JOIN messages ON messages.conversation_id = conversations.id
@@ -300,6 +479,18 @@ export class ConversationService {
       .get(conversationId) as unknown as ConversationRow | undefined;
 
     return row ? mapConversationSummary(row) : null;
+  }
+
+  private ensureConversationColumn(database: DatabaseSync, columnName: string, columnDefinition: string) {
+    const columns = database
+      .prepare("PRAGMA table_info(conversations)")
+      .all() as Array<{ name?: string }>;
+
+    if (columns.some((column) => column.name === columnName)) {
+      return;
+    }
+
+    database.exec(`ALTER TABLE conversations ADD COLUMN ${columnName} ${columnDefinition}`);
   }
 
   private getDatabase() {
