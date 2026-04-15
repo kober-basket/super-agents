@@ -1,5 +1,5 @@
 import { ArrowUp, ChevronDown, Paperclip, Sparkles, X } from "lucide-react";
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from "react";
 
 import { formatBytes } from "../../lib/format";
 import type { ChatConversation, FileDropEntry } from "../../types";
@@ -14,6 +14,7 @@ interface ChatWorkspaceProps {
   onPickFiles: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
   onSendMessage: () => void;
+  scrollToBottomRequest: number;
 }
 
 const HOME_PROMPTS = [
@@ -32,8 +33,10 @@ export function ChatWorkspace({
   onPickFiles,
   onRemoveAttachment,
   onSendMessage,
+  scrollToBottomRequest,
 }: ChatWorkspaceProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -44,6 +47,22 @@ export function ChatWorkspace({
 
   const isHome = activeConversation === null;
   const canSend = draftMessage.trim().length > 0 || attachments.length > 0;
+  const activeConversationId = activeConversation?.id ?? null;
+  const messageCount = activeConversation?.messages.length ?? 0;
+  const lastMessageId = activeConversation?.messages[messageCount - 1]?.id ?? null;
+
+  useLayoutEffect(() => {
+    const messageList = messageListRef.current;
+    if (!messageList || !activeConversationId) return undefined;
+
+    const scrollToBottom = () => {
+      messageList.scrollTop = messageList.scrollHeight;
+    };
+
+    scrollToBottom();
+    const frame = window.requestAnimationFrame(scrollToBottom);
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeConversationId, messageCount, lastMessageId, scrollToBottomRequest]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -216,7 +235,7 @@ export function ChatWorkspace({
           </div>
         ) : (
           <div className="chat-thread-layout">
-            <div className="message-list">
+            <div ref={messageListRef} className="message-list">
               {activeConversation.messages.map((message) => (
                 <div key={message.id} className={`message-row ${message.role === "user" ? "user" : ""}`}>
                   <div className={`message-bubble ${message.role === "user" ? "user" : ""}`}>

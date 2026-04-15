@@ -299,10 +299,10 @@ body {
   min-height: 48px;
   position: relative;
   display: grid;
-  grid-template-columns: minmax(180px, var(--titlebar-sidebar-width, 236px)) minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   align-items: center;
   gap: 12px;
-  padding: 5px 8px 5px 0;
+  padding: 5px 8px 5px 16px;
   border: 1px solid var(--titlebar-border);
   border-radius: 14px;
   background: var(--titlebar-bg);
@@ -312,7 +312,7 @@ body {
 }
 
 .window-titlebar.mac {
-  padding-left: 0;
+  padding-left: 84px;
 }
 
 .window-titlebar-copy,
@@ -322,33 +322,33 @@ body {
 }
 
 .window-titlebar-copy {
-  min-width: 0;
+  width: fit-content;
+  max-width: min(420px, calc(100vw - 220px));
   gap: 12px;
-  padding-left: 16px;
-}
-
-.window-titlebar.mac .window-titlebar-copy {
-  padding-left: 84px;
+  justify-self: start;
 }
 
 .window-titlebar-status-wrap {
+  position: absolute;
+  top: 50%;
+  right: max(8px, calc((100% - var(--titlebar-sidebar-width) - 760px) / 2));
+  transform: translateY(-50%);
   min-width: 0;
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
+  max-width: min(760px, calc(100% - var(--titlebar-sidebar-width) - 24px));
 }
 
 .window-titlebar-status {
-  width: min(100%, 760px);
-  max-width: none;
+  width: auto;
+  max-width: 100%;
   min-width: 0;
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 10px;
-  padding: 8px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(113, 126, 145, 0.18);
-  background: rgba(255, 255, 255, 0.64);
+  padding: 0;
 }
 
 .window-titlebar-status-dot {
@@ -372,11 +372,12 @@ body {
 
 .window-titlebar-status-copy {
   min-width: 0;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 0;
-  text-align: right;
+  text-align: left;
 }
 
 .window-titlebar-status-copy strong,
@@ -394,7 +395,7 @@ body {
 
 .window-titlebar-status-copy span {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text);
 }
 

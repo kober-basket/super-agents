@@ -122,6 +122,7 @@ export default function App() {
   const [activeConversation, setActiveConversation] = useState<ChatConversation | null>(null);
   const [generatingConversationId, setGeneratingConversationId] = useState<string | null>(null);
   const [draftMessage, setDraftMessage] = useState("");
+  const [messageScrollRequest, setMessageScrollRequest] = useState(0);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("assistant");
   const [preview, setPreview] = useState<FilePreviewPayload | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -1219,6 +1220,8 @@ export default function App() {
     const pendingAttachments = attachments.map((attachment) => ({ ...attachment }));
     if (!content && pendingAttachments.length === 0) return;
 
+    setMessageScrollRequest((current) => current + 1);
+
     const targetConversationId = activeConversationId;
     if (targetConversationId) {
       setGeneratingConversationId(targetConversationId);
@@ -1355,6 +1358,7 @@ export default function App() {
           onPickFiles={() => void pickFiles()}
           onRemoveAttachment={removeAttachment}
           onSendMessage={sendChatMessage}
+          scrollToBottomRequest={messageScrollRequest}
         />
       );
     }
