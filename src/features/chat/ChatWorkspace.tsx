@@ -120,6 +120,18 @@ function toolSummary(toolCall: ChatToolCall) {
   return "Execution details";
 }
 
+function hasVisibleText(value?: string | null) {
+  return Boolean(value && value.trim());
+}
+
+function shouldRenderToolTextAsMarkdown(toolCall: ChatToolCall, text: string) {
+  if (toolCall.kind === "execute") {
+    return false;
+  }
+
+  return /(^|\n)(#{1,6}\s|[-*]\s|\d+\.\s|>\s|```|`[^`\n]+`|\|.+\|)/m.test(text);
+}
+
 export function ChatWorkspace({
   activeConversation,
   activeModel,
@@ -378,6 +390,31 @@ export function ChatWorkspace({
     );
   }
 
+  function renderActiveKnowledgeChips() {
+    if (!selectedKnowledgeBases.length) {
+      return null;
+    }
+
+    return (
+      <div className="chat-knowledge-active-row">
+        {selectedKnowledgeBases.map((base) => (
+          <div key={base.id} className="chat-knowledge-active-chip">
+            <BookOpen size={13} />
+            <span title={base.name}>{base.name}</span>
+            <button
+              aria-label={`移除知识库 ${base.name}`}
+              className="chat-knowledge-active-chip-remove"
+              onClick={() => onToggleKnowledgeBase(base.id)}
+              type="button"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   function renderModelPicker() {
     const disabled = busy || selectableModels.length === 0;
 
@@ -551,7 +588,11 @@ export function ChatWorkspace({
               <span className="activity-panel-label">
                 {entry.priority} · {entry.status}
               </span>
-              <p>{entry.content}</p>
+              <div
+                className="activity-markdown"
+                dangerouslySetInnerHTML={{ __html: markdownToHtml(entry.content) }}
+                onClick={handleMessageClick}
+              />
             </div>
           ))}
         </div>
@@ -560,6 +601,29 @@ export function ChatWorkspace({
   }
 
   function renderToolCard(toolCall: ChatToolCall) {
+    const visibleContent = toolCall.content.filter((content) => {
+      if (content.type === "text") {
+        return hasVisibleText(content.text);
+      }
+
+      if (content.type === "diff") {
+        return hasVisibleText(content.newText) || hasVisibleText(content.oldText) || hasVisibleText(content.path);
+      }
+
+      const terminal = runtimeState?.terminalOutputs[content.terminalId];
+      if (!terminal) {
+        return runtimeState?.status === "running";
+      }
+
+      return hasVisibleText(terminal.output) || terminal.exitCode !== null || terminal.signal !== null;
+    });
+    const hasRawInput = hasVisibleText(toolCall.rawInputJson);
+    const hasRawOutput = hasVisibleText(toolCall.rawOutputJson);
+
+    if (visibleContent.length === 0 && !hasRawInput && !hasRawOutput) {
+      return null;
+    }
+
     return (
       <details key={toolCall.toolCallId} className="activity-card tool-message-card" open>
         <summary className="activity-summary">
@@ -585,12 +649,25 @@ export function ChatWorkspace({
           </div>
         </summary>
         <div className="activity-detail">
-          {toolCall.content.map((content, index) => {
+          {visibleContent.map((content, index) => {
             if (content.type === "text") {
+              if (shouldRenderToolTextAsMarkdown(toolCall, content.text)) {
+                return (
+                  <div key={`${toolCall.toolCallId}-text-${index}`} className="activity-panel activity-panel-summary">
+                    <span className="activity-panel-label">Output</span>
+                    <div
+                      className="activity-markdown"
+                      dangerouslySetInnerHTML={{ __html: markdownToHtml(content.text) }}
+                      onClick={handleMessageClick}
+                    />
+                  </div>
+                );
+              }
+
               return (
-                <div key={`${toolCall.toolCallId}-text-${index}`} className="activity-panel activity-panel-summary">
+                <div key={`${toolCall.toolCallId}-text-${index}`} className="activity-panel">
                   <span className="activity-panel-label">Output</span>
-                  <p>{content.text}</p>
+                  <pre>{content.text}</pre>
                 </div>
               );
             }
@@ -615,14 +692,14 @@ export function ChatWorkspace({
             );
           })}
 
-          {toolCall.rawInputJson ? (
+          {hasRawInput ? (
             <div className="activity-panel">
               <span className="activity-panel-label">Input</span>
               <pre>{toolCall.rawInputJson}</pre>
             </div>
           ) : null}
 
-          {toolCall.rawOutputJson ? (
+          {hasRawOutput ? (
             <div className="activity-panel">
               <span className="activity-panel-label">Raw output</span>
               <pre>{toolCall.rawOutputJson}</pre>
@@ -634,11 +711,16 @@ export function ChatWorkspace({
   }
 
   function renderUnlinkedTerminals() {
-    if (unlinkedTerminalOutputs.length === 0) {
+    const visibleTerminals = unlinkedTerminalOutputs.filter(
+      (terminal) =>
+        hasVisibleText(terminal.output) || terminal.exitCode !== null || terminal.signal !== null,
+    );
+
+    if (visibleTerminals.length === 0) {
       return null;
     }
 
-    return unlinkedTerminalOutputs.map((terminal) => (
+    return visibleTerminals.map((terminal) => (
       <details key={terminal.terminalId} className="activity-card tool-message-card" open>
         <summary className="activity-summary">
           <div className="activity-summary-main">
@@ -679,6 +761,7 @@ export function ChatWorkspace({
     return (
       <div className={`chat-composer-card ${home ? "chat-composer-home" : ""}`}>
         {renderAttachmentList(attachments, true)}
+        {renderActiveKnowledgeChips()}
         <textarea
           ref={textareaRef}
           disabled={busy}
@@ -694,7 +777,6 @@ export function ChatWorkspace({
               <Paperclip size={16} />
             </button>
             {renderKnowledgePicker()}
-            {home ? <span className="chat-composer-hint">Shift + Enter 换行</span> : null}
           </div>
 
           <div className="chat-composer-right">

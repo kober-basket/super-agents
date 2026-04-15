@@ -1305,6 +1305,51 @@ textarea {
   box-shadow: none;
 }
 
+.chat-knowledge-active-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.chat-knowledge-active-chip {
+  min-width: 0;
+  max-width: min(100%, 240px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px 0 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #dff1c9, #d3ebb7);
+  color: #4a9626;
+  box-shadow: inset 0 0 0 1px rgba(108, 173, 61, 0.16);
+}
+
+.chat-knowledge-active-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chat-knowledge-active-chip-remove {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: currentColor;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.chat-knowledge-active-chip-remove:hover {
+  background: rgba(74, 150, 38, 0.14);
+  color: #3d811d;
+}
+
 .chat-composer-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1516,7 +1561,7 @@ textarea {
 }
 
 .chat-knowledge-trigger.active {
-  color: var(--text);
+  color: #5aa52f;
   transform: translateY(-1px);
 }
 
@@ -2065,6 +2110,7 @@ textarea {
 
 .message-text pre,
 .preview-markdown pre,
+.activity-markdown pre,
 .preview-code {
   overflow: auto;
   border-radius: 18px;
@@ -2077,7 +2123,8 @@ textarea {
 }
 
 .message-text code,
-.preview-markdown code {
+.preview-markdown code,
+.activity-markdown code {
   background: #f5efe7;
   border-radius: 6px;
   padding: 1px 4px;
@@ -2085,14 +2132,16 @@ textarea {
 }
 
 .message-text a,
-.preview-markdown a {
+.preview-markdown a,
+.activity-markdown a {
   color: #2457d1;
   text-decoration: none;
   border-bottom: 1px solid rgba(36, 87, 209, 0.22);
 }
 
 .message-text a:hover,
-.preview-markdown a:hover {
+.preview-markdown a:hover,
+.activity-markdown a:hover {
   color: #163fa6;
   border-bottom-color: rgba(22, 63, 166, 0.4);
 }
@@ -6948,6 +6997,7 @@ textarea:focus,
 
 .message-text pre,
 .preview-markdown pre,
+.activity-markdown pre,
 .preview-code,
 .mcp-debug-output,
 .preview-frame {
@@ -6956,7 +7006,8 @@ textarea:focus,
 }
 
 .message-text code,
-.preview-markdown code {
+.preview-markdown code,
+.activity-markdown code {
   background: rgba(var(--accent-rgb), 0.08);
 }
 
@@ -7102,6 +7153,96 @@ textarea:focus,
   color: var(--muted-strong);
   font-size: 12px;
   line-height: 1.55;
+}
+
+.activity-markdown {
+  padding: 10px 11px;
+  border-radius: 12px;
+  border: 1px solid rgba(212, 204, 190, 0.78);
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.activity-markdown p,
+.activity-markdown ul,
+.activity-markdown ol,
+.activity-markdown blockquote,
+.activity-markdown table,
+.activity-markdown hr {
+  margin: 0 0 12px;
+}
+
+.activity-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.activity-markdown ul,
+.activity-markdown ol,
+.message-text ul,
+.message-text ol,
+.preview-markdown ul,
+.preview-markdown ol {
+  padding-left: 20px;
+}
+
+.activity-markdown li + li,
+.message-text li + li,
+.preview-markdown li + li {
+  margin-top: 4px;
+}
+
+.activity-markdown blockquote,
+.message-text blockquote,
+.preview-markdown blockquote {
+  padding: 10px 12px;
+  border-left: 3px solid rgba(var(--accent-rgb), 0.28);
+  background: rgba(var(--accent-rgb), 0.05);
+  border-radius: 0 12px 12px 0;
+  color: var(--muted-strong);
+}
+
+.activity-markdown hr,
+.message-text hr,
+.preview-markdown hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.activity-markdown table,
+.message-text table,
+.preview-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+
+.activity-markdown th,
+.activity-markdown td,
+.message-text th,
+.message-text td,
+.preview-markdown th,
+.preview-markdown td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.activity-markdown th,
+.message-text th,
+.preview-markdown th {
+  background: rgba(var(--accent-rgb), 0.06);
+  font-weight: 700;
+}
+
+.activity-markdown tr:last-child td,
+.message-text tr:last-child td,
+.preview-markdown tr:last-child td {
+  border-bottom: 0;
 }
 
 .composer-skill-chip-row {
