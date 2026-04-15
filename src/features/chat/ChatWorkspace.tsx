@@ -714,7 +714,7 @@ export function ChatWorkspace({
     }
 
     return (
-      <details key="runtime-plan" className="activity-card tool-message-card" open>
+      <details key="runtime-plan" className="activity-card tool-message-card">
         <summary className="activity-summary">
           <div className="activity-summary-main">
             <div className="activity-summary-title">
@@ -755,7 +755,7 @@ export function ChatWorkspace({
     }
 
     return (
-      <details key="runtime-execute-group" className="activity-card tool-message-card codex-command-group" open>
+      <details key="runtime-execute-group" className="activity-card tool-message-card codex-command-group">
         <summary className="codex-command-group-summary">
           <span className="codex-command-group-title">
             已执行 {executeToolCalls.length} 条命令
@@ -812,7 +812,7 @@ export function ChatWorkspace({
     }
 
     return (
-      <details key={toolCall.toolCallId} className="activity-card tool-message-card" open>
+      <details key={toolCall.toolCallId} className="activity-card tool-message-card">
         <summary className="activity-summary">
           <div className="activity-summary-main">
             <div className="activity-summary-title">
@@ -908,7 +908,7 @@ export function ChatWorkspace({
     }
 
     return visibleTerminals.map((terminal) => (
-      <details key={terminal.terminalId} className="activity-card tool-message-card" open>
+      <details key={terminal.terminalId} className="activity-card tool-message-card">
         <summary className="activity-summary">
           <div className="activity-summary-main">
             <div className="activity-summary-title">

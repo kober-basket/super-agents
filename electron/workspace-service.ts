@@ -14,6 +14,13 @@ import {
   sanitizeModelProviderId,
 } from "../src/lib/model-config";
 import { inferProviderModelCapabilities, inferProviderModelGroup, inferProviderModelVendor } from "../src/lib/model-metadata";
+import {
+  DEFAULT_ACTIVE_MODEL_ID,
+  DEFAULT_ACTIVE_PROVIDER_ID,
+  DEFAULT_EMBEDDING_MODEL_ID,
+  DEFAULT_EMBEDDING_PROVIDER_ID,
+  getDefaultModelProviders,
+} from "../src/lib/provider-presets";
 import { DEFAULT_REMOTE_CONTROL_CONFIG, normalizeRemoteControlConfig } from "../src/lib/remote-control-config";
 import { sanitizeMcpName } from "../src/features/shared/utils";
 import type {
@@ -48,32 +55,16 @@ interface PersistedWorkspaceState {
   config: AppConfig;
 }
 
-const IFLY_RPA_BASE_URL = "https://oneapi.iflyrpa.com/v1";
-const IFLY_RPA_API_KEY =
-  process.env.SUPER_AGENTS_IFLYRPA_API_KEY ??
-  process.env.KOBER_IFLYRPA_API_KEY ??
-  process.env.IFLYRPA_API_KEY ??
-  "sk-9Uoh18eJkEL8PEFPB735D104Bd534cA69e95F971A4Ba4e6d";
+const LEGACY_DEFAULT_PROVIDER_BASE_URL = "https://oneapi.iflyrpa.com/v1";
+const LEGACY_DEFAULT_PROVIDER_MODEL_IDS = [
+  "azure/gpt-5",
+  "azure/gpt-5-mini",
+  "azure/gpt-5-nano",
+  "claude-4.5-sonnet",
+  "gemini-2.5-pro",
+].sort();
 
-const DEFAULT_MODEL_PROVIDERS: ModelProviderConfig[] = [
-  {
-    id: "iflyrpa",
-    name: "iFlyRpa",
-    kind: "openai-compatible",
-    baseUrl: IFLY_RPA_BASE_URL,
-    apiKey: IFLY_RPA_API_KEY,
-    temperature: 0.2,
-    maxTokens: 8192,
-    enabled: true,
-    models: [
-      { id: "azure/gpt-5", label: "GPT-5", enabled: true },
-      { id: "azure/gpt-5-mini", label: "GPT-5 Mini", enabled: true },
-      { id: "azure/gpt-5-nano", label: "GPT-5 Nano", enabled: true },
-      { id: "claude-4.5-sonnet", label: "Claude 4.5 Sonnet", enabled: true },
-      { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", enabled: true },
-    ],
-  },
-];
+const DEFAULT_MODEL_PROVIDERS: ModelProviderConfig[] = getDefaultModelProviders();
 
 const DEFAULT_SKILLS: SkillConfig[] = [
   {
@@ -110,7 +101,7 @@ const DEFAULT_CONFIG: AppConfig = {
   bridgeUrl: "",
   environment: "local",
   defaultAgentMode: "general",
-  activeModelId: createRuntimeModelId("iflyrpa", "azure/gpt-5-mini"),
+  activeModelId: createRuntimeModelId(DEFAULT_ACTIVE_PROVIDER_ID, DEFAULT_ACTIVE_MODEL_ID),
   contextTier: "high",
   appearance: { theme: "linen" },
   proxy: { http: "", https: "", bypass: "localhost,127.0.0.1" },
@@ -120,8 +111,8 @@ const DEFAULT_CONFIG: AppConfig = {
   hiddenCodexSkillIds: [],
   knowledgeBase: {
     enabled: false,
-    embeddingProviderId: "iflyrpa",
-    embeddingModel: "text-embedding-3-small",
+    embeddingProviderId: DEFAULT_EMBEDDING_PROVIDER_ID,
+    embeddingModel: DEFAULT_EMBEDDING_MODEL_ID,
     selectedBaseIds: [],
     documentCount: 5,
     chunkSize: 1200,
@@ -145,6 +136,27 @@ function createEmptyState(): PersistedWorkspaceState {
 
 function normalizeBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
+}
+
+function isLegacyDefaultProviderList(modelProviders: ModelProviderConfig[]) {
+  if (modelProviders.length !== 1) {
+    return false;
+  }
+
+  const [provider] = modelProviders;
+  if (!provider || provider.id !== "iflyrpa") {
+    return false;
+  }
+
+  if (normalizeBaseUrl(provider.baseUrl) !== LEGACY_DEFAULT_PROVIDER_BASE_URL) {
+    return false;
+  }
+
+  const modelIds = provider.models.map((model) => model.id).sort();
+  return (
+    modelIds.length === LEGACY_DEFAULT_PROVIDER_MODEL_IDS.length &&
+    modelIds.every((modelId, index) => modelId === LEGACY_DEFAULT_PROVIDER_MODEL_IDS[index])
+  );
 }
 
 function migrateLegacyModels(legacyModels: any[], legacyActiveModelId?: string) {
@@ -207,7 +219,7 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
   const legacyModels = Array.isArray(customModels) ? customModels.filter(Boolean) : [];
   const migratedLegacy = migrateLegacyModels(legacyModels, rawConfig.activeModelId);
   const cleanedConfig = restConfig as Partial<AppConfig>;
-  const modelProviders =
+  const configuredProviders =
     Array.isArray(cleanedConfig.modelProviders) && cleanedConfig.modelProviders.length > 0
       ? cleanedConfig.modelProviders.map((item) => ({
           ...item,
@@ -217,13 +229,22 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
           maxTokens: typeof item.maxTokens === "number" ? item.maxTokens : 4096,
           models: normalizeProviderModels(Array.isArray(item.models) ? item.models : [], item.id),
         }))
+      : null;
+  const migratedFromLegacyDefaults = Boolean(configuredProviders && isLegacyDefaultProviderList(configuredProviders));
+  const modelProviders =
+    configuredProviders && configuredProviders.length > 0
+      ? migratedFromLegacyDefaults
+        ? cloneDefaultConfig().modelProviders
+        : configuredProviders
       : migratedLegacy.providers.length > 0
         ? migratedLegacy.providers
         : cloneDefaultConfig().modelProviders;
   const preferredActiveModelId =
-    modelProviders.some((provider) =>
-      provider.models.some((model) => createRuntimeModelId(provider.id, model.id) === rawConfig.activeModelId),
-    )
+    migratedFromLegacyDefaults
+      ? DEFAULT_CONFIG.activeModelId
+      : modelProviders.some((provider) =>
+            provider.models.some((model) => createRuntimeModelId(provider.id, model.id) === rawConfig.activeModelId),
+          )
       ? String(rawConfig.activeModelId ?? "")
       : String(migratedLegacy.activeModelId || rawConfig.activeModelId || DEFAULT_CONFIG.activeModelId);
 
@@ -249,6 +270,15 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
       knowledgeBase: {
         ...DEFAULT_CONFIG.knowledgeBase,
         ...(rawConfig.knowledgeBase ?? {}),
+        embeddingProviderId:
+          typeof rawConfig.knowledgeBase?.embeddingProviderId === "string" &&
+          modelProviders.some((provider) => provider.id === rawConfig.knowledgeBase?.embeddingProviderId)
+            ? rawConfig.knowledgeBase.embeddingProviderId
+            : DEFAULT_CONFIG.knowledgeBase.embeddingProviderId,
+        embeddingModel:
+          typeof rawConfig.knowledgeBase?.embeddingModel === "string" && rawConfig.knowledgeBase.embeddingModel.trim()
+            ? rawConfig.knowledgeBase.embeddingModel.trim()
+            : DEFAULT_CONFIG.knowledgeBase.embeddingModel,
         selectedBaseIds: Array.isArray(rawConfig.knowledgeBase?.selectedBaseIds)
           ? rawConfig.knowledgeBase.selectedBaseIds.map((item) => String(item)).filter(Boolean)
           : [],

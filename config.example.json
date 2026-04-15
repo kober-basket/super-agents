@@ -3,7 +3,7 @@
   "bridgeUrl": "",
   "environment": "local",
   "defaultAgentMode": "general",
-  "activeModelId": "iflyrpa::azure/gpt-5-mini",
+  "activeModelId": "openai::gpt-5-mini",
   "contextTier": "high",
   "appearance": {
     "theme": "linen"
@@ -15,41 +15,153 @@
   },
   "modelProviders": [
     {
-      "id": "iflyrpa",
-      "name": "iFlyRpa",
+      "id": "openai",
+      "name": "OpenAI",
       "kind": "openai-compatible",
-      "baseUrl": "https://oneapi.iflyrpa.com/v1",
+      "baseUrl": "https://api.openai.com/v1",
       "apiKey": "sk-xxxx",
       "temperature": 0.2,
       "maxTokens": 8192,
       "enabled": true,
       "models": [
         {
-          "id": "azure/gpt-5",
+          "id": "gpt-5",
           "label": "GPT-5",
           "enabled": true
         },
         {
-          "id": "azure/gpt-5-mini",
+          "id": "gpt-5-mini",
           "label": "GPT-5 Mini",
           "enabled": true
         },
         {
-          "id": "azure/gpt-5-nano",
-          "label": "GPT-5 Nano",
+          "id": "text-embedding-3-small",
+          "label": "Text Embedding 3 Small",
           "enabled": true
         },
         {
-          "id": "claude-4.5-sonnet",
-          "label": "Claude 4.5 Sonnet",
-          "enabled": true
-        },
-        {
-          "id": "gemini-2.5-pro",
-          "label": "Gemini 2.5 Pro",
+          "id": "gpt-4o-mini-transcribe",
+          "label": "GPT-4o Mini Transcribe",
           "enabled": true
         }
       ]
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "kind": "openai-compatible",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "apiKey": "sk-ant-xxxx",
+      "temperature": 0.2,
+      "maxTokens": 8192,
+      "enabled": true,
+      "models": [
+        {
+          "id": "claude-sonnet-4-6",
+          "label": "Claude Sonnet 4.6",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "kind": "openai-compatible",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKey": "sk-or-xxxx",
+      "temperature": 0.2,
+      "maxTokens": 8192,
+      "enabled": true,
+      "models": [
+        {
+          "id": "openai/gpt-5.2",
+          "label": "GPT-5.2",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "id": "qwen",
+      "name": "Qwen",
+      "kind": "openai-compatible",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "sk-qwen-xxxx",
+      "temperature": 0.2,
+      "maxTokens": 8192,
+      "enabled": true,
+      "models": [
+        {
+          "id": "qwen-plus",
+          "label": "Qwen Plus",
+          "enabled": true
+        },
+        {
+          "id": "qwen-max",
+          "label": "Qwen Max",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "id": "z-ai",
+      "name": "Z.ai",
+      "kind": "openai-compatible",
+      "baseUrl": "https://api.z.ai/api/paas/v4",
+      "apiKey": "ZAI_xxxx",
+      "temperature": 0.2,
+      "maxTokens": 8192,
+      "enabled": true,
+      "models": [
+        {
+          "id": "glm-5.1",
+          "label": "GLM 5.1",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "kind": "openai-compatible",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "apiKey": "sk-deepseek-xxxx",
+      "temperature": 0.2,
+      "maxTokens": 8192,
+      "enabled": true,
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "label": "DeepSeek Chat",
+          "enabled": true
+        },
+        {
+          "id": "deepseek-reasoner",
+          "label": "DeepSeek Reasoner",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "id": "volcengine",
+      "name": "Volcengine Ark",
+      "kind": "openai-compatible",
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "apiKey": "ark-xxxx",
+      "temperature": 0.2,
+      "maxTokens": 8192,
+      "enabled": true,
+      "models": []
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "kind": "openai-compatible",
+      "baseUrl": "http://localhost:11434/v1",
+      "apiKey": "",
+      "temperature": 0.2,
+      "maxTokens": 8192,
+      "enabled": true,
+      "models": []
     }
   ],
   "mcpServers": [],

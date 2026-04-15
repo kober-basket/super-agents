@@ -9,6 +9,7 @@ import {
   normalizeProviderModels,
   sanitizeModelProviderId,
 } from "./lib/model-config";
+import { getNextModelProvider } from "./lib/provider-presets";
 import type {
   AppConfig,
   AppSection,
@@ -1049,7 +1050,18 @@ export default function App() {
     scheduleModelProvidersPersist(modelProviders);
   }
 
+  function addPresetModelProvider() {
+    const providerId = sanitizeModelProviderId(`provider-${uid()}`);
+    const nextProvider = getNextModelProvider(config.modelProviders, providerId);
+    const modelProviders = [...config.modelProviders, nextProvider];
+    setSelectedModelProviderId(nextProvider.id);
+    commitModelProviders(modelProviders, "宸叉坊鍔犳彁渚涙柟");
+  }
+
   function addModelProvider() {
+    addPresetModelProvider();
+    return;
+
     const providerId = sanitizeModelProviderId(`provider-${uid()}`);
     const modelProviders = [
       ...config.modelProviders,
@@ -2062,7 +2074,7 @@ export default function App() {
             providerRefreshingId={providerRefreshingId}
             selectedModelProviderId={selectedModelProviderId}
             selectableModels={selectableModels}
-            onAddModelProvider={addModelProvider}
+            onAddModelProvider={addPresetModelProvider}
             onModelChange={(value) => updateConfigField("activeModelId", value)}
             onRefreshProviderModels={refreshProviderModels}
             onRemoveModelProvider={removeModelProvider}
