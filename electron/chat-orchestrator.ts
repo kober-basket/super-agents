@@ -7,6 +7,7 @@ import type {
   AppConfig,
   ChatConversation,
   ChatEvent,
+  ChatMessageRuntimeTrace,
   ChatMessage,
   ChatPlanEntry,
   ChatSendInput,
@@ -35,6 +36,7 @@ interface ActiveTurn {
   assistantContent: string;
   assistantVisuals: ChatVisual[];
   assistantVisualsSignature: string;
+  runtimeTrace: ChatMessageRuntimeTrace;
   completion: Deferred<ChatTurnCompletionResult>;
   unregisterSessionHandlers: () => void;
   closed: boolean;
@@ -95,6 +97,15 @@ function stringifyJson(value: unknown) {
   } catch {
     return String(value);
   }
+}
+
+function createEmptyRuntimeTrace(): ChatMessageRuntimeTrace {
+  return {
+    planEntries: [],
+    toolCalls: [],
+    terminalOutputs: {},
+    thoughtText: "",
+  };
 }
 
 function mapPlanEntries(entries: acp.PlanEntry[]): ChatPlanEntry[] {
@@ -377,6 +388,7 @@ export class ChatOrchestrator {
         assistantContent: started.assistantMessage.content,
         assistantVisuals: started.assistantMessage.visuals ?? [],
         assistantVisualsSignature: serializeVisuals(started.assistantMessage.visuals ?? []),
+        runtimeTrace: started.assistantMessage.runtimeTrace ?? createEmptyRuntimeTrace(),
         completion,
         unregisterSessionHandlers: () => undefined,
         closed: false,
@@ -387,6 +399,14 @@ export class ChatOrchestrator {
           await this.handleSessionUpdate(activeTurn, update);
         },
         onTerminalOutput: async (terminal) => {
+          activeTurn.runtimeTrace.terminalOutputs[terminal.terminalId] = {
+            terminalId: terminal.terminalId,
+            output: terminal.output,
+            truncated: terminal.truncated,
+            exitCode: terminal.exitCode,
+            signal: terminal.signal,
+          };
+
           this.emitEvent({
             type: "terminal_output",
             conversationId: activeTurn.conversationId,
@@ -517,6 +537,13 @@ export class ChatOrchestrator {
         prompt,
       });
       await this.ensureInterruptedReplyHint(activeTurn, response.stopReason);
+      activeTurn.runtimeTrace.stopReason = response.stopReason;
+      activeTurn.runtimeTrace.error = undefined;
+      try {
+        await this.persistRuntimeTrace(activeTurn);
+      } catch {
+        // Preserve the main turn result even if trace persistence fails.
+      }
       const conversation = await this.conversationService.getConversation(activeTurn.conversationId);
       const assistantMessage =
         conversation.messages.find((message) => message.id === activeTurn.assistantMessageId) ??
@@ -547,6 +574,14 @@ export class ChatOrchestrator {
         activeTurn,
         error instanceof Error ? error.message : String(error),
       );
+      activeTurn.runtimeTrace.stopReason = undefined;
+      activeTurn.runtimeTrace.error =
+        error instanceof Error ? error.message : "Agent turn failed";
+      try {
+        await this.persistRuntimeTrace(activeTurn);
+      } catch {
+        // Best effort only; the original failure should still surface.
+      }
       activeTurn.completion.reject(error);
       this.emitEvent({
         type: "turn_failed",
@@ -588,6 +623,7 @@ export class ChatOrchestrator {
       activeTurn.assistantMessageId,
       activeTurn.assistantContent,
       activeTurn.assistantVisuals,
+      activeTurn.runtimeTrace,
     );
 
     this.emitEvent({
@@ -597,6 +633,24 @@ export class ChatOrchestrator {
       messageId: activeTurn.assistantMessageId,
       content: activeTurn.assistantContent,
       visuals: activeTurn.assistantVisuals,
+    });
+  }
+
+  private async persistRuntimeTrace(activeTurn: ActiveTurn) {
+    await this.conversationService.updateAssistantMessage(
+      activeTurn.conversationId,
+      activeTurn.assistantMessageId,
+      activeTurn.assistantContent,
+      activeTurn.assistantVisuals,
+      activeTurn.runtimeTrace,
+    );
+
+    this.emitEvent({
+      type: "message_runtime_trace_updated",
+      conversationId: activeTurn.conversationId,
+      turnId: activeTurn.turnId,
+      messageId: activeTurn.assistantMessageId,
+      runtimeTrace: activeTurn.runtimeTrace,
     });
   }
 
@@ -622,6 +676,8 @@ export class ChatOrchestrator {
         return;
       }
 
+      activeTurn.runtimeTrace.thoughtText += textDelta;
+
       this.emitEvent({
         type: "thought_delta",
         conversationId: activeTurn.conversationId,
@@ -632,32 +688,53 @@ export class ChatOrchestrator {
     }
 
     if (update.sessionUpdate === "plan") {
+      activeTurn.runtimeTrace.planEntries = mapPlanEntries(update.entries);
+
       this.emitEvent({
         type: "plan_updated",
         conversationId: activeTurn.conversationId,
         turnId: activeTurn.turnId,
-        entries: mapPlanEntries(update.entries),
+        entries: activeTurn.runtimeTrace.planEntries,
       });
       return;
     }
 
     if (update.sessionUpdate === "tool_call") {
+      activeTurn.runtimeTrace.toolCalls = [
+        ...activeTurn.runtimeTrace.toolCalls.filter(
+          (toolCall) => toolCall.toolCallId !== update.toolCallId,
+        ),
+        mapToolCall(update),
+      ];
+
       this.emitEvent({
         type: "tool_call_started",
         conversationId: activeTurn.conversationId,
         turnId: activeTurn.turnId,
-        toolCall: mapToolCall(update),
+        toolCall: activeTurn.runtimeTrace.toolCalls[activeTurn.runtimeTrace.toolCalls.length - 1],
       });
       return;
     }
 
     if (update.sessionUpdate === "tool_call_update") {
+      const patch = mapToolCallPatch(update);
+      activeTurn.runtimeTrace.toolCalls = activeTurn.runtimeTrace.toolCalls.map((toolCall) =>
+        toolCall.toolCallId === update.toolCallId
+          ? {
+              ...toolCall,
+              ...patch,
+              content: patch.content ?? toolCall.content,
+              locations: patch.locations ?? toolCall.locations,
+            }
+          : toolCall,
+      );
+
       this.emitEvent({
         type: "tool_call_updated",
         conversationId: activeTurn.conversationId,
         turnId: activeTurn.turnId,
         toolCallId: update.toolCallId,
-        patch: mapToolCallPatch(update),
+        patch,
       });
     }
   }

@@ -7,14 +7,18 @@ export type AppSection =
   | "emergency"
   | "settings";
 export type AppearanceThemeId =
+  | "porcelain"
   | "linen"
   | "ocean"
+  | "sage"
   | "forest"
   | "sunset"
-  | "graphite"
   | "mist"
   | "citrus"
-  | "aubergine";
+  | "aubergine"
+  | "dusk"
+  | "graphite"
+  | "midnight";
 export type ContextTier = "low" | "medium" | "high";
 export type EnvironmentMode = "local" | "cloud";
 export type DefaultAgentMode = "general" | "build";
@@ -542,6 +546,7 @@ export interface ChatMessage {
   role: ChatMessageRole;
   content: string;
   visuals?: ChatVisual[];
+  runtimeTrace?: ChatMessageRuntimeTrace;
   attachments?: FileDropEntry[];
   createdAt: number;
   updatedAt: number;
@@ -591,6 +596,15 @@ export interface ChatTerminalOutput {
   truncated: boolean;
   exitCode?: number | null;
   signal?: string | null;
+}
+
+export interface ChatMessageRuntimeTrace {
+  planEntries: ChatPlanEntry[];
+  toolCalls: ChatToolCall[];
+  terminalOutputs: Record<string, ChatTerminalOutput>;
+  thoughtText: string;
+  stopReason?: string;
+  error?: string;
 }
 
 export interface ChatConversationRuntimeState {
@@ -644,19 +658,26 @@ export interface ChatTurnStartResult {
 }
 
 export type ChatEvent =
-  | {
-      type: "message_updated";
-      conversationId: string;
-      turnId: string;
-      messageId: string;
-      content: string;
-      visuals: ChatVisual[];
-    }
-  | {
-      type: "message_delta";
-      conversationId: string;
-      turnId: string;
-      messageId: string;
+    | {
+        type: "message_updated";
+        conversationId: string;
+        turnId: string;
+        messageId: string;
+        content: string;
+        visuals: ChatVisual[];
+      }
+    | {
+        type: "message_runtime_trace_updated";
+        conversationId: string;
+        turnId: string;
+        messageId: string;
+        runtimeTrace: ChatMessageRuntimeTrace;
+      }
+    | {
+        type: "message_delta";
+        conversationId: string;
+        turnId: string;
+        messageId: string;
       textDelta: string;
     }
   | {

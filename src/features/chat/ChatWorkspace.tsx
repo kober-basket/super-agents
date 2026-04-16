@@ -27,6 +27,7 @@ import { formatBytes, markdownToHtml } from "../../lib/format";
 import type {
   ChatConversation,
   ChatMessage,
+  ChatMessageRuntimeTrace,
   ChatConversationRuntimeState,
   ChatToolCall,
   FileDropEntry,
@@ -334,7 +335,6 @@ export function ChatWorkspace({
     })),
   });
   const runtimeToolCalls = runtimeState?.toolCalls ?? [];
-  const executeToolCalls = runtimeToolCalls.filter((toolCall) => toolCall.kind === "execute");
   const selectedTerminalIds = new Set(
     runtimeToolCalls.flatMap((toolCall) =>
       toolCall.content
@@ -723,62 +723,30 @@ export function ChatWorkspace({
     );
   }
 
-  function renderThinkingCard() {
-    const hasThinkingContent = Boolean(reasoningText) || busy;
+  function renderThinkingCard(
+    thoughtText: string,
+    options?: { isStreaming?: boolean; fallbackText?: string; keyPrefix?: string },
+  ) {
+    const hasThinkingContent = Boolean(thoughtText) || options?.isStreaming;
 
     if (!hasThinkingContent) {
       return null;
     }
 
     return (
-      <Reasoning key="runtime-thinking" isStreaming={runtimeInProgress}>
+      <Reasoning key={`${options?.keyPrefix ?? "runtime"}-thinking`} isStreaming={options?.isStreaming}>
         <ReasoningTrigger />
-        <ReasoningContent>
-          {reasoningText || (cancelInFlight ? "Stopping current reply..." : "Generating reasoning...")}
-        </ReasoningContent>
+        <ReasoningContent>{thoughtText || options?.fallbackText || "Generating reasoning..."}</ReasoningContent>
       </Reasoning>
     );
   }
 
-  function renderExecuteToolGroup() {
-    if (executeToolCalls.length === 0) {
-      return null;
-    }
-
-    return (
-      <details key="runtime-execute-group" className="activity-card tool-message-card codex-command-group">
-        <summary className="codex-command-group-summary">
-          <span className="codex-command-group-title">
-            已执行 {executeToolCalls.length} 条命令
-          </span>
-          <ChevronDown size={14} className="codex-command-group-chevron" />
-        </summary>
-        <div className="codex-command-group-body">
-          {executeToolCalls.map((toolCall) => {
-            const label = extractExecuteLabel(toolCall);
-            const rowStatus = statusClassName(toolCall.status);
-            const rowPrefix =
-              toolCall.status === "failed"
-                ? "失败"
-                : toolCall.status === "pending"
-                  ? "排队中"
-                  : toolCall.status === "in_progress"
-                    ? "执行中"
-                    : "已执行";
-
-            return (
-              <div key={toolCall.toolCallId} className={`codex-command-row ${rowStatus}`} title={label}>
-                <span className="codex-command-row-prefix">{rowPrefix}</span>
-                <span className="codex-command-row-command">{label}</span>
-              </div>
-            );
-          })}
-        </div>
-      </details>
-    );
-  }
-
-  function renderToolCard(toolCall: ChatToolCall) {
+  function renderToolCard(
+    toolCall: ChatToolCall,
+    terminalOutputs: Record<string, NonNullable<ChatMessageRuntimeTrace["terminalOutputs"]>[string]>,
+    runtimeInProgressForCard: boolean,
+    keyPrefix: string,
+  ) {
     const visibleContent = toolCall.content.filter((content) => {
       if (content.type === "text") {
         return hasVisibleText(content.text);
@@ -788,9 +756,9 @@ export function ChatWorkspace({
         return hasVisibleText(content.newText) || hasVisibleText(content.oldText) || hasVisibleText(content.path);
       }
 
-      const terminal = runtimeState?.terminalOutputs[content.terminalId];
+      const terminal = terminalOutputs[content.terminalId];
       if (!terminal) {
-        return runtimeInProgress;
+        return runtimeInProgressForCard;
       }
 
       return hasVisibleText(terminal.output) || terminal.exitCode !== null || terminal.signal !== null;
@@ -803,7 +771,7 @@ export function ChatWorkspace({
     }
 
     return (
-      <details key={toolCall.toolCallId} className="activity-card tool-message-card">
+      <details key={`${keyPrefix}-${toolCall.toolCallId}`} className="activity-card tool-message-card">
         <summary className="activity-summary">
           <div className="activity-summary-main">
             <div className="activity-summary-title">
@@ -859,12 +827,10 @@ export function ChatWorkspace({
               );
             }
 
-            const terminal = runtimeState?.terminalOutputs[content.terminalId];
+            const terminal = terminalOutputs[content.terminalId];
             return (
               <div key={`${toolCall.toolCallId}-terminal-${index}`} className="activity-panel">
-                <span className="activity-panel-label">
-                  终端 {content.terminalId.slice(0, 8)}
-                </span>
+                <span className="activity-panel-label">终端 {content.terminalId.slice(0, 8)}</span>
                 <pre>{terminal?.output || "等待终端输出..."}</pre>
               </div>
             );
@@ -888,18 +854,24 @@ export function ChatWorkspace({
     );
   }
 
-  function renderUnlinkedTerminals() {
-    const visibleTerminals = unlinkedTerminalOutputs.filter(
-      (terminal) =>
-        hasVisibleText(terminal.output) || terminal.exitCode !== null || terminal.signal !== null,
-    );
+  function renderUnlinkedTerminals(
+    terminalOutputs: Record<string, NonNullable<ChatMessageRuntimeTrace["terminalOutputs"]>[string]>,
+    linkedTerminalIds: Set<string>,
+    keyPrefix: string,
+  ) {
+    const visibleTerminals = Object.values(terminalOutputs)
+      .filter((terminal) => !linkedTerminalIds.has(terminal.terminalId))
+      .filter(
+        (terminal) =>
+          hasVisibleText(terminal.output) || terminal.exitCode !== null || terminal.signal !== null,
+      );
 
     if (visibleTerminals.length === 0) {
       return null;
     }
 
     return visibleTerminals.map((terminal) => (
-      <details key={terminal.terminalId} className="activity-card tool-message-card">
+      <details key={`${keyPrefix}-${terminal.terminalId}`} className="activity-card tool-message-card">
         <summary className="activity-summary">
           <div className="activity-summary-main">
             <div className="activity-summary-title">
@@ -935,6 +907,69 @@ export function ChatWorkspace({
     ));
   }
 
+  function renderTraceBlocks(
+    trace: Pick<
+      ChatMessageRuntimeTrace,
+      "thoughtText" | "toolCalls" | "terminalOutputs" | "error"
+    > | null | undefined,
+    options: { keyPrefix: string; isStreaming?: boolean; fallbackText?: string },
+  ) {
+    if (!trace) {
+      return [];
+    }
+
+    const blocks: JSX.Element[] = [];
+    const linkedTerminalIds = new Set(
+      trace.toolCalls.flatMap((toolCall) =>
+        toolCall.content
+          .filter((content) => content.type === "terminal")
+          .map((content) => content.terminalId),
+      ),
+    );
+
+    const thinkingCard = renderThinkingCard(trace.thoughtText.trim(), {
+      isStreaming: options.isStreaming,
+      fallbackText: options.fallbackText,
+      keyPrefix: options.keyPrefix,
+    });
+    if (thinkingCard) {
+      blocks.push(thinkingCard);
+    }
+
+    trace.toolCalls
+      .forEach((toolCall) => {
+        const toolCard = renderToolCard(
+          toolCall,
+          trace.terminalOutputs,
+          Boolean(options.isStreaming),
+          options.keyPrefix,
+        );
+        if (toolCard) {
+          blocks.push(toolCard);
+        }
+      });
+
+    const unlinkedTerminalCards = renderUnlinkedTerminals(
+      trace.terminalOutputs,
+      linkedTerminalIds,
+      options.keyPrefix,
+    );
+    if (unlinkedTerminalCards) {
+      blocks.push(...unlinkedTerminalCards);
+    }
+
+    if (trace.error) {
+      blocks.push(
+        <div key={`${options.keyPrefix}-error`} className="message-text error">
+          <strong>智能体执行失败</strong>
+          <p>{trace.error}</p>
+        </div>,
+      );
+    }
+
+    return blocks;
+  }
+
   function renderMessage(message: ChatMessage) {
     const parsedMessage =
       message.role === "assistant"
@@ -949,6 +984,13 @@ export function ChatWorkspace({
     return (
       <div key={message.id} className={`message-row ${message.role === "user" ? "user" : ""}`}>
         <div className={`message-bubble ${message.role === "user" ? "user" : ""}`}>
+          {message.role === "assistant" && message.runtimeTrace ? (
+            <div className="message-runtime-stack">
+              {renderTraceBlocks(message.runtimeTrace, {
+                keyPrefix: `message-${message.id}`,
+              })}
+            </div>
+          ) : null}
           {message.attachments?.length ? renderAttachmentList(message.attachments) : null}
           {parsedMessage.text ? (
             message.role === "assistant" ? (
@@ -1089,43 +1131,25 @@ export function ChatWorkspace({
       return null;
     }
 
-    const runtimeBlocks: JSX.Element[] = [];
-    const thinkingCard = renderThinkingCard();
-    if (thinkingCard) {
-      runtimeBlocks.push(thinkingCard);
-    }
-
-    const executeToolGroup = renderExecuteToolGroup();
-    if (executeToolGroup) {
-      runtimeBlocks.push(executeToolGroup);
-    }
-
-    runtimeToolCalls
-      .filter((toolCall) => toolCall.kind !== "execute")
-      .forEach((toolCall) => {
-      const toolCard = renderToolCard(toolCall);
-      if (toolCard) {
-        runtimeBlocks.push(toolCard);
-      }
-      });
-
-    const unlinkedTerminalCards = renderUnlinkedTerminals();
-    if (unlinkedTerminalCards) {
-      runtimeBlocks.push(...unlinkedTerminalCards);
-    }
-
-    if (runtimeState?.status === "failed" && runtimeState.error) {
-      runtimeBlocks.push(
-        <div key="runtime-error" className="message-row">
-          <div className="message-bubble">
-            <div className="message-text error">
-              <strong>智能体执行失败</strong>
-              <p>{runtimeState.error}</p>
-            </div>
-          </div>
-        </div>,
-      );
-    }
+    const lastAssistantHasPersistedTrace = Boolean(
+      lastMessage?.role === "assistant" && lastMessage.runtimeTrace,
+    );
+    const runtimeBlocks =
+      runtimeState && (runtimeInProgress || !lastAssistantHasPersistedTrace)
+        ? renderTraceBlocks(
+            {
+              thoughtText: runtimeState.thoughtText,
+              toolCalls: runtimeState.toolCalls,
+              terminalOutputs: runtimeState.terminalOutputs,
+              error: runtimeState.status === "failed" ? runtimeState.error : undefined,
+            },
+            {
+              keyPrefix: "runtime",
+              isStreaming: runtimeInProgress,
+              fallbackText: cancelInFlight ? "Stopping current reply..." : "Generating reasoning...",
+            },
+          )
+        : [];
 
     const hasRuntimeActivity = runtimeBlocks.length > 0;
     const inlineAssistantMessage =
@@ -1167,6 +1191,9 @@ export function ChatWorkspace({
         {isHome ? (
           <div className="chat-home chat-home-upgraded">
             <div className="chat-home-stage">
+              <div className="chat-home-center-copy">
+                <h1>开启新的会话</h1>
+              </div>
               <div className="chat-home-composer-shell">
                 {renderComposer(true)}
               </div>

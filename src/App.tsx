@@ -897,6 +897,32 @@ export default function App() {
         return;
       }
 
+      if (event.type === "message_runtime_trace_updated") {
+        const now = Date.now();
+
+        setActiveConversation((current) => {
+          if (!current || current.id !== event.conversationId) {
+            return current;
+          }
+
+          return {
+            ...current,
+            messages: current.messages.map((message) =>
+              message.id === event.messageId
+                ? {
+                    ...message,
+                    runtimeTrace: event.runtimeTrace,
+                    updatedAt: now,
+                  }
+                : message,
+            ),
+            updatedAt: now,
+          };
+        });
+
+        return;
+      }
+
       if (event.type === "plan_updated") {
         setConversationRuntimeStates((current) => {
           const previous = current[event.conversationId] ?? createConversationRuntimeState("running");

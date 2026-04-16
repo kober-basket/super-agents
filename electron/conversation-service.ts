@@ -7,6 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type {
   ChatConversation,
   ChatConversationListPayload,
+  ChatMessageRuntimeTrace,
   ChatConversationSummary,
   ChatMessage,
   ChatSendInput,
@@ -38,6 +39,7 @@ interface MessageRow {
   content: string;
   attachments_json: string | null;
   visuals_json: string | null;
+  runtime_trace_json: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -107,6 +109,42 @@ function parseVisuals(value: string | null): ChatVisual[] {
     return normalizeChatVisualPayload(parsed).visuals;
   } catch {
     return [];
+  }
+}
+
+function createEmptyRuntimeTrace(): ChatMessageRuntimeTrace {
+  return {
+    planEntries: [],
+    toolCalls: [],
+    terminalOutputs: {},
+    thoughtText: "",
+  };
+}
+
+function parseRuntimeTrace(value: string | null): ChatMessageRuntimeTrace | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<ChatMessageRuntimeTrace> | null;
+    if (!parsed || typeof parsed !== "object") {
+      return undefined;
+    }
+
+    return {
+      planEntries: Array.isArray(parsed.planEntries) ? parsed.planEntries : [],
+      toolCalls: Array.isArray(parsed.toolCalls) ? parsed.toolCalls : [],
+      terminalOutputs:
+        parsed.terminalOutputs && typeof parsed.terminalOutputs === "object"
+          ? parsed.terminalOutputs
+          : {},
+      thoughtText: typeof parsed.thoughtText === "string" ? parsed.thoughtText : "",
+      stopReason: typeof parsed.stopReason === "string" ? parsed.stopReason : undefined,
+      error: typeof parsed.error === "string" ? parsed.error : undefined,
+    };
+  } catch {
+    return undefined;
   }
 }
 
@@ -181,9 +219,10 @@ function mapMessage(row: MessageRow): ChatMessage {
     content: parsedAssistantMessage?.text ?? row.content,
     visuals: parsedAssistantMessage?.visuals.length
       ? parsedAssistantMessage.visuals
-      : visuals.length
-        ? visuals
-        : undefined,
+        : visuals.length
+          ? visuals
+          : undefined,
+    runtimeTrace: row.role === "assistant" ? parseRuntimeTrace(row.runtime_trace_json) : undefined,
     attachments: parseAttachments(row.attachments_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -213,17 +252,18 @@ export class ConversationService {
         preview TEXT NOT NULL DEFAULT ''
       );
 
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        conversation_id TEXT NOT NULL,
-        role TEXT NOT NULL,
-        content TEXT NOT NULL,
-        attachments_json TEXT,
-        visuals_json TEXT NOT NULL DEFAULT '[]',
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-      );
+        CREATE TABLE IF NOT EXISTS messages (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          attachments_json TEXT,
+          visuals_json TEXT NOT NULL DEFAULT '[]',
+          runtime_trace_json TEXT NOT NULL DEFAULT '',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        );
 
       CREATE INDEX IF NOT EXISTS idx_conversations_last_message_at
       ON conversations(last_message_at DESC, created_at DESC);
@@ -236,6 +276,7 @@ export class ConversationService {
     this.ensureConversationColumn(database, "agent_session_id", "TEXT NOT NULL DEFAULT ''");
     this.ensureConversationColumn(database, "selected_knowledge_base_ids_json", "TEXT NOT NULL DEFAULT '[]'");
     this.ensureMessageColumn(database, "visuals_json", "TEXT NOT NULL DEFAULT '[]'");
+    this.ensureMessageColumn(database, "runtime_trace_json", "TEXT NOT NULL DEFAULT ''");
 
     this.database = database;
   }
@@ -286,6 +327,7 @@ export class ConversationService {
           content,
           attachments_json,
           visuals_json,
+          runtime_trace_json,
           created_at,
           updated_at
         FROM messages
@@ -326,6 +368,7 @@ export class ConversationService {
     const preview = buildConversationPreview(content, attachments);
       const attachmentsJson = JSON.stringify(attachments);
       const emptyVisualsJson = "[]";
+      const emptyRuntimeTraceJson = JSON.stringify(createEmptyRuntimeTrace());
       const userMessageId = randomUUID();
       const assistantMessageId = randomUUID();
     let transactionStarted = false;
@@ -381,17 +424,37 @@ export class ConversationService {
 
       database
         .prepare(`
-          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, runtime_trace_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
-        .run(userMessageId, conversationId, "user", content, attachmentsJson, emptyVisualsJson, now, now);
+        .run(
+          userMessageId,
+          conversationId,
+          "user",
+          content,
+          attachmentsJson,
+          emptyVisualsJson,
+          "",
+          now,
+          now,
+        );
 
       database
         .prepare(`
-          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, runtime_trace_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
-        .run(assistantMessageId, conversationId, "assistant", "", "[]", emptyVisualsJson, now + 1, now + 1);
+        .run(
+          assistantMessageId,
+          conversationId,
+          "assistant",
+          "",
+          "[]",
+          emptyVisualsJson,
+          emptyRuntimeTraceJson,
+          now + 1,
+          now + 1,
+        );
 
       database
         .prepare(`
@@ -431,19 +494,21 @@ export class ConversationService {
     messageId: string,
     content: string,
     visuals: ChatVisual[] = [],
+    runtimeTrace?: ChatMessageRuntimeTrace,
   ): Promise<void> {
     const database = this.getDatabase();
     const now = Date.now();
     const preview = buildAssistantPreview(content, visuals);
     const visualsJson = JSON.stringify(visuals);
+    const runtimeTraceJson = JSON.stringify(runtimeTrace ?? createEmptyRuntimeTrace());
 
     database
       .prepare(`
         UPDATE messages
-        SET content = ?, visuals_json = ?, updated_at = ?
+        SET content = ?, visuals_json = ?, runtime_trace_json = ?, updated_at = ?
         WHERE id = ? AND conversation_id = ? AND role = 'assistant'
       `)
-      .run(content, visualsJson, now, messageId, conversationId);
+      .run(content, visualsJson, runtimeTraceJson, now, messageId, conversationId);
 
     database
       .prepare(`
@@ -494,6 +559,7 @@ export class ConversationService {
     const preview = buildAssistantPreview(assistantContent, []);
     const attachmentsJson = JSON.stringify(attachments);
     const emptyVisualsJson = "[]";
+    const emptyRuntimeTraceJson = JSON.stringify(createEmptyRuntimeTrace());
     let transactionStarted = false;
 
     try {
@@ -536,17 +602,27 @@ export class ConversationService {
 
       database
         .prepare(`
-          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, runtime_trace_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
-        .run(randomUUID(), conversationId, "user", content, attachmentsJson, emptyVisualsJson, now, now);
+        .run(randomUUID(), conversationId, "user", content, attachmentsJson, emptyVisualsJson, "", now, now);
 
       database
         .prepare(`
-          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO messages (id, conversation_id, role, content, attachments_json, visuals_json, runtime_trace_json, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
-        .run(randomUUID(), conversationId, "assistant", assistantContent, "[]", emptyVisualsJson, now + 1, now + 1);
+        .run(
+          randomUUID(),
+          conversationId,
+          "assistant",
+          assistantContent,
+          "[]",
+          emptyVisualsJson,
+          emptyRuntimeTraceJson,
+          now + 1,
+          now + 1,
+        );
 
       database
         .prepare(`
