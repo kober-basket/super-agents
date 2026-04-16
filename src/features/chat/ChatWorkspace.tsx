@@ -69,29 +69,6 @@ interface ChatWorkspaceProps {
   scrollToBottomRequest: number;
 }
 
-const HOME_PROMPT_CARDS = [
-  {
-    label: "拆解需求",
-    description: "理清目标、约束、风险和执行步骤",
-    value: "帮我拆解这个需求，按目标、约束、风险和执行步骤整理出来。",
-  },
-  {
-    label: "写页面文案",
-    description: "补标题、副标题、卖点和按钮文案",
-    value: "帮我写这个页面的文案，包含标题、副标题、核心卖点和按钮文案。",
-  },
-  {
-    label: "规划任务",
-    description: "把任务拆成可以直接执行的小步骤",
-    value: "帮我规划实现任务，给我一个清晰的分步执行方案。",
-  },
-  {
-    label: "优化界面",
-    description: "从布局、层级和交互上给出改进建议",
-    value: "帮我优化这个界面，重点看布局、视觉层级和交互体验。",
-  },
-];
-
 function formatCompactModelLabel(label: string) {
   const trimmed = label.trim();
   if (!trimmed) return "选择模型";
@@ -1041,7 +1018,7 @@ export function ChatWorkspace({
             : "当前环境暂不支持语音输入";
 
     return (
-      <div className={`chat-composer-card ${home ? "chat-composer-home" : ""}`}>
+      <div className="chat-composer-card">
         {renderAttachmentList(attachments, true)}
         {renderActiveKnowledgeChips()}
         <textarea
@@ -1118,12 +1095,19 @@ export function ChatWorkspace({
       runtimeBlocks.push(thinkingCard);
     }
 
-    runtimeToolCalls.forEach((toolCall) => {
+    const executeToolGroup = renderExecuteToolGroup();
+    if (executeToolGroup) {
+      runtimeBlocks.push(executeToolGroup);
+    }
+
+    runtimeToolCalls
+      .filter((toolCall) => toolCall.kind !== "execute")
+      .forEach((toolCall) => {
       const toolCard = renderToolCard(toolCall);
       if (toolCard) {
         runtimeBlocks.push(toolCard);
       }
-    });
+      });
 
     const unlinkedTerminalCards = renderUnlinkedTerminals();
     if (unlinkedTerminalCards) {
@@ -1182,29 +1166,10 @@ export function ChatWorkspace({
       <div className="chat-column chat-workspace-shell">
         {isHome ? (
           <div className="chat-home chat-home-upgraded">
-            <div className="chat-home-stage">              <div className="chat-home-copy">
-                <h2>开始新会话</h2>
-                <p>直接输入问题，或选一个常用任务快速开始。</p>
-              </div>
-
+            <div className="chat-home-stage">
               <div className="chat-home-composer-shell">
                 {renderComposer(true)}
               </div>
-            </div>
-
-            <div className="chat-home-prompt-grid">
-              {HOME_PROMPT_CARDS.map((prompt) => (
-                <button
-                  key={prompt.label}
-                  className="chat-home-prompt"
-                  onClick={() => applyHomePrompt(prompt.value)}
-                  type="button"
-                >
-                  <span className="chat-home-prompt-kicker">快速开始</span>
-                  <strong>{prompt.label}</strong>
-                  <span>{prompt.description}</span>
-                </button>
-              ))}
             </div>
           </div>
         ) : (
