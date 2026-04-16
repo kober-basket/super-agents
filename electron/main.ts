@@ -11,9 +11,19 @@ import { AcpRuntimeManager } from "./acp-runtime-manager";
 import { ChatOrchestrator } from "./chat-orchestrator";
 import { ConversationService } from "./conversation-service";
 import { McpInspector } from "./mcp-inspector";
+import { summarizeMapToolResult } from "./project-report";
 import { RemoteControlService } from "./remote-control-service";
 import { WorkspaceService } from "./workspace-service";
-import type { AppConfig, ChatEvent, DesktopWindowState, WorkspaceTool } from "../src/types";
+import type {
+  AppConfig,
+  ChatEvent,
+  DesktopWindowState,
+  EmergencyPlanInput,
+  McpServerConfig,
+  McpToolInfo,
+  ProjectReportInput,
+  WorkspaceTool,
+} from "../src/types";
 
 app.setName(APP_NAME);
 app.setPath("userData", path.join(app.getPath("appData"), APP_DATA_DIR));
@@ -32,6 +42,103 @@ function isTrustedDesktopOrigin(origin: string) {
     /^https?:\/\/127\.0\.0\.1(?::\d+)?$/i.test(origin) ||
     /^https?:\/\/localhost(?::\d+)?$/i.test(origin)
   );
+}
+
+function isLikelyMapTool(tool: Pick<WorkspaceTool, "name" | "title" | "description">) {
+  const text = [tool.name, tool.title, tool.description].filter(Boolean).join(" ").toLowerCase();
+  return /(map|geo|geocode|coordinate|location|amap|gaode|baidu|tencent|place|poi|reverse)/i.test(text);
+}
+
+function inferMapArguments(tool: McpToolInfo, input: ProjectReportInput) {
+  const params = tool.parameters.map((item) => item.name);
+  const lowerMap = new Map(params.map((name) => [name.toLowerCase(), name]));
+  const args: Record<string, unknown> = {};
+  const query = [input.projectName, input.projectLocation, input.projectType].filter(Boolean).join(" ").trim();
+  const lng = input.longitude?.trim();
+  const lat = input.latitude?.trim();
+  const location = lng && lat ? `${lng},${lat}` : "";
+
+  const assign = (candidates: string[], value: unknown) => {
+    if (value === undefined || value === null || value === "") return;
+    for (const key of candidates) {
+      const matched = lowerMap.get(key);
+      if (matched && args[matched] === undefined) {
+        args[matched] = value;
+        return;
+      }
+    }
+  };
+
+  assign(["query", "q", "keyword", "keywords", "address", "input", "text"], query);
+  assign(["projectname", "project_name", "name"], input.projectName.trim());
+  assign(["location", "coordinates", "coord", "center", "lnglat"], location || input.projectLocation?.trim());
+  assign(["longitude", "lng", "lon"], lng);
+  assign(["latitude", "lat"], lat);
+  assign(["addressdetail", "formatted_address", "region", "city"], input.projectLocation?.trim());
+
+  if (Object.keys(args).length === 0 && params.length > 0) {
+    args[params[0]] = location || query || input.projectName.trim();
+  }
+
+  return args;
+}
+
+async function resolveMapSummary(input: ProjectReportInput, config: AppConfig) {
+  const selectedServerId = input.preferredMapServerId?.trim();
+  const selectedToolName = input.preferredMapToolName?.trim();
+  const servers = config.mcpServers.filter((server) => server.enabled !== false);
+
+  const candidates: Array<{ server: McpServerConfig; toolName?: string }> = selectedServerId
+    ? servers
+        .filter((server) => server.id === selectedServerId)
+        .map((server) => ({ server, toolName: selectedToolName }))
+    : servers.map((server) => ({ server }));
+
+  for (const candidate of candidates) {
+    try {
+      const inspected = await mcpInspector.inspectServer({
+        server: candidate.server,
+        workspaceRoot: input.workspaceRoot || config.workspaceRoot,
+      });
+      const tool =
+        (candidate.toolName
+          ? inspected.tools.find((item) => item.name === candidate.toolName)
+          : inspected.tools.find((item) =>
+              isLikelyMapTool({
+                name: item.name,
+                title: item.title,
+                description: item.description,
+              }),
+            )) ?? null;
+      if (!tool) continue;
+
+      const argumentsJson = JSON.stringify(inferMapArguments(tool, input));
+      const result = await mcpInspector.debugTool({
+        server: candidate.server,
+        workspaceRoot: input.workspaceRoot || config.workspaceRoot,
+        toolName: tool.name,
+        argumentsJson,
+      });
+      if (result.isError) continue;
+
+      return {
+        mapSummary: summarizeMapToolResult(result),
+        mapToolUsed: `${candidate.server.name} / ${tool.name}`,
+      };
+    } catch {
+      continue;
+    }
+  }
+
+  return {
+    mapSummary: [
+      input.projectLocation?.trim(),
+      input.longitude && input.latitude ? `Coordinates: ${input.longitude}, ${input.latitude}` : "",
+    ]
+      .filter(Boolean)
+      .join("; "),
+    mapToolUsed: undefined,
+  };
 }
 
 function configureMediaPermissions() {
@@ -265,6 +372,24 @@ app.whenReady().then(async () => {
       return await service!.searchKnowledgeBases(payload);
     },
   );
+
+  ipcMain.handle("desktop:generate-project-report", async (_event, payload: ProjectReportInput) => {
+    const bootstrap = await service!.bootstrap();
+    const mapPayload = await resolveMapSummary(payload, bootstrap.config);
+    return await service!.generateProjectReport({
+      ...payload,
+      workspaceRoot: payload.workspaceRoot || bootstrap.config.workspaceRoot,
+      ...mapPayload,
+    });
+  });
+
+  ipcMain.handle("desktop:generate-emergency-plan", async (_event, payload: EmergencyPlanInput) => {
+    const bootstrap = await service!.bootstrap();
+    return await service!.generateEmergencyPlan({
+      ...payload,
+      workspaceRoot: payload.workspaceRoot || bootstrap.config.workspaceRoot,
+    });
+  });
 
   ipcMain.handle("desktop:uninstall-skill", async (_event, skillId: string) => {
     const payload = await service!.uninstallSkill(skillId);

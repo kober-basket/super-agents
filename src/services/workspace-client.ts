@@ -26,6 +26,10 @@ export const workspaceClient = {
     window.desktopAgent.deleteKnowledgeItem(payload),
   searchKnowledgeBases: (payload: Parameters<typeof window.desktopAgent.searchKnowledgeBases>[0]) =>
     window.desktopAgent.searchKnowledgeBases(payload),
+  generateProjectReport: (payload: Parameters<typeof window.desktopAgent.generateProjectReport>[0]) =>
+    window.desktopAgent.generateProjectReport(payload),
+  generateEmergencyPlan: (payload: Parameters<typeof window.desktopAgent.generateEmergencyPlan>[0]) =>
+    window.desktopAgent.generateEmergencyPlan(payload),
   uninstallSkill: (skillId: string) => window.desktopAgent.uninstallSkill(skillId),
   updateConfig: (patch: Parameters<typeof window.desktopAgent.updateConfig>[0]) =>
     window.desktopAgent.updateConfig(patch),

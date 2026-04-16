@@ -10,6 +10,8 @@ import type {
   ChatTurnStartResult,
   BootstrapPayload,
   DesktopWindowState,
+  EmergencyPlanInput,
+  EmergencyPlanResult,
   FileDropEntry,
   KnowledgeCatalogPayload,
   KnowledgeAddDirectoryInput,
@@ -26,6 +28,8 @@ import type {
   McpToolDebugResult,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
+  ProjectReportInput,
+  ProjectReportResult,
   RemoteControlStatus,
   WechatLoginStartResult,
   WechatLoginWaitResult,
@@ -52,6 +56,8 @@ declare global {
       deleteKnowledgeBase: (baseId: string) => Promise<KnowledgeCatalogPayload>;
       deleteKnowledgeItem: (payload: KnowledgeDeleteItemInput) => Promise<KnowledgeCatalogPayload>;
       searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) => Promise<KnowledgeSearchPayload>;
+      generateProjectReport: (payload: ProjectReportInput) => Promise<ProjectReportResult>;
+      generateEmergencyPlan: (payload: EmergencyPlanInput) => Promise<EmergencyPlanResult>;
       uninstallSkill: (skillId: string) => Promise<BootstrapPayload>;
       updateConfig: (patch: Partial<AppConfig>) => Promise<BootstrapPayload>;
       getRemoteControlStatus: () => Promise<RemoteControlStatus>;

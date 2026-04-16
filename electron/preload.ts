@@ -12,6 +12,8 @@ import type {
   ChatTurnStartResult,
   BootstrapPayload,
   DesktopWindowState,
+  EmergencyPlanInput,
+  EmergencyPlanResult,
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeCatalogPayload,
@@ -28,6 +30,8 @@ import type {
   McpToolDebugResult,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
+  ProjectReportInput,
+  ProjectReportResult,
   RemoteControlStatus,
   WechatLoginStartResult,
   WechatLoginWaitResult,
@@ -68,6 +72,10 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:delete-knowledge-item", payload) as Promise<KnowledgeCatalogPayload>,
   searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) =>
     ipcRenderer.invoke("desktop:search-knowledge-bases", payload) as Promise<KnowledgeSearchPayload>,
+  generateProjectReport: (payload: ProjectReportInput) =>
+    ipcRenderer.invoke("desktop:generate-project-report", payload) as Promise<ProjectReportResult>,
+  generateEmergencyPlan: (payload: EmergencyPlanInput) =>
+    ipcRenderer.invoke("desktop:generate-emergency-plan", payload) as Promise<EmergencyPlanResult>,
   uninstallSkill: (skillId: string) =>
     ipcRenderer.invoke("desktop:uninstall-skill", skillId) as Promise<BootstrapPayload>,
   updateConfig: (patch: Partial<AppConfig>) =>

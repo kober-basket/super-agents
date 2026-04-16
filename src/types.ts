@@ -1,4 +1,11 @@
-export type AppSection = "chat" | "skills" | "tools" | "knowledge" | "settings";
+export type AppSection =
+  | "chat"
+  | "skills"
+  | "tools"
+  | "knowledge"
+  | "reports"
+  | "emergency"
+  | "settings";
 export type AppearanceThemeId =
   | "linen"
   | "ocean"
@@ -257,6 +264,62 @@ export interface KnowledgeSearchPayload {
   results: KnowledgeSearchResultItem[];
   searchedBases: Array<{ id: string; name: string }>;
   warnings: string[];
+}
+
+export interface ProjectReportInput {
+  knowledgeBaseId: string;
+  projectName: string;
+  projectType?: string;
+  projectLocation?: string;
+  longitude?: string;
+  latitude?: string;
+  projectOverview?: string;
+  policyFocus?: string;
+  outputDirectory?: string;
+  outputFileName?: string;
+  workspaceRoot?: string;
+  preferredMapServerId?: string;
+  preferredMapToolName?: string;
+}
+
+export interface ProjectReportResult {
+  outputPath: string;
+  fileName: string;
+  generatedAt: number;
+  locationSummary?: string;
+  mapToolUsed?: string;
+  references: KnowledgeSearchResultItem[];
+  content: string;
+}
+
+export interface EmergencyPlanInput {
+  projectName: string;
+  projectType?: string;
+  projectLocation?: string;
+  companyName?: string;
+  industryCategory?: string;
+  riskSources?: string;
+  emergencyResources?: string;
+  projectOverview?: string;
+  specialRequirements?: string;
+  templateFiles: FileDropEntry[];
+  outputDirectory?: string;
+  outputFileName?: string;
+  workspaceRoot?: string;
+}
+
+export interface EmergencyPlanResult {
+  outputPath: string;
+  fileName: string;
+  generatedAt: number;
+  templateCount: number;
+  recognizedTemplates: Array<{
+    name: string;
+    path: string;
+    kind: string;
+    excerpt: string;
+  }>;
+  content: string;
 }
 
 export interface KnowledgeInjectionMeta {

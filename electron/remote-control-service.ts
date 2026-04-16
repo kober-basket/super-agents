@@ -41,6 +41,7 @@ interface RemoteControlPersistedState {
   peers: RemotePeerBinding[];
   wechat: {
     syncCursorByAccountId: Record<string, string>;
+    recentMessageKeysByAccountId: Record<string, string[]>;
   };
 }
 
@@ -70,14 +71,18 @@ const DEFAULT_STATE: RemoteControlPersistedState = {
   peers: [],
   wechat: {
     syncCursorByAccountId: {},
+    recentMessageKeysByAccountId: {},
   },
 };
+
+const WECHAT_RECENT_MESSAGE_KEY_LIMIT = 200;
 
 function cloneDefaultState(): RemoteControlPersistedState {
   return {
     peers: [],
     wechat: {
       syncCursorByAccountId: {},
+      recentMessageKeysByAccountId: {},
     },
   };
 }
@@ -145,6 +150,39 @@ function normalizePeerBindings(value: unknown): RemotePeerBinding[] {
       };
     })
     .filter((item) => item.accountId && item.peerId);
+}
+
+function normalizeWechatRecentMessageKeys(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([accountId, keys]) => [
+        accountId.trim(),
+        Array.isArray(keys)
+          ? keys
+              .filter((item): item is string => typeof item === "string")
+              .map((item) => item.trim())
+              .filter(Boolean)
+              .slice(-WECHAT_RECENT_MESSAGE_KEY_LIMIT)
+          : [],
+      ])
+      .filter(([accountId, keys]) => accountId && keys.length > 0),
+  );
+}
+
+function buildWechatMessageDedupKey(message: WechatProtocolMessage) {
+  if (typeof message.message_id === "number" && Number.isFinite(message.message_id)) {
+    return `id:${message.message_id}`;
+  }
+
+  const fromUserId = message.from_user_id?.trim() || "";
+  const toUserId = message.to_user_id?.trim() || "";
+  const createTimeMs = message.create_time_ms ?? 0;
+  const text = extractWechatText(message);
+  return `fallback:${fromUserId}:${toUserId}:${createTimeMs}:${text}`;
 }
 
 export class RemoteControlService {
@@ -215,6 +253,9 @@ export class RemoteControlService {
           typeof loaded.wechat.syncCursorByAccountId === "object"
             ? loaded.wechat.syncCursorByAccountId
             : {},
+        recentMessageKeysByAccountId: normalizeWechatRecentMessageKeys(
+          loaded?.wechat?.recentMessageKeysByAccountId,
+        ),
       },
     };
     await this.syncWithConfig(config);
@@ -629,10 +670,35 @@ export class RemoteControlService {
         if (!isWechatUserMessage(message)) {
           continue;
         }
+        if (!(await this.markWechatMessageProcessed(profile.accountId, message))) {
+          continue;
+        }
         this.noteInbound("wechat");
         this.enqueueWechatMessage(profile, message);
       }
     }
+  }
+
+  private async markWechatMessageProcessed(
+    accountId: string,
+    message: WechatProtocolMessage,
+  ) {
+    const messageKey = buildWechatMessageDedupKey(message);
+    if (!messageKey) {
+      return true;
+    }
+
+    const recentKeys = this.state.wechat.recentMessageKeysByAccountId[accountId] ?? [];
+    if (recentKeys.includes(messageKey)) {
+      return false;
+    }
+
+    this.state.wechat.recentMessageKeysByAccountId[accountId] = [
+      ...recentKeys,
+      messageKey,
+    ].slice(-WECHAT_RECENT_MESSAGE_KEY_LIMIT);
+    await this.saveState();
+    return true;
   }
 
   private enqueueWechatMessage(profile: WechatAccountProfile, message: WechatProtocolMessage) {

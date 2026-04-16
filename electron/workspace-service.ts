@@ -1,5 +1,5 @@
 ﻿import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -30,6 +30,8 @@ import type {
   AudioTranscriptionInput,
   AudioTranscriptionResult,
   BootstrapPayload,
+  EmergencyPlanInput,
+  EmergencyPlanResult,
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeAddDirectoryInput,
@@ -46,11 +48,28 @@ import type {
   ModelProviderFetchInput,
   ModelProviderFetchResult,
   PreviewKind,
+  ProjectReportInput,
+  ProjectReportResult,
   ProxyConfig,
   SkillConfig,
   WorkspaceToolCatalog,
 } from "../src/types";
+import {
+  buildEmergencyPlanPrompt,
+  createDefaultEmergencyPlanFileName,
+  createEmergencyPlanDocBuffer,
+  recognizeEmergencyTemplate,
+  sanitizeEmergencyPlanFileName,
+} from "./emergency-plan";
 import { KnowledgeService } from "./knowledge-service";
+import {
+  buildProjectReportPrompt,
+  createDefaultReportFileName,
+  createProjectReportDocBuffer,
+  mergeKnowledgeResults,
+  resolveReportOutputPath,
+  sanitizeReportFileName,
+} from "./project-report";
 import { readJsonFile, writeJsonFile } from "./store";
 
 interface PersistedWorkspaceState {
@@ -386,6 +405,113 @@ function extractStringList(value: unknown): string[] {
   return value
     .map((item) => (typeof item === "string" ? item.trim().toLowerCase() : ""))
     .filter(Boolean);
+}
+
+function createChatCompletionsUrl(baseUrl: string) {
+  const normalized = normalizeBaseUrl(baseUrl);
+  if (!normalized) {
+    throw new Error("请先填写提供商接口地址");
+  }
+
+  return normalized.endsWith("/chat/completions")
+    ? normalized
+    : `${normalized}/chat/completions`;
+}
+
+function extractTextFromCompletionPayload(payload: unknown): string {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+
+  const record = payload as Record<string, unknown>;
+  const choices = Array.isArray(record.choices) ? record.choices : [];
+  const firstChoice =
+    choices.length > 0 && choices[0] && typeof choices[0] === "object"
+      ? (choices[0] as Record<string, unknown>)
+      : null;
+  const message =
+    firstChoice?.message && typeof firstChoice.message === "object"
+      ? (firstChoice.message as Record<string, unknown>)
+      : null;
+
+  if (typeof message?.content === "string") {
+    return message.content;
+  }
+
+  if (Array.isArray(message?.content)) {
+    return message.content
+      .map((part) => {
+        if (typeof part === "string") {
+          return part;
+        }
+        if (!part || typeof part !== "object") {
+          return "";
+        }
+        const value = part as Record<string, unknown>;
+        if (typeof value.text === "string") {
+          return value.text;
+        }
+        const nestedText =
+          value.text && typeof value.text === "object" ? (value.text as Record<string, unknown>).value : undefined;
+        return typeof nestedText === "string" ? nestedText : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (typeof record.output_text === "string") {
+    return record.output_text;
+  }
+
+  return "";
+}
+
+async function generateTextWithActiveModel(config: AppConfig, prompt: string): Promise<string> {
+  const activeModel = getActiveModelOption(config.modelProviders, config.activeModelId);
+  if (!activeModel) {
+    throw new Error("请先配置可用的默认模型");
+  }
+
+  const provider = config.modelProviders.find((item) => item.id === activeModel.providerId) ?? null;
+  if (!provider || provider.enabled === false) {
+    throw new Error("当前默认模型所属提供商不可用");
+  }
+  if (provider.kind !== "openai-compatible") {
+    throw new Error("当前仅支持 OpenAI 兼容模型生成报告");
+  }
+
+  const response = await fetch(createChatCompletionsUrl(provider.baseUrl), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...createOpenAiCompatibleHeaders(provider.apiKey),
+    },
+    body: JSON.stringify({
+      model: activeModel.modelId,
+      temperature: provider.temperature,
+      max_tokens: provider.maxTokens,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    }),
+  });
+
+  const rawText = await response.text();
+  const parsed = safeParseJson(rawText);
+
+  if (!response.ok) {
+    throw new Error(extractResponseErrorMessage(parsed ?? rawText, "模型生成失败"));
+  }
+
+  const content = extractTextFromCompletionPayload(parsed);
+  if (!content.trim()) {
+    throw new Error("模型未返回有效文本内容");
+  }
+
+  return content.trim();
 }
 
 function inferVendorName(record: Record<string, unknown>, id: string, label: string, description: string, group?: string) {
@@ -914,6 +1040,134 @@ export class WorkspaceService {
 
   async deleteKnowledgeItem(input: KnowledgeDeleteItemInput): Promise<KnowledgeCatalogPayload> {
     return await this.knowledge.deleteItem(input);
+  }
+
+  async generateProjectReport(
+    input: ProjectReportInput & { mapSummary?: string; mapToolUsed?: string },
+  ): Promise<ProjectReportResult> {
+    const state = await this.loadState();
+    const knowledgeBaseId = input.knowledgeBaseId.trim();
+    if (!knowledgeBaseId) {
+      throw new Error("请先选择知识库");
+    }
+    if (!input.projectName.trim()) {
+      throw new Error("请先输入项目名称");
+    }
+
+    const workspaceRoot = input.workspaceRoot?.trim() || state.config.workspaceRoot || process.cwd();
+    const outputDirectory = input.outputDirectory?.trim() || path.join(workspaceRoot, "reports");
+    const outputFileName = (() => {
+      const raw = input.outputFileName?.trim();
+      if (!raw) return createDefaultReportFileName(input);
+      return `${sanitizeReportFileName(raw.replace(/\.docx?$/i, ""))}.docx`;
+    })();
+
+    await mkdir(outputDirectory, { recursive: true });
+
+    const knowledgeQueries = [
+      input.projectName.trim(),
+      `${input.projectName.trim()} 环评 编制依据`,
+      `${input.projectName.trim()} 评价等级`,
+      `${input.projectName.trim()} 选址符合性`,
+      `${input.projectName.trim()} 政策符合性`,
+      input.projectLocation?.trim() ? `${input.projectLocation.trim()} ${input.projectName.trim()}` : "",
+    ].filter(Boolean);
+
+    const searchResults = await Promise.all(
+      knowledgeQueries.map((query) =>
+        this.searchKnowledgeBases({
+          query,
+          knowledgeBaseIds: [knowledgeBaseId],
+          documentCount: 6,
+        }).catch(() => ({
+          query,
+          total: 0,
+          results: [],
+          searchedBases: [],
+          warnings: [],
+        })),
+      ),
+    );
+
+    const references = mergeKnowledgeResults(searchResults.map((item) => item.results));
+    const draft = await generateTextWithActiveModel(
+      state.config,
+      buildProjectReportPrompt(input, references, input.mapSummary),
+    );
+    const filePath = resolveReportOutputPath(outputDirectory, outputFileName);
+    const buffer = await createProjectReportDocBuffer({
+      title: `${input.projectName.trim()} 环评分析报告`,
+      content: draft,
+      meta: [
+        `项目名称：${input.projectName.trim()}`,
+        input.projectLocation?.trim() ? `项目位置：${input.projectLocation.trim()}` : "",
+        input.mapToolUsed ? `地图工具：${input.mapToolUsed}` : "",
+        input.mapSummary ? `定位摘要：${input.mapSummary.slice(0, 140)}` : "",
+      ],
+    });
+
+    await writeFile(filePath, buffer);
+
+    return {
+      outputPath: filePath,
+      fileName: outputFileName,
+      generatedAt: Date.now(),
+      locationSummary: input.mapSummary,
+      mapToolUsed: input.mapToolUsed,
+      references,
+      content: draft,
+    };
+  }
+
+  async generateEmergencyPlan(input: EmergencyPlanInput): Promise<EmergencyPlanResult> {
+    const state = await this.loadState();
+    const projectName = input.projectName.trim();
+    if (!projectName) {
+      throw new Error("请先填写项目名称");
+    }
+    if (!Array.isArray(input.templateFiles) || input.templateFiles.length === 0) {
+      throw new Error("请至少选择一个 PDF 或 Word 模板文件");
+    }
+
+    const workspaceRoot = input.workspaceRoot?.trim() || state.config.workspaceRoot || process.cwd();
+    const outputDirectory = input.outputDirectory?.trim() || path.join(workspaceRoot, "emergency-plans");
+    await mkdir(outputDirectory, { recursive: true });
+
+    const recognizedTemplates = await Promise.all(input.templateFiles.map((file) => recognizeEmergencyTemplate(file)));
+    const fileName = sanitizeEmergencyPlanFileName(
+      input.outputFileName?.trim() || createDefaultEmergencyPlanFileName(input),
+    ).replace(/(?:\.docx)?$/i, ".docx");
+    const outputPath = path.join(outputDirectory, fileName);
+    const draft = await generateTextWithActiveModel(
+      state.config,
+      buildEmergencyPlanPrompt(input, recognizedTemplates),
+    );
+    const buffer = await createEmergencyPlanDocBuffer({
+      title: `${projectName} 突发环境事件应急预案`,
+      content: draft,
+      meta: [
+        input.companyName ? `企业名称：${input.companyName}` : "",
+        input.projectLocation ? `项目位置：${input.projectLocation}` : "",
+        `模板数量：${recognizedTemplates.length}`,
+        `生成时间：${new Date().toLocaleString("zh-CN", { hour12: false })}`,
+      ],
+    });
+
+    await writeFile(outputPath, buffer);
+
+    return {
+      outputPath,
+      fileName,
+      generatedAt: Date.now(),
+      templateCount: recognizedTemplates.length,
+      recognizedTemplates: recognizedTemplates.map((template) => ({
+        name: template.name,
+        path: template.path,
+        kind: template.kind,
+        excerpt: template.excerpt,
+      })),
+      content: draft,
+    };
   }
 
   async searchKnowledgeBases(input: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }): Promise<KnowledgeSearchPayload> {

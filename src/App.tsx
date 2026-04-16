@@ -18,11 +18,15 @@ import type {
   ChatConversationRuntimeState,
   ChatConversationSummary,
   DesktopWindowState,
+  EmergencyPlanInput,
+  EmergencyPlanResult,
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeBaseSummary,
   McpServerConfig,
   ModelProviderConfig,
+  ProjectReportInput,
+  ProjectReportResult,
   RemoteControlStatus,
   SkillConfig,
   WorkspaceTool,
@@ -59,6 +63,14 @@ const ToolsView = lazy(async () => {
 const KnowledgeView = lazy(async () => {
   const module = await import("./features/knowledge/KnowledgeView");
   return { default: module.KnowledgeView };
+});
+const ReportsView = lazy(async () => {
+  const module = await import("./features/reports/ReportsView");
+  return { default: module.ReportsView };
+});
+const EmergencyPlanView = lazy(async () => {
+  const module = await import("./features/emergency/EmergencyPlanView");
+  return { default: module.EmergencyPlanView };
 });
 const AssistantSettings = lazy(async () => {
   const module = await import("./features/settings/AssistantSettings");
@@ -319,6 +331,38 @@ export default function App() {
   const [providerRefreshErrors, setProviderRefreshErrors] = useState<Record<string, string>>({});
   const [selectedModelProviderId, setSelectedModelProviderId] = useState("");
   const [windowState, setWindowState] = useState<DesktopWindowState | null>(null);
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportResult, setReportResult] = useState<ProjectReportResult | null>(null);
+  const [emergencyGenerating, setEmergencyGenerating] = useState(false);
+  const [emergencyResult, setEmergencyResult] = useState<EmergencyPlanResult | null>(null);
+  const [reportForm, setReportForm] = useState<ProjectReportInput>({
+    knowledgeBaseId: "",
+    projectName: "",
+    projectType: "",
+    projectLocation: "",
+    longitude: "",
+    latitude: "",
+    projectOverview: "",
+    policyFocus: "",
+    outputDirectory: "",
+    outputFileName: "",
+    workspaceRoot: "",
+  });
+  const [emergencyForm, setEmergencyForm] = useState<EmergencyPlanInput>({
+    projectName: "",
+    companyName: "",
+    projectType: "",
+    industryCategory: "",
+    projectLocation: "",
+    projectOverview: "",
+    riskSources: "",
+    emergencyResources: "",
+    specialRequirements: "",
+    templateFiles: [],
+    outputDirectory: "",
+    outputFileName: "",
+    workspaceRoot: "",
+  });
   const [remoteStatus, setRemoteStatus] = useState<RemoteControlStatus | null>(null);
   const [remoteStatusRefreshing, setRemoteStatusRefreshing] = useState(false);
   const [wechatConnecting, setWechatConnecting] = useState(false);
@@ -403,6 +447,15 @@ export default function App() {
         matchQuery(skillQuery, [skill.name, skill.description, skill.location]),
       ),
     [availableSkills, skillQuery],
+  );
+  const reportMapTools = useMemo(
+    () =>
+      tools.filter((tool) =>
+        /(map|geo|geocode|coordinate|location|amap|gaode|baidu|tencent|place|poi|reverse)/i.test(
+          [tool.name, tool.title, tool.description, tool.origin].filter(Boolean).join(" "),
+        ),
+      ),
+    [tools],
   );
   useEffect(() => {
     if (!toast) return undefined;
@@ -550,7 +603,7 @@ export default function App() {
   }, [config.appearance.theme]);
 
   useEffect(() => {
-    if (view !== "tools" || toolsRefreshing || toolsLoadedRef.current) {
+    if ((view !== "tools" && view !== "reports") || toolsRefreshing || toolsLoadedRef.current) {
       return;
     }
 
@@ -558,12 +611,37 @@ export default function App() {
   }, [toolsRefreshing, view]);
 
   useEffect(() => {
-    if ((view !== "knowledge" && view !== "chat") || knowledgeRefreshing || knowledgeLoadedRef.current) {
+    if ((view !== "knowledge" && view !== "chat" && view !== "reports") || knowledgeRefreshing || knowledgeLoadedRef.current) {
       return;
     }
 
     void refreshKnowledgeView({ silent: true });
   }, [knowledgeRefreshing, view]);
+
+  useEffect(() => {
+    if (reportForm.workspaceRoot) {
+      return;
+    }
+    setReportForm((current) => ({ ...current, workspaceRoot: config.workspaceRoot || "" }));
+  }, [config.workspaceRoot, reportForm.workspaceRoot]);
+
+  useEffect(() => {
+    if (emergencyForm.workspaceRoot) {
+      return;
+    }
+    setEmergencyForm((current) => ({ ...current, workspaceRoot: config.workspaceRoot || "" }));
+  }, [config.workspaceRoot, emergencyForm.workspaceRoot]);
+
+  useEffect(() => {
+    if (reportForm.knowledgeBaseId) {
+      return;
+    }
+    const fallbackId = config.knowledgeBase.selectedBaseIds[0] || knowledgeBases[0]?.id || "";
+    if (!fallbackId) {
+      return;
+    }
+    setReportForm((current) => ({ ...current, knowledgeBaseId: fallbackId }));
+  }, [config.knowledgeBase.selectedBaseIds, knowledgeBases, reportForm.knowledgeBaseId]);
 
   useEffect(() => {
     if (view !== "settings" || settingsSection !== "remote-control") {
@@ -1250,11 +1328,16 @@ export default function App() {
     id: string;
     name: string;
     transport: "local" | "remote";
+    command?: string;
+    args?: string[];
+    url?: string;
+    headersJson?: string;
+    envJson?: string;
+    enabled?: boolean;
   }) {
     const normalized = sanitizeMcpName(server.name);
     if (config.mcpServers.some((item) => sanitizeMcpName(item.name) === normalized)) {
       setToast("这个服务草稿已经存在");
-      setView("tools");
       return;
     }
 
@@ -1264,18 +1347,37 @@ export default function App() {
         id: `mcp-${uid()}`,
         name: server.name,
         transport: server.transport,
-        command: server.transport === "local" ? "node" : "",
-        args: [],
-        url: "",
-        headersJson: "{}",
-        envJson: "{}",
-        enabled: false,
+        command: server.command ?? (server.transport === "local" ? "node" : ""),
+        args: server.args ?? [],
+        url: server.url ?? "",
+        headersJson: server.headersJson ?? "{}",
+        envJson: server.envJson ?? "{}",
+        enabled: server.enabled ?? false,
         timeoutMs: 30000,
       },
     ];
 
     void commitConfig({ ...cloneConfig(config), mcpServers }, "已添加推荐的 MCP 服务");
-    setView("tools");
+  }
+
+  async function addRecommendedMapMcpServer() {
+    addRecommendedMcpServer({
+      id: "amap-maps",
+      name: "AMap Maps",
+      transport: "local",
+      command: "npx",
+      args: ["-y", "@amap/amap-maps-mcp-server"],
+      envJson: JSON.stringify(
+        {
+          AMAP_MAPS_API_KEY: "",
+        },
+        null,
+        2,
+      ),
+      enabled: true,
+    });
+    setToast("已添加高德地图 MCP，请在工具页填写 AMAP_MAPS_API_KEY");
+    await refreshToolsView({ silent: true });
   }
 
   async function refreshSkillsView() {
@@ -1671,6 +1773,111 @@ export default function App() {
       setToast(error instanceof Error ? error.message : "删除知识项失败");
     } finally {
       setKnowledgeRefreshing(false);
+    }
+  }
+
+  function updateReportForm(patch: Partial<ProjectReportInput>) {
+    setReportForm((current) => ({ ...current, ...patch }));
+  }
+
+  async function chooseReportOutputDirectory() {
+    try {
+      const directory = await workspaceClient.selectWorkspaceFolder();
+      if (!directory) return;
+      updateReportForm({ outputDirectory: directory });
+    } catch {
+      setToast("选择输出目录失败");
+    }
+  }
+
+  function updateEmergencyForm(patch: Partial<EmergencyPlanInput>) {
+    setEmergencyForm((current) => ({ ...current, ...patch }));
+  }
+
+  async function pickEmergencyTemplates() {
+    try {
+      const files = await workspaceClient.selectFiles();
+      const nextFiles = files.filter((file) => /\.(pdf|doc|docx)$/i.test(file.name));
+      if (nextFiles.length === 0) {
+        setToast("请选择 PDF、DOC 或 DOCX 模板文件");
+        return;
+      }
+      setEmergencyForm((current) => {
+        const existing = new Map(current.templateFiles.map((file) => [file.path, file]));
+        for (const file of nextFiles) {
+          existing.set(file.path, file);
+        }
+        return { ...current, templateFiles: Array.from(existing.values()) };
+      });
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "选择模板文件失败");
+    }
+  }
+
+  function removeEmergencyTemplate(fileId: string) {
+    setEmergencyForm((current) => ({
+      ...current,
+      templateFiles: current.templateFiles.filter((file) => file.id !== fileId),
+    }));
+  }
+
+  async function chooseEmergencyOutputDirectory() {
+    try {
+      const directory = await workspaceClient.selectWorkspaceFolder();
+      if (!directory) return;
+      setEmergencyForm((current) => ({ ...current, outputDirectory: directory }));
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "选择输出目录失败");
+    }
+  }
+
+  async function generateProjectReport() {
+    if (!reportForm.knowledgeBaseId) {
+      setToast("请先选择知识库");
+      return;
+    }
+    if (!reportForm.projectName.trim()) {
+      setToast("请先输入项目名称");
+      return;
+    }
+
+    setReportGenerating(true);
+    try {
+      const payload = await workspaceClient.generateProjectReport({
+        ...reportForm,
+        workspaceRoot: reportForm.workspaceRoot || config.workspaceRoot,
+      });
+      setReportResult(payload);
+      setToast(`报告已生成：${payload.fileName}`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "生成报告失败");
+    } finally {
+      setReportGenerating(false);
+    }
+  }
+
+  async function generateEmergencyPlan() {
+    if (!emergencyForm.projectName.trim()) {
+      setToast("请先填写项目名称");
+      return;
+    }
+    if (emergencyForm.templateFiles.length === 0) {
+      setToast("请先选择应急预案模板");
+      return;
+    }
+
+    setEmergencyGenerating(true);
+    try {
+      const result = await workspaceClient.generateEmergencyPlan({
+        ...emergencyForm,
+        workspaceRoot: emergencyForm.workspaceRoot || config.workspaceRoot,
+      });
+      setEmergencyResult(result);
+      setToast(`应急预案已生成：${result.fileName}`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "生成应急预案失败");
+    } finally {
+      setEmergencyGenerating(false);
     }
   }
 
@@ -2290,6 +2497,41 @@ export default function App() {
             onAddKnowledgeUrl={addKnowledgeUrl}
             onAddKnowledgeWebsite={addKnowledgeWebsite}
             onDeleteKnowledgeItem={deleteKnowledgeItem}
+          />
+        </Suspense>
+      );
+    }
+
+    if (view === "reports") {
+      return (
+        <Suspense fallback={<LazyViewFallback />}>
+          <ReportsView
+            form={reportForm}
+            generating={reportGenerating}
+            knowledgeBases={knowledgeBases}
+            mapTools={reportMapTools}
+            result={reportResult}
+            onAddMapTool={addRecommendedMapMcpServer}
+            onChange={updateReportForm}
+            onChooseOutputDirectory={chooseReportOutputDirectory}
+            onGenerate={generateProjectReport}
+          />
+        </Suspense>
+      );
+    }
+
+    if (view === "emergency") {
+      return (
+        <Suspense fallback={<LazyViewFallback />}>
+          <EmergencyPlanView
+            form={emergencyForm}
+            generating={emergencyGenerating}
+            result={emergencyResult}
+            onChange={updateEmergencyForm}
+            onPickTemplates={pickEmergencyTemplates}
+            onRemoveTemplate={removeEmergencyTemplate}
+            onChooseOutputDirectory={chooseEmergencyOutputDirectory}
+            onGenerate={generateEmergencyPlan}
           />
         </Suspense>
       );

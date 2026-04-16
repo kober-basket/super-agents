@@ -1,5 +1,14 @@
 import clsx from "clsx";
-import { Database, Layers3, MessageSquarePlus, Settings2, Trash2, Wrench } from "lucide-react";
+import {
+  Database,
+  FileText,
+  Layers3,
+  MessageSquarePlus,
+  Settings2,
+  ShieldAlert,
+  Trash2,
+  Wrench,
+} from "lucide-react";
 
 import { formatRelativeTime } from "../../lib/format";
 import type { AppSection } from "../../types";
@@ -37,11 +46,7 @@ export function PrimarySidebar({
       <div className="sidebar-primary">
         <div className="sidebar-feature-section">
           <button
-            className={clsx(
-              "sidebar-link",
-              isChatHomeActive && "sidebar-link-strong",
-              isChatHomeActive && "active",
-            )}
+            className={clsx("sidebar-link", isChatHomeActive && "sidebar-link-strong", isChatHomeActive && "active")}
             onClick={onCreateConversation}
             type="button"
           >
@@ -73,6 +78,22 @@ export function PrimarySidebar({
             <Database size={18} />
             <span>知识库</span>
           </button>
+          <button
+            className={clsx("sidebar-link", view === "reports" && "active")}
+            onClick={() => onSetView("reports")}
+            type="button"
+          >
+            <FileText size={18} />
+            <span>报告生成</span>
+          </button>
+          <button
+            className={clsx("sidebar-link", view === "emergency" && "active")}
+            onClick={() => onSetView("emergency")}
+            type="button"
+          >
+            <ShieldAlert size={18} />
+            <span>应急预案</span>
+          </button>
 
           <div className="sidebar-conversation-section">
             <div className="sidebar-section-label">
@@ -81,41 +102,41 @@ export function PrimarySidebar({
             </div>
 
             <div className="sidebar-conversation-list">
-              {conversations.length > 0 ? (
-                conversations.map((conversation) => {
-                  const isActive = view === "chat" && activeConversationId === conversation.id;
-                  return (
-                    <div
-                      key={conversation.id}
-                      className={clsx(
-                        "sidebar-conversation-item",
-                        isActive && "active",
-                        conversation.isGenerating && "is-generating",
-                      )}
-                    >
-                      <button
-                        className="sidebar-conversation-trigger"
-                        onClick={() => onOpenConversation(conversation.id)}
-                        type="button"
+              {conversations.length > 0
+                ? conversations.map((conversation) => {
+                    const isActive = view === "chat" && activeConversationId === conversation.id;
+                    return (
+                      <div
+                        key={conversation.id}
+                        className={clsx(
+                          "sidebar-conversation-item",
+                          isActive && "active",
+                          conversation.isGenerating && "is-generating",
+                        )}
                       >
-                        <div className="sidebar-conversation-dot" aria-hidden="true" />
-                        <div className="sidebar-conversation-copy">
-                          <strong title={conversation.title}>{conversation.title}</strong>
-                          <span>{formatRelativeTime(conversation.createdAt)}</span>
-                        </div>
-                      </button>
-                      <button
-                        aria-label={`删除会话 ${conversation.title}`}
-                        className="sidebar-conversation-delete"
-                        onClick={() => onDeleteConversation(conversation.id)}
-                        type="button"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  );
-                })
-              ) : null}
+                        <button
+                          className="sidebar-conversation-trigger"
+                          onClick={() => onOpenConversation(conversation.id)}
+                          type="button"
+                        >
+                          <div className="sidebar-conversation-dot" aria-hidden="true" />
+                          <div className="sidebar-conversation-copy">
+                            <strong title={conversation.title}>{conversation.title}</strong>
+                            <span>{formatRelativeTime(conversation.createdAt)}</span>
+                          </div>
+                        </button>
+                        <button
+                          aria-label={`删除会话 ${conversation.title}`}
+                          className="sidebar-conversation-delete"
+                          onClick={() => onDeleteConversation(conversation.id)}
+                          type="button"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    );
+                  })
+                : null}
             </div>
           </div>
         </div>
