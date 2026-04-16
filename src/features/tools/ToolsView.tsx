@@ -74,6 +74,7 @@ export function ToolsView({
         <header className="skills-toolbar">
           <div className="skills-toolbar-copy">
             <h2>工具</h2>
+            <p>查看运行时工具和 MCP 服务，常用入口都放在这里。</p>
           </div>
 
           <div className="skills-toolbar-actions">
@@ -107,6 +108,7 @@ export function ToolsView({
           ) : (
             <div className="empty-panel compact">
               <strong>还没有运行时工具</strong>
+              <p>执行任务后，运行时工具会自动出现在这里。</p>
             </div>
           )}
         </section>
@@ -148,6 +150,7 @@ export function ToolsView({
           ) : (
             <div className="empty-panel compact">
               <strong>还没有 MCP</strong>
+              <p>添加一个 MCP 服务后，就能在这里统一查看和调试。</p>
             </div>
           )}
         </section>

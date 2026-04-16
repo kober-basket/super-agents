@@ -1189,13 +1189,14 @@ export function ChatWorkspace({
     <section className={`workspace-main ${isHome ? "is-home" : "is-thread"}`}>
       <div className="chat-column chat-workspace-shell">
         {isHome ? (
-          <div className="chat-home chat-home-upgraded">
-            <div className="chat-home-stage">
-              <div className="chat-home-center-copy">
-                <h1>开启新的会话</h1>
-              </div>
-              <div className="chat-home-composer-shell">
-                {renderComposer(true)}
+            <div className="chat-home chat-home-upgraded">
+              <div className="chat-home-stage">
+                <div className="chat-home-center-copy">
+                  <h1>开始新的对话</h1>
+                  <p>一句话描述任务，剩下的交给智能体。</p>
+                </div>
+                <div className="chat-home-composer-shell">
+                  {renderComposer(true)}
               </div>
             </div>
           </div>

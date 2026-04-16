@@ -96,6 +96,7 @@ export function SkillsView({
         <header className="skills-toolbar">
           <div className="skills-toolbar-copy">
             <h2>技能</h2>
+            <p>把常用能力整理成技能，方便重复使用和快速调用。</p>
           </div>
 
           <div className="skills-toolbar-actions">
@@ -158,7 +159,7 @@ export function SkillsView({
           ) : (
             <div className="empty-panel">
               <strong>还没有已安装技能</strong>
-              <p>可以先新建一个技能，或者先从下方已发现技能里挑一个试用。</p>
+              <p>可以先新建一个，或者先从下方可用技能里挑一个试用。</p>
               <button className="secondary-button" onClick={() => onPrepareSkillDraft()}>
                 <Plus size={14} />
                 创建第一个技能
@@ -172,7 +173,7 @@ export function SkillsView({
             <div className="skills-section-head">
               <div>
                 <span className="section-kicker muted">发现</span>
-                <h3>已发现技能</h3>
+                <h3>可用技能</h3>
               </div>
               <span className="section-count">{filteredReferenceSkills.length}</span>
             </div>

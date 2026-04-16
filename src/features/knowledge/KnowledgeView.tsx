@@ -535,6 +535,7 @@ export function KnowledgeView({
         <aside className="knowledge-sidebar">
           <header className="knowledge-sidebar-head">
             <h2>知识库</h2>
+            <p>集中管理文件、笔记、目录和网页资料。</p>
           </header>
 
           <div className="knowledge-base-list">
@@ -802,6 +803,7 @@ export function KnowledgeView({
             ) : (
               <div className="knowledge-empty wide knowledge-empty-stage simple">
                 <strong>还没有知识库</strong>
+                <span>先创建一个知识库，再把文件、网页或笔记放进来。</span>
               </div>
             )}
           </div>

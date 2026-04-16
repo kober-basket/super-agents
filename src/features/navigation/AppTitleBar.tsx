@@ -1,5 +1,4 @@
 import clsx from "clsx";
-import type { CSSProperties } from "react";
 import { Copy, Minus, Square, X } from "lucide-react";
 
 import type { AppSection, DesktopWindowState } from "../../types";
@@ -23,31 +22,19 @@ interface AppTitleBarProps {
 
 export function AppTitleBar({
   view,
-  sidebarWidth,
+  sidebarWidth: _sidebarWidth,
   windowState,
   onClose,
   onMinimize,
   onToggleMaximize,
 }: AppTitleBarProps) {
   const isMac = windowState?.platform === "darwin";
-  const style = {
-    "--titlebar-sidebar-width": `${sidebarWidth}px`,
-  } as CSSProperties;
 
   return (
-    <header className={clsx("window-titlebar", isMac && "mac")} style={style}>
+    <header className={clsx("window-titlebar", isMac && "mac")}>
       <div className="window-titlebar-copy">
         <strong>super-agents</strong>
         <span>{SECTION_LABELS[view]}</span>
-      </div>
-
-      <div className="window-titlebar-status-wrap">
-        <div className={clsx("window-titlebar-status", "idle")} aria-label="当前状态">
-          <span className="window-titlebar-status-dot" aria-hidden="true" />
-          <div className="window-titlebar-status-copy">
-            <span>本地智能体空闲中 · 会话已就绪</span>
-          </div>
-        </div>
       </div>
 
       {isMac ? null : (
