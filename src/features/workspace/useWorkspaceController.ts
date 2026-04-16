@@ -83,6 +83,7 @@ export function useWorkspaceController({ onToast }: UseWorkspaceControllerOption
   const [attachments, setAttachments] = useState<FileDropEntry[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [bootstrapped, setBootstrapped] = useState(false);
+  const [skillImporting, setSkillImporting] = useState(false);
   const pendingConfigSaveRef = useRef<number | null>(null);
 
   const selectableModels = useMemo(() => getSelectableModels(config.modelProviders), [config.modelProviders]);
@@ -194,6 +195,24 @@ export function useWorkspaceController({ onToast }: UseWorkspaceControllerOption
     onToast(`已载入技能：${skill.name}`);
   }
 
+  async function importLocalSkill() {
+    try {
+      const folderPath = await workspaceClient.selectSkillFolder();
+      if (!folderPath) {
+        return;
+      }
+
+      setSkillImporting(true);
+      const result = await workspaceClient.importLocalSkill(folderPath);
+      await applyBootstrapPayload(result.bootstrap);
+      onToast(`已导入技能：${result.importedSkillName}`);
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "导入本地技能失败");
+    } finally {
+      setSkillImporting(false);
+    }
+  }
+
   async function uninstallSkill(skill: SkillConfig) {
     try {
       const payload = await workspaceClient.uninstallSkill(skill.id);
@@ -239,6 +258,7 @@ export function useWorkspaceController({ onToast }: UseWorkspaceControllerOption
     currentWorkspaceLabel,
     currentWorkspacePath,
     dragActive,
+    skillImporting,
     mcpStatusMap,
     mcpStatuses,
     openWorkspaceFolder,
@@ -250,6 +270,7 @@ export function useWorkspaceController({ onToast }: UseWorkspaceControllerOption
     selectableModels,
     setAttachments,
     setDragActive,
+    importLocalSkill,
     uninstallSkill,
     updateConfigField,
     useReferenceSkill,

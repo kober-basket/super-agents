@@ -93,6 +93,13 @@ export const APPEARANCE_THEME_OPTIONS: AppearanceThemeOption[] = [
     accentLabel: "沉静海雾蓝",
     swatches: ["#10151b", "#1a232d", "#89a0b5"],
   },
+  {
+    id: "ember",
+    label: "余烬棕夜",
+    description: "偏暖的深棕底色叠加冷调深蓝控件，再用橘棕强调关键操作，整体更像夜间工作台。",
+    accentLabel: "铜橘微光",
+    swatches: ["#17110f", "#10202b", "#d26a47"],
+  },
 ];
 
 export function getAppearanceThemeOption(themeId: AppearanceThemeId) {

@@ -50,7 +50,7 @@ export function PrimarySidebar({
             onClick={onCreateConversation}
             type="button"
           >
-            <MessageSquarePlus size={18} />
+            <MessageSquarePlus size={16} />
             <span>新对话</span>
           </button>
 
@@ -59,7 +59,7 @@ export function PrimarySidebar({
             onClick={() => onSetView("skills")}
             type="button"
           >
-            <Layers3 size={18} />
+            <Layers3 size={16} />
             <span>技能</span>
           </button>
           <button
@@ -67,7 +67,7 @@ export function PrimarySidebar({
             onClick={() => onSetView("tools")}
             type="button"
           >
-            <Wrench size={18} />
+            <Wrench size={16} />
             <span>工具</span>
           </button>
           <button
@@ -75,7 +75,7 @@ export function PrimarySidebar({
             onClick={() => onSetView("knowledge")}
             type="button"
           >
-            <Database size={18} />
+            <Database size={16} />
             <span>知识库</span>
           </button>
           <button
@@ -83,7 +83,7 @@ export function PrimarySidebar({
             onClick={() => onSetView("reports")}
             type="button"
           >
-            <FileText size={18} />
+            <FileText size={16} />
             <span>报告生成</span>
           </button>
           <button
@@ -91,7 +91,7 @@ export function PrimarySidebar({
             onClick={() => onSetView("emergency")}
             type="button"
           >
-            <ShieldAlert size={18} />
+            <ShieldAlert size={16} />
             <span>应急预案</span>
           </button>
 
@@ -148,7 +148,7 @@ export function PrimarySidebar({
           onClick={() => onSetView("settings")}
           type="button"
         >
-          <Settings2 size={18} />
+          <Settings2 size={16} />
           <span>设置</span>
         </button>
       </div>

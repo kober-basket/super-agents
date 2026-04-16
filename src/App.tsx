@@ -150,10 +150,10 @@ function describeMessagePreview(message: Pick<ChatMessage, "content" | "visuals"
 const SIDEBAR_WIDTH_STORAGE_KEY = "super-agents:sidebar-width";
 const SETTINGS_SIDEBAR_WIDTH_STORAGE_KEY = "super-agents:settings-sidebar-width";
 const PREVIEW_PANE_WIDTH_STORAGE_KEY = "super-agents:preview-pane-width";
-const SIDEBAR_DEFAULT_WIDTH = 236;
+const SIDEBAR_DEFAULT_WIDTH = 208;
 const SETTINGS_SIDEBAR_DEFAULT_WIDTH = 344;
 const PREVIEW_PANE_DEFAULT_WIDTH = 380;
-const SIDEBAR_MIN_WIDTH = 188;
+const SIDEBAR_MIN_WIDTH = 172;
 const SIDEBAR_MAX_WIDTH = 360;
 const SETTINGS_SIDEBAR_MIN_WIDTH = 260;
 const SETTINGS_SIDEBAR_MAX_WIDTH = 460;
@@ -167,14 +167,18 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function readStoredWidth(key: string, fallback: number) {
+function readStoredWidth(key: string, fallback: number, legacyValues: number[] = []) {
   if (typeof window === "undefined") {
     return fallback;
   }
 
   const rawValue = window.localStorage.getItem(key);
   const parsedValue = rawValue ? Number.parseInt(rawValue, 10) : Number.NaN;
-  return Number.isFinite(parsedValue) ? parsedValue : fallback;
+  if (!Number.isFinite(parsedValue)) {
+    return fallback;
+  }
+
+  return legacyValues.includes(parsedValue) ? fallback : parsedValue;
 }
 
 function LazyViewFallback() {
@@ -365,7 +369,7 @@ export default function App() {
   const [remoteStatusRefreshing, setRemoteStatusRefreshing] = useState(false);
   const [wechatConnecting, setWechatConnecting] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
-    readStoredWidth(SIDEBAR_WIDTH_STORAGE_KEY, SIDEBAR_DEFAULT_WIDTH),
+    readStoredWidth(SIDEBAR_WIDTH_STORAGE_KEY, SIDEBAR_DEFAULT_WIDTH, [236]),
   );
   const [settingsSidebarWidth, setSettingsSidebarWidth] = useState(() =>
     readStoredWidth(SETTINGS_SIDEBAR_WIDTH_STORAGE_KEY, SETTINGS_SIDEBAR_DEFAULT_WIDTH),
@@ -396,6 +400,7 @@ export default function App() {
     currentWorkspaceLabel,
     currentWorkspacePath,
     dragActive,
+    importLocalSkill,
     mcpStatusMap,
     pickFiles,
     prepareSkillDraft,
@@ -405,6 +410,7 @@ export default function App() {
     selectableModels,
     setAttachments,
     setDragActive,
+    skillImporting,
     uninstallSkill,
     updateConfigField,
     useReferenceSkill,
@@ -2539,7 +2545,9 @@ export default function App() {
             filteredReferenceSkills={filteredReferenceSkills}
             hasResults={hasSkillResults}
             skillQuery={skillQuery}
+            skillsImporting={skillImporting}
             skillsRefreshing={skillsRefreshing}
+            onImportLocalSkill={importLocalSkill}
             onPrepareSkillDraft={prepareSkillDraft}
             onRefresh={refreshSkillsView}
             onSkillQueryChange={setSkillQuery}

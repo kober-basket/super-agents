@@ -31,6 +31,7 @@ import type {
   ProjectReportInput,
   ProjectReportResult,
   RemoteControlStatus,
+  SkillImportResult,
   WechatLoginStartResult,
   WechatLoginWaitResult,
   WorkspaceToolCatalog,
@@ -58,6 +59,8 @@ declare global {
       searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) => Promise<KnowledgeSearchPayload>;
       generateProjectReport: (payload: ProjectReportInput) => Promise<ProjectReportResult>;
       generateEmergencyPlan: (payload: EmergencyPlanInput) => Promise<EmergencyPlanResult>;
+      selectSkillFolder: () => Promise<string>;
+      importLocalSkill: (sourcePath: string) => Promise<SkillImportResult>;
       uninstallSkill: (skillId: string) => Promise<BootstrapPayload>;
       updateConfig: (patch: Partial<AppConfig>) => Promise<BootstrapPayload>;
       getRemoteControlStatus: () => Promise<RemoteControlStatus>;

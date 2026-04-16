@@ -391,6 +391,24 @@ app.whenReady().then(async () => {
     });
   });
 
+  ipcMain.handle("desktop:select-skill-folder", async () => {
+    const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
+      properties: ["openDirectory"],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return "";
+    }
+
+    return result.filePaths[0] ?? "";
+  });
+
+  ipcMain.handle("desktop:import-local-skill", async (_event, sourcePath: string) => {
+    const result = await service!.importLocalSkill(sourcePath);
+    await broadcastState();
+    return result;
+  });
+
   ipcMain.handle("desktop:uninstall-skill", async (_event, skillId: string) => {
     const payload = await service!.uninstallSkill(skillId);
     await broadcastState();

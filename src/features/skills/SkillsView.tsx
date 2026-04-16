@@ -13,7 +13,9 @@ interface SkillsViewProps {
   filteredReferenceSkills: RuntimeSkill[];
   hasResults: boolean;
   skillQuery: string;
+  skillsImporting: boolean;
   skillsRefreshing: boolean;
+  onImportLocalSkill: () => void | Promise<void>;
   onPrepareSkillDraft: (name?: string, description?: string) => void;
   onRefresh: () => void | Promise<void>;
   onSkillQueryChange: (value: string) => void;
@@ -40,7 +42,9 @@ export function SkillsView({
   filteredReferenceSkills,
   hasResults,
   skillQuery,
+  skillsImporting,
   skillsRefreshing,
+  onImportLocalSkill,
   onPrepareSkillDraft,
   onRefresh,
   onSkillQueryChange,
@@ -112,6 +116,15 @@ export function SkillsView({
             <button className="secondary-button" onClick={() => void onRefresh()} disabled={skillsRefreshing}>
               <RefreshCw size={14} className={skillsRefreshing ? "spin" : undefined} />
               刷新
+            </button>
+
+            <button
+              className="secondary-button"
+              onClick={() => void onImportLocalSkill()}
+              disabled={skillsImporting}
+            >
+              <Plus size={16} />
+              {skillsImporting ? "导入中..." : "导入本地技能"}
             </button>
 
             <button className="primary-button" onClick={() => onPrepareSkillDraft()}>

@@ -18,7 +18,8 @@ export type AppearanceThemeId =
   | "aubergine"
   | "dusk"
   | "graphite"
-  | "midnight";
+  | "midnight"
+  | "ember";
 export type ContextTier = "low" | "medium" | "high";
 export type EnvironmentMode = "local" | "cloud";
 export type DefaultAgentMode = "general" | "build";
@@ -130,6 +131,12 @@ export interface RuntimeSkill {
   description: string;
   location: string;
   content: string;
+}
+
+export interface SkillImportResult {
+  bootstrap: BootstrapPayload;
+  importedSkillName: string;
+  importedTo: string;
 }
 
 export interface RuntimeAgent {

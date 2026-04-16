@@ -33,6 +33,7 @@ import type {
   ProjectReportInput,
   ProjectReportResult,
   RemoteControlStatus,
+  SkillImportResult,
   WechatLoginStartResult,
   WechatLoginWaitResult,
   WorkspaceToolCatalog,
@@ -76,6 +77,9 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:generate-project-report", payload) as Promise<ProjectReportResult>,
   generateEmergencyPlan: (payload: EmergencyPlanInput) =>
     ipcRenderer.invoke("desktop:generate-emergency-plan", payload) as Promise<EmergencyPlanResult>,
+  selectSkillFolder: () => ipcRenderer.invoke("desktop:select-skill-folder") as Promise<string>,
+  importLocalSkill: (sourcePath: string) =>
+    ipcRenderer.invoke("desktop:import-local-skill", sourcePath) as Promise<SkillImportResult>,
   uninstallSkill: (skillId: string) =>
     ipcRenderer.invoke("desktop:uninstall-skill", skillId) as Promise<BootstrapPayload>,
   updateConfig: (patch: Partial<AppConfig>) =>

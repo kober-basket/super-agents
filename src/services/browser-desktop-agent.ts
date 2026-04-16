@@ -34,6 +34,7 @@ import type {
   ProjectReportResult,
   RemoteControlStatus,
   RuntimeSkill,
+  SkillImportResult,
   WechatLoginStartResult,
   WechatLoginWaitResult,
   WorkspaceToolCatalog,
@@ -332,6 +333,8 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
       warnings: ["浏览器预览模式下未启用知识库搜索。"],
     }),
     generateProjectReport: async (_payload: ProjectReportInput): Promise<ProjectReportResult> => unsupported("项目报告生成"),
+    selectSkillFolder: async () => unsupported("技能目录选择"),
+    importLocalSkill: async (_sourcePath: string): Promise<SkillImportResult> => unsupported("本地技能导入"),
     generateEmergencyPlan: async (_payload: EmergencyPlanInput): Promise<EmergencyPlanResult> => unsupported("应急预案生成"),
     uninstallSkill: async (_skillId: string) => unsupported("技能卸载"),
     updateConfig: async (patch: Partial<AppConfig>) => {

@@ -1,5 +1,5 @@
 ﻿import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -52,6 +52,7 @@ import type {
   ProjectReportResult,
   ProxyConfig,
   SkillConfig,
+  SkillImportResult,
   WorkspaceToolCatalog,
 } from "../src/types";
 import {
@@ -658,8 +659,25 @@ function getExternalCodexSkillsRoot() {
   return path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "skills");
 }
 
-function getManagedCodexSkillsRoot(statePath: string) {
+function getLegacyManagedCodexSkillsRoot(statePath: string) {
   return path.join(path.dirname(statePath), "skills", "codex");
+}
+
+function getProjectCodexSkillsRoot(workspaceRoot: string) {
+  return path.join(workspaceRoot, ".codex", "skills");
+}
+
+function getManagedCodexSkillsRoots(statePath: string, workspaceRoot?: string) {
+  const roots = [getLegacyManagedCodexSkillsRoot(statePath)];
+  const normalizedWorkspaceRoot = workspaceRoot?.trim();
+  if (normalizedWorkspaceRoot) {
+    roots.unshift(getProjectCodexSkillsRoot(normalizedWorkspaceRoot));
+  }
+  return Array.from(new Set(roots));
+}
+
+function getPreferredManagedCodexSkillsRoot(statePath: string, workspaceRoot?: string) {
+  return getManagedCodexSkillsRoots(statePath, workspaceRoot)[0];
 }
 
 function parseSkillFrontmatter(content: string) {
@@ -714,13 +732,51 @@ async function listCodexSkillsFromRoot(skillsRoot: string) {
   return result;
 }
 
+async function assertDirectoryExists(targetPath: string) {
+  const stats = await stat(targetPath).catch(() => null);
+  if (!stats?.isDirectory()) {
+    throw new Error("请选择有效的技能目录");
+  }
+}
+
+async function assertSkillDirectory(sourcePath: string) {
+  await assertDirectoryExists(sourcePath);
+  try {
+    await access(path.join(sourcePath, "SKILL.md"));
+  } catch {
+    throw new Error("所选目录缺少 SKILL.md，无法作为技能导入");
+  }
+}
+
+function isPathInside(parentPath: string, childPath: string) {
+  const relative = path.relative(parentPath, childPath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function resolveImportDestination(rootPath: string, preferredName: string) {
+  const normalized = preferredName.trim() || "skill";
+  let attempt = 0;
+
+  while (true) {
+    const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
+    const destination = path.join(rootPath, `${normalized}${suffix}`);
+    const existing = await stat(destination).catch(() => null);
+    if (!existing) {
+      return destination;
+    }
+    attempt += 1;
+  }
+}
+
 async function syncManagedCodexSkills(statePath: string, state: PersistedWorkspaceState) {
   const hidden = new Set(state.config.hiddenCodexSkillIds);
-  const managedRoot = getManagedCodexSkillsRoot(statePath);
-  await mkdir(managedRoot, { recursive: true }).catch(() => undefined);
+  const managedRoots = getManagedCodexSkillsRoots(statePath, state.config.workspaceRoot);
+  await Promise.all(managedRoots.map((root) => mkdir(root, { recursive: true }).catch(() => undefined)));
   const discovered = [
     ...(await listCodexSkillsFromRoot(getExternalCodexSkillsRoot()).catch(() => [])),
-    ...(await listCodexSkillsFromRoot(managedRoot).catch(() => [])),
+    ...(
+      await Promise.all(managedRoots.map((root) => listCodexSkillsFromRoot(root).catch(() => [])))
+    ).flat(),
   ];
   const codexSkills = new Map(
     discovered.filter((skill) => !hidden.has(skill.id)).map((skill) => [skill.id, skill] as const),
@@ -876,6 +932,44 @@ export class WorkspaceService {
     };
     await this.saveState(state);
     return await this.bootstrap();
+  }
+
+  async importLocalSkill(sourcePath: string): Promise<SkillImportResult> {
+    const state = await this.loadState();
+    const normalizedSourcePath = path.resolve(String(sourcePath || "").trim());
+    if (!normalizedSourcePath) {
+      throw new Error("缺少技能目录");
+    }
+
+    await assertSkillDirectory(normalizedSourcePath);
+
+    const targetRoot = getPreferredManagedCodexSkillsRoot(this.statePath, state.config.workspaceRoot);
+    await mkdir(targetRoot, { recursive: true });
+
+    let importedTo = normalizedSourcePath;
+    if (!isPathInside(targetRoot, normalizedSourcePath)) {
+      const preferredFolderName = path.basename(normalizedSourcePath);
+      importedTo = await resolveImportDestination(targetRoot, preferredFolderName);
+      await cp(normalizedSourcePath, importedTo, {
+        recursive: true,
+        force: false,
+        errorOnExist: true,
+      });
+    }
+
+    const importedSkill = await readLocalCodexSkill(importedTo, false);
+    if (!importedSkill) {
+      throw new Error("技能导入失败，无法解析 SKILL.md");
+    }
+
+    state.config.hiddenCodexSkillIds = state.config.hiddenCodexSkillIds.filter((id) => id !== importedSkill.id);
+    await this.saveState(state);
+
+    return {
+      bootstrap: await this.bootstrap(),
+      importedSkillName: importedSkill.name,
+      importedTo,
+    };
   }
 
   async uninstallSkill(skillId: string) {

@@ -34,6 +34,8 @@ export const workspaceClient = {
     desktopAgent.generateProjectReport(payload),
   generateEmergencyPlan: (payload: Parameters<typeof desktopAgent.generateEmergencyPlan>[0]) =>
     desktopAgent.generateEmergencyPlan(payload),
+  selectSkillFolder: () => desktopAgent.selectSkillFolder(),
+  importLocalSkill: (sourcePath: string) => desktopAgent.importLocalSkill(sourcePath),
   uninstallSkill: (skillId: string) => desktopAgent.uninstallSkill(skillId),
   updateConfig: (patch: Parameters<typeof desktopAgent.updateConfig>[0]) =>
     desktopAgent.updateConfig(patch),
