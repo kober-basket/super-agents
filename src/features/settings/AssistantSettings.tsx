@@ -4,6 +4,7 @@ import {
   Brain,
   Eye,
   Globe,
+  GripVertical,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -21,11 +22,13 @@ interface AssistantSettingsProps {
   activeModel: RuntimeModelOption | null;
   composerModelId: string;
   modelProviders: ModelProviderConfig[];
+  providerRefreshError?: string | null;
   providerRefreshingId: string | null;
   selectedModelProviderId: string;
   selectableModels: RuntimeModelOption[];
   onAddModelProvider: () => void;
   onModelChange: (modelId: string) => void;
+  onReorderModelProviders: (providerId: string, targetProviderId: string) => void;
   onRefreshProviderModels: (providerId: string) => void | Promise<void>;
   onRemoveModelProvider: (providerId: string) => void;
   onSelectProvider: (providerId: string) => void;
@@ -53,11 +56,13 @@ export function AssistantSettings({
   activeModel,
   composerModelId,
   modelProviders,
+  providerRefreshError,
   providerRefreshingId,
   selectedModelProviderId,
   selectableModels,
   onAddModelProvider,
   onModelChange,
+  onReorderModelProviders,
   onRefreshProviderModels,
   onRemoveModelProvider,
   onSelectProvider,
@@ -68,6 +73,8 @@ export function AssistantSettings({
 }: AssistantSettingsProps) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+  const [draggingProviderId, setDraggingProviderId] = useState<string | null>(null);
+  const [dropTargetProviderId, setDropTargetProviderId] = useState<string | null>(null);
 
   const currentProvider =
     modelProviders.find((provider) => provider.id === selectedModelProviderId) ??
@@ -146,10 +153,52 @@ export function AssistantSettings({
               {modelProviders.map((provider) => {
                 const enabledCount = provider.models.filter((model) => model.enabled !== false).length;
                 const isSelected = currentProvider?.id === provider.id;
+                const isDragging = draggingProviderId === provider.id;
+                const isDropTarget =
+                  dropTargetProviderId === provider.id && draggingProviderId !== provider.id;
 
                 return (
-                  <div key={provider.id} className={clsx("provider-nav-card", isSelected && "active")}>
+                  <div
+                    key={provider.id}
+                    className={clsx(
+                      "provider-nav-card",
+                      isSelected && "active",
+                      isDragging && "dragging",
+                      isDropTarget && "drop-target",
+                    )}
+                    draggable
+                    onDragStart={(event) => {
+                      setDraggingProviderId(provider.id);
+                      setDropTargetProviderId(provider.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", provider.id);
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      if (draggingProviderId && draggingProviderId !== provider.id) {
+                        event.dataTransfer.dropEffect = "move";
+                        setDropTargetProviderId(provider.id);
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const sourceProviderId = event.dataTransfer.getData("text/plain") || draggingProviderId;
+                      if (sourceProviderId && sourceProviderId !== provider.id) {
+                        onReorderModelProviders(sourceProviderId, provider.id);
+                      }
+                      setDraggingProviderId(null);
+                      setDropTargetProviderId(null);
+                    }}
+                    onDragEnd={() => {
+                      setDraggingProviderId(null);
+                      setDropTargetProviderId(null);
+                    }}
+                  >
                     <div className="provider-nav-top">
+                      <span className="provider-drag-handle" title="拖动排序">
+                        <GripVertical size={14} />
+                      </span>
+
                       <button
                         className="provider-nav-select"
                         onClick={() => onSelectProvider(provider.id)}
@@ -158,32 +207,35 @@ export function AssistantSettings({
                         <div className="provider-nav-copy">
                           <div className="provider-nav-title-row">
                             <strong>{provider.name}</strong>
-                            {provider.system ? <span className="stack-badge">鍐呯疆</span> : null}
+                          </div>
+                          <div className="provider-nav-meta">
+                            {provider.system ? <span className="stack-badge">内置</span> : null}
+                            {!provider.system ? <span className="stack-badge">自定义</span> : null}
+                            {activeModel?.providerId === provider.id ? (
+                              <span className="stack-badge active">默认</span>
+                            ) : null}
                             <span className="provider-count-pill">
                               {enabledCount}/{provider.models.length}
                             </span>
                           </div>
-                          <small>
-                            {activeModel?.providerId === provider.id
-                              ? "默认来源"
-                              : provider.baseUrl || "还没设置接口地址"}
-                          </small>
                         </div>
                       </button>
 
-                      <label className="provider-switch" title={provider.enabled ? "停用提供商" : "启用提供商"}>
-                        <input
-                          checked={provider.enabled}
-                          onChange={(event) => {
-                            event.stopPropagation();
-                            onUpdateModelProvider(provider.id, { enabled: !provider.enabled });
-                          }}
-                          type="checkbox"
-                        />
-                        <span className="provider-switch-track">
-                          <span className="provider-switch-thumb" />
-                        </span>
-                      </label>
+                      <div className="provider-nav-actions">
+                        <label className="provider-switch" title={provider.enabled ? "停用提供商" : "启用提供商"}>
+                          <input
+                            checked={provider.enabled}
+                            onChange={(event) => {
+                              event.stopPropagation();
+                              onUpdateModelProvider(provider.id, { enabled: !provider.enabled });
+                            }}
+                            type="checkbox"
+                          />
+                          <span className="provider-switch-track">
+                            <span className="provider-switch-thumb" />
+                          </span>
+                        </label>
+                      </div>
                     </div>
                   </div>
                 );
@@ -195,7 +247,7 @@ export function AssistantSettings({
                 <div className="provider-detail-head">
                   <div className="provider-detail-copy">
                     <h3>{currentProvider.name}</h3>
-                    {currentProvider.system ? <small>鍐呯疆 Provider锛屽彲閰嶇疆浣嗕笉鍙垹闄?</small> : null}
+                    {currentProvider.system ? <small>内置 Provider，可配置但不可删除。</small> : null}
                   </div>
 
                   <div className="mcp-card-actions">
@@ -223,6 +275,8 @@ export function AssistantSettings({
                     </button>
                   </div>
                 </div>
+
+                {providerRefreshError ? <p className="provider-inline-error">{providerRefreshError}</p> : null}
 
                 <div className="provider-section">
                   <div className="settings-stage-grid two provider-form-grid">
@@ -375,6 +429,7 @@ export function AssistantSettings({
         open={modelPickerOpen}
         provider={currentProvider}
         composerModelId={composerModelId}
+        error={providerRefreshError}
         refreshing={currentProviderRefreshing}
         onClose={() => setModelPickerOpen(false)}
         onRefresh={onRefreshProviderModels}

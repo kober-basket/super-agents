@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+﻿import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Suspense, lazy } from "react";
 import clsx from "clsx";
 import {
@@ -256,6 +256,36 @@ function formatVoiceRecordingError(error: unknown) {
     : "语音输入失败，请重试";
 }
 
+function formatProviderModelsRefreshError(provider: Pick<ModelProviderConfig, "name" | "apiKey" | "baseUrl">, error: unknown) {
+  const fallback = "拉取模型列表失败，请稍后重试";
+  const rawMessage = error instanceof Error ? error.message.trim() : "";
+  const normalizedMessage = rawMessage.toLowerCase();
+  const providerName = provider.name.trim() || "当前提供商";
+
+  if (!provider.apiKey.trim()) {
+    return `请先填写 ${providerName} 的 API Key，再拉取模型列表。`;
+  }
+
+  if (!provider.baseUrl.trim()) {
+    return `请先填写 ${providerName} 的 Base URL，再拉取模型列表。`;
+  }
+
+  if (
+    normalizedMessage.includes("you didn't provide an api key") ||
+    normalizedMessage.includes("authorization header") ||
+    normalizedMessage.includes("invalid api key") ||
+    normalizedMessage.includes("incorrect api key")
+  ) {
+    return `${providerName} 的 API Key 不可用，请检查后再重试。`;
+  }
+
+  if (normalizedMessage.includes("fetch failed") || normalizedMessage.includes("network")) {
+    return `无法连接到 ${providerName}，请检查 Base URL、网络或代理设置。`;
+  }
+
+  return rawMessage || fallback;
+}
+
 export default function App() {
   useGlobalSmoothScroll();
 
@@ -286,6 +316,7 @@ export default function App() {
   const [mcpRefreshing, setMcpRefreshing] = useState(false);
   const [mcpAdvancedOpen, setMcpAdvancedOpen] = useState(false);
   const [providerRefreshingId, setProviderRefreshingId] = useState<string | null>(null);
+  const [providerRefreshErrors, setProviderRefreshErrors] = useState<Record<string, string>>({});
   const [selectedModelProviderId, setSelectedModelProviderId] = useState("");
   const [windowState, setWindowState] = useState<DesktopWindowState | null>(null);
   const [remoteStatus, setRemoteStatus] = useState<RemoteControlStatus | null>(null);
@@ -1061,7 +1092,6 @@ export default function App() {
   function addModelProvider() {
     const providerId = sanitizeModelProviderId(`provider-${uid()}`);
     const modelProviders = [
-      ...config.modelProviders,
       {
         id: providerId,
         name: "新模型提供方",
@@ -1074,15 +1104,29 @@ export default function App() {
         system: false,
         models: [],
       },
+      ...config.modelProviders,
     ];
     setSelectedModelProviderId(providerId);
     commitModelProviders(modelProviders, "已添加提供方");
   }
 
+  function reorderModelProviders(providerId: string, targetProviderId: string) {
+    const index = config.modelProviders.findIndex((item) => item.id === providerId);
+    const targetIndex = config.modelProviders.findIndex((item) => item.id === targetProviderId);
+    if (index < 0 || targetIndex < 0 || index === targetIndex) {
+      return;
+    }
+
+    const modelProviders = [...config.modelProviders];
+    const [target] = modelProviders.splice(index, 1);
+    modelProviders.splice(targetIndex, 0, target);
+    commitModelProviders(modelProviders);
+  }
+
   function removeModelProvider(providerId: string) {
     const target = config.modelProviders.find((item) => item.id === providerId);
     if (target?.system) {
-      setToast("鍐呯疆鎻愪緵鍟嗕笉鑳藉垹闄?");
+      setToast("内置提供商不可删除");
       return;
     }
     const modelProviders = config.modelProviders.filter((item) => item.id !== providerId);
@@ -1116,6 +1160,15 @@ export default function App() {
     if (!provider) return;
 
     setProviderRefreshingId(providerId);
+    setProviderRefreshErrors((current) => {
+      if (!current[providerId]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[providerId];
+      return next;
+    });
     try {
       const payload = await workspaceClient.fetchProviderModels({
         providerId: provider.id,
@@ -1140,9 +1193,21 @@ export default function App() {
             }
           : item,
       );
+      setProviderRefreshErrors((current) => {
+        if (!current[providerId]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[providerId];
+        return next;
+      });
       commitModelProviders(modelProviders, `${provider.name} 模型已同步`);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "拉取模型列表失败");
+      setProviderRefreshErrors((current) => ({
+        ...current,
+        [providerId]: formatProviderModelsRefreshError(provider, error),
+      }));
     } finally {
       setProviderRefreshingId(null);
     }
@@ -2073,11 +2138,13 @@ export default function App() {
             activeModel={activeModel}
             composerModelId={composerModelId}
             modelProviders={config.modelProviders}
+            providerRefreshError={providerRefreshErrors[selectedModelProviderId] ?? null}
             providerRefreshingId={providerRefreshingId}
             selectedModelProviderId={selectedModelProviderId}
             selectableModels={selectableModels}
             onAddModelProvider={addModelProvider}
             onModelChange={(value) => updateConfigField("activeModelId", value)}
+            onReorderModelProviders={reorderModelProviders}
             onRefreshProviderModels={refreshProviderModels}
             onRemoveModelProvider={removeModelProvider}
             onSelectProvider={setSelectedModelProviderId}

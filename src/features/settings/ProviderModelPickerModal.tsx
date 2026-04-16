@@ -24,6 +24,7 @@ interface ProviderModelPickerModalProps {
   open: boolean;
   provider: ModelProviderConfig | null;
   composerModelId: string;
+  error?: string | null;
   refreshing: boolean;
   onClose: () => void;
   onRefresh: (providerId: string) => void | Promise<void>;
@@ -64,6 +65,7 @@ export function ProviderModelPickerModal({
   open,
   provider,
   composerModelId,
+  error,
   refreshing,
   onClose,
   onRefresh,
@@ -157,6 +159,8 @@ export function ProviderModelPickerModal({
             <RefreshCw size={14} className={clsx(refreshing && "spin")} />
           </button>
         </div>
+
+        {error ? <p className="provider-inline-error modal">{error}</p> : null}
 
         <div className="model-picker-tabs">
           {FILTER_OPTIONS.map((item) => (
