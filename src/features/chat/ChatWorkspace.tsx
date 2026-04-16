@@ -603,6 +603,7 @@ export function ChatWorkspace({
               {selectableModels.map((model) => {
                 const selected = model.id === activeModelId;
                 const fullLabel = model.modelLabel.trim() || model.label;
+                const providerLabel = model.providerName.trim();
 
                 return (
                   <button
@@ -616,6 +617,7 @@ export function ChatWorkspace({
                   >
                     <div className="chat-model-option-copy">
                       <strong title={fullLabel}>{fullLabel}</strong>
+                      <span>{providerLabel}</span>
                     </div>
                     <span className={`chat-model-option-check ${selected ? "selected" : ""}`}>
                       <Check size={13} />

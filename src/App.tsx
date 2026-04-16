@@ -1059,9 +1059,6 @@ export default function App() {
   }
 
   function addModelProvider() {
-    addPresetModelProvider();
-    return;
-
     const providerId = sanitizeModelProviderId(`provider-${uid()}`);
     const modelProviders = [
       ...config.modelProviders,
@@ -1074,6 +1071,7 @@ export default function App() {
         temperature: 0.2,
         maxTokens: 4096,
         enabled: true,
+        system: false,
         models: [],
       },
     ];
@@ -1083,6 +1081,10 @@ export default function App() {
 
   function removeModelProvider(providerId: string) {
     const target = config.modelProviders.find((item) => item.id === providerId);
+    if (target?.system) {
+      setToast("鍐呯疆鎻愪緵鍟嗕笉鑳藉垹闄?");
+      return;
+    }
     const modelProviders = config.modelProviders.filter((item) => item.id !== providerId);
     commitModelProviders(
       modelProviders,
@@ -2074,7 +2076,7 @@ export default function App() {
             providerRefreshingId={providerRefreshingId}
             selectedModelProviderId={selectedModelProviderId}
             selectableModels={selectableModels}
-            onAddModelProvider={addPresetModelProvider}
+            onAddModelProvider={addModelProvider}
             onModelChange={(value) => updateConfigField("activeModelId", value)}
             onRefreshProviderModels={refreshProviderModels}
             onRemoveModelProvider={removeModelProvider}

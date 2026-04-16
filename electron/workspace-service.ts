@@ -20,6 +20,8 @@ import {
   DEFAULT_EMBEDDING_MODEL_ID,
   DEFAULT_EMBEDDING_PROVIDER_ID,
   getDefaultModelProviders,
+  isSystemModelProviderId,
+  mergeWithDefaultModelProviders,
 } from "../src/lib/provider-presets";
 import { DEFAULT_REMOTE_CONTROL_CONFIG, normalizeRemoteControlConfig } from "../src/lib/remote-control-config";
 import { sanitizeMcpName } from "../src/features/shared/utils";
@@ -225,13 +227,14 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
           ...item,
           kind: item.kind ?? "openai-compatible",
           enabled: item.enabled !== false,
+          system: item.system === true || isSystemModelProviderId(item.id),
           temperature: typeof item.temperature === "number" ? item.temperature : 0.2,
           maxTokens: typeof item.maxTokens === "number" ? item.maxTokens : 4096,
           models: normalizeProviderModels(Array.isArray(item.models) ? item.models : [], item.id),
         }))
       : null;
   const migratedFromLegacyDefaults = Boolean(configuredProviders && isLegacyDefaultProviderList(configuredProviders));
-  const modelProviders =
+  const baseModelProviders =
     configuredProviders && configuredProviders.length > 0
       ? migratedFromLegacyDefaults
         ? cloneDefaultConfig().modelProviders
@@ -239,6 +242,7 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
       : migratedLegacy.providers.length > 0
         ? migratedLegacy.providers
         : cloneDefaultConfig().modelProviders;
+  const modelProviders = mergeWithDefaultModelProviders(baseModelProviders);
   const preferredActiveModelId =
     migratedFromLegacyDefaults
       ? DEFAULT_CONFIG.activeModelId

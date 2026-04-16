@@ -46,6 +46,7 @@ export interface ModelProviderConfig {
   temperature: number;
   maxTokens: number;
   enabled: boolean;
+  system?: boolean;
   models: ProviderModelConfig[];
 }
 

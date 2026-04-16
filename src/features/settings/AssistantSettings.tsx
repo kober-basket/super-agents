@@ -158,6 +158,7 @@ export function AssistantSettings({
                         <div className="provider-nav-copy">
                           <div className="provider-nav-title-row">
                             <strong>{provider.name}</strong>
+                            {provider.system ? <span className="stack-badge">鍐呯疆</span> : null}
                             <span className="provider-count-pill">
                               {enabledCount}/{provider.models.length}
                             </span>
@@ -194,6 +195,7 @@ export function AssistantSettings({
                 <div className="provider-detail-head">
                   <div className="provider-detail-copy">
                     <h3>{currentProvider.name}</h3>
+                    {currentProvider.system ? <small>鍐呯疆 Provider锛屽彲閰嶇疆浣嗕笉鍙垹闄?</small> : null}
                   </div>
 
                   <div className="mcp-card-actions">
@@ -214,6 +216,7 @@ export function AssistantSettings({
                     <button
                       className="ghost-text-button danger"
                       onClick={() => onRemoveModelProvider(currentProvider.id)}
+                      disabled={currentProvider.system}
                       title="删除提供商"
                     >
                       <X size={14} />
@@ -230,6 +233,7 @@ export function AssistantSettings({
                         onChange={(event) =>
                           onUpdateModelProvider(currentProvider.id, { name: event.target.value })
                         }
+                        disabled={currentProvider.system}
                       />
                     </label>
 

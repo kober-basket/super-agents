@@ -22,6 +22,7 @@ test("workspace service bootstraps with provider presets by default", async () =
       config.modelProviders.map((provider) => provider.id),
       ["openai", "anthropic", "openrouter", "qwen", "z-ai", "deepseek", "volcengine", "ollama"],
     );
+    assert.equal(config.modelProviders.every((provider) => provider.system === true), true);
     assert.equal(config.activeModelId, "openai::gpt-5-mini");
     assert.equal(config.knowledgeBase.embeddingProviderId, "openai");
     assert.equal(config.knowledgeBase.embeddingModel, "text-embedding-3-small");
@@ -87,3 +88,50 @@ test("workspace service migrates untouched legacy iflyrpa defaults to provider p
   }
 });
 
+test("workspace service preserves existing providers and appends missing presets", async () => {
+  const tempDir = await createWorkspaceServiceTempDir("super-agents-workspace-");
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const service = new WorkspaceService(statePath);
+
+  await mkdir(path.dirname(statePath), { recursive: true });
+  await writeFile(
+    statePath,
+    JSON.stringify(
+      {
+        config: {
+          activeModelId: "iflyrpa::imodel/minimax-m2.7",
+          modelProviders: [
+            {
+              id: "iflyrpa",
+              name: "iFlyRpa",
+              kind: "openai-compatible",
+              baseUrl: "https://oneapi.iflyrpa.com/v1",
+              apiKey: "sk-legacy",
+              temperature: 0.2,
+              maxTokens: 8192,
+              enabled: true,
+              models: [{ id: "imodel/minimax-m2.7", label: "MiniMax M2.7", enabled: true }],
+            },
+          ],
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  try {
+    const config = await service.getConfigSnapshot();
+
+    assert.equal(config.modelProviders[0]?.id, "iflyrpa");
+    assert.equal(config.modelProviders[0]?.system, false);
+    assert.equal(config.modelProviders.some((provider) => provider.id === "openai"), true);
+    assert.equal(config.modelProviders.find((provider) => provider.id === "openai")?.system, true);
+    assert.equal(config.modelProviders.some((provider) => provider.id === "anthropic"), true);
+    assert.equal(config.activeModelId, "iflyrpa::imodel/minimax-m2.7");
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});

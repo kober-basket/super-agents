@@ -96,12 +96,27 @@ function createProviderFromPreset(input: ProviderPresetInput): ModelProviderConf
     temperature: DEFAULT_PROVIDER_TEMPERATURE,
     maxTokens: DEFAULT_PROVIDER_MAX_TOKENS,
     enabled: true,
+    system: true,
     models: cloneModels(input.models ?? []),
   };
 }
 
 export function getDefaultModelProviders() {
   return PROVIDER_PRESET_INPUTS.map(createProviderFromPreset);
+}
+
+export function mergeWithDefaultModelProviders(existingProviders: ModelProviderConfig[]) {
+  const existingIds = new Set(existingProviders.map((provider) => sanitizeModelProviderId(provider.id)));
+  const missingProviders = PROVIDER_PRESET_INPUTS
+    .filter((provider) => !existingIds.has(sanitizeModelProviderId(provider.id)))
+    .map(createProviderFromPreset);
+
+  return [...existingProviders, ...missingProviders];
+}
+
+export function isSystemModelProviderId(providerId: string) {
+  const normalizedId = sanitizeModelProviderId(providerId);
+  return PROVIDER_PRESET_INPUTS.some((provider) => sanitizeModelProviderId(provider.id) === normalizedId);
 }
 
 export function createCustomModelProvider(providerId: string): ModelProviderConfig {
@@ -123,4 +138,3 @@ export function getNextModelProvider(existingProviders: ModelProviderConfig[], f
   const preset = PROVIDER_PRESET_INPUTS.find((provider) => !existingIds.has(sanitizeModelProviderId(provider.id)));
   return preset ? createProviderFromPreset(preset) : createCustomModelProvider(fallbackProviderId);
 }
-

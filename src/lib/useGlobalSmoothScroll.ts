@@ -3,6 +3,7 @@ import { useEffect } from "react";
 const SCROLLABLE_OVERFLOW_VALUES = new Set(["auto", "scroll", "overlay"]);
 const EDITABLE_TARGET_SELECTOR =
   "input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='textbox']";
+const NATIVE_WHEEL_SCROLL_SELECTOR = "[data-native-wheel-scroll]";
 const LINE_DELTA_PX = 30;
 const PAGE_DELTA_FACTOR = 0.9;
 const COARSE_PIXEL_DELTA_THRESHOLD = 6;
@@ -35,6 +36,10 @@ function clamp(value: number, min: number, max: number) {
 
 function isEditableTarget(target: Element) {
   return Boolean(target.closest(EDITABLE_TARGET_SELECTOR));
+}
+
+export function shouldBypassSmoothScrollTarget(target: Element) {
+  return Boolean(target.closest(NATIVE_WHEEL_SCROLL_SELECTOR));
 }
 
 function isScrollableOnAxis(element: HTMLElement, axis: Axis) {
@@ -228,7 +233,12 @@ export function useGlobalSmoothScroll() {
       }
 
       const target = event.target;
-      if (!(target instanceof Element) || isEditableTarget(target) || isLikelyTrackpadWheelEvent(event)) {
+      if (
+        !(target instanceof Element) ||
+        isEditableTarget(target) ||
+        shouldBypassSmoothScrollTarget(target) ||
+        isLikelyTrackpadWheelEvent(event)
+      ) {
         return;
       }
 

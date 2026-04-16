@@ -343,7 +343,11 @@ function MermaidVisual({
         />
       }
     >
-      <div ref={containerRef} className="chat-visual-surface chat-visual-mermaid" />
+      <div
+        ref={containerRef}
+        className="chat-visual-surface chat-visual-mermaid"
+        data-native-wheel-scroll="true"
+      />
     </VisualFrame>
   );
 }
@@ -429,7 +433,11 @@ function VegaLiteVisual({
         />
       }
     >
-      <div ref={containerRef} className="chat-visual-surface chat-visual-chart" />
+      <div
+        ref={containerRef}
+        className="chat-visual-surface chat-visual-chart"
+        data-native-wheel-scroll="true"
+      />
     </VisualFrame>
   );
 }
