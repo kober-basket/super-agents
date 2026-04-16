@@ -598,6 +598,7 @@ export interface ChatConversationRuntimeState {
   planEntries: ChatPlanEntry[];
   toolCalls: ChatToolCall[];
   terminalOutputs: Record<string, ChatTerminalOutput>;
+  thoughtText: string;
   stopReason?: string;
   error?: string;
 }
@@ -656,6 +657,12 @@ export type ChatEvent =
       conversationId: string;
       turnId: string;
       messageId: string;
+      textDelta: string;
+    }
+  | {
+      type: "thought_delta";
+      conversationId: string;
+      turnId: string;
       textDelta: string;
     }
   | {

@@ -1,4 +1,4 @@
-import {
+﻿import {
   AlertCircle,
   ArrowUp,
   BookOpen,
@@ -9,7 +9,6 @@ import {
   Mic,
   Paperclip,
   Square,
-  Sparkles,
   TerminalSquare,
   Wrench,
   X,
@@ -34,6 +33,7 @@ import type {
   KnowledgeBaseSummary,
   RuntimeModelOption,
 } from "../../types";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "../../components/ai-elements/reasoning";
 import { ChatVisualBlock } from "./ChatVisualBlock";
 import { fileKind, getFileExtension, isOfficeDocument } from "../shared/utils";
 
@@ -69,11 +69,27 @@ interface ChatWorkspaceProps {
   scrollToBottomRequest: number;
 }
 
-const HOME_PROMPTS = [
-  { label: "拆解需求", value: "帮我拆解这个需求" },
-  { label: "写页面文案", value: "帮我写这页的文案" },
-  { label: "规划任务", value: "帮我规划实现任务" },
-  { label: "优化界面", value: "帮我优化这个界面" },
+const HOME_PROMPT_CARDS = [
+  {
+    label: "拆解需求",
+    description: "理清目标、约束、风险和执行步骤",
+    value: "帮我拆解这个需求，按目标、约束、风险和执行步骤整理出来。",
+  },
+  {
+    label: "写页面文案",
+    description: "补标题、副标题、卖点和按钮文案",
+    value: "帮我写这个页面的文案，包含标题、副标题、核心卖点和按钮文案。",
+  },
+  {
+    label: "规划任务",
+    description: "把任务拆成可以直接执行的小步骤",
+    value: "帮我规划实现任务，给我一个清晰的分步执行方案。",
+  },
+  {
+    label: "优化界面",
+    description: "从布局、层级和交互上给出改进建议",
+    value: "帮我优化这个界面，重点看布局、视觉层级和交互体验。",
+  },
 ];
 
 function formatCompactModelLabel(label: string) {
@@ -325,6 +341,7 @@ export function ChatWorkspace({
     status: runtimeState?.status,
     stopReason: runtimeState?.stopReason,
     error: runtimeState?.error,
+    thoughtTextLength: runtimeState?.thoughtText.length ?? 0,
     planEntries: runtimeState?.planEntries,
     toolCalls: runtimeState?.toolCalls.map((toolCall) => ({
       toolCallId: toolCall.toolCallId,
@@ -351,6 +368,7 @@ export function ChatWorkspace({
   const unlinkedTerminalOutputs = Object.values(runtimeState?.terminalOutputs ?? {}).filter(
     (terminal) => !selectedTerminalIds.has(terminal.terminalId),
   );
+  const reasoningText = runtimeState?.thoughtText.trim() ?? "";
   const knowledgeLabel =
     selectedKnowledgeBases.length > 1
       ? `${selectedKnowledgeBases[0].name} +${selectedKnowledgeBases.length - 1}`
@@ -453,6 +471,24 @@ export function ChatWorkspace({
     const nextDraft = draftMessage.trim()
       ? `${draftMessage.trim()}\n\n${normalizedPrompt}`
       : normalizedPrompt;
+
+    onDraftMessageChange(nextDraft);
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) {
+        return;
+      }
+
+      textarea.focus();
+      textarea.setSelectionRange(nextDraft.length, nextDraft.length);
+    });
+  }
+
+  function applyHomePrompt(prompt: string) {
+    const nextDraft = prompt.trim();
+    if (!nextDraft) {
+      return;
+    }
 
     onDraftMessageChange(nextDraft);
     window.requestAnimationFrame(() => {
@@ -710,44 +746,20 @@ export function ChatWorkspace({
     );
   }
 
-  function renderPlanCard() {
-    if (!runtimeState || runtimeState.planEntries.length === 0) {
+  function renderThinkingCard() {
+    const hasThinkingContent = Boolean(reasoningText) || busy;
+
+    if (!hasThinkingContent) {
       return null;
     }
 
     return (
-      <details key="runtime-plan" className="activity-card tool-message-card">
-        <summary className="activity-summary">
-          <div className="activity-summary-main">
-            <div className="activity-summary-title">
-              <span className="activity-tool-icon">
-                <Wrench size={14} />
-              </span>
-              <strong>执行计划</strong>
-              <span className="activity-status-pill default">
-                {runtimeState.planEntries.length} 个步骤
-              </span>
-            </div>
-          </div>
-          <div className="activity-summary-side">
-            <ChevronDown size={14} />
-          </div>
-        </summary>
-        <div className="activity-detail">
-          {runtimeState.planEntries.map((entry, index) => (
-            <div key={`${entry.content}-${index}`} className="activity-panel activity-panel-summary">
-              <span className="activity-panel-label">
-                {entry.priority} · {entry.status}
-              </span>
-              <div
-                className="activity-markdown"
-                dangerouslySetInnerHTML={{ __html: markdownToHtml(entry.content) }}
-                onClick={handleMessageClick}
-              />
-            </div>
-          ))}
-        </div>
-      </details>
+      <Reasoning key="runtime-thinking" isStreaming={runtimeInProgress}>
+        <ReasoningTrigger />
+        <ReasoningContent>
+          {reasoningText || (cancelInFlight ? "Stopping current reply..." : "Generating reasoning...")}
+        </ReasoningContent>
+      </Reasoning>
     );
   }
 
@@ -822,18 +834,18 @@ export function ChatWorkspace({
                 {toolCall.kind === "execute" ? <TerminalSquare size={14} /> : <Wrench size={14} />}
               </span>
               <strong>{toolCall.title}</strong>
-              <span className={`activity-status-pill ${statusClassName(toolCall.status)}`}>
-                {toolCall.status === "completed" ? <CheckCircle2 size={12} /> : null}
-                {toolCall.status === "failed" ? <AlertCircle size={12} /> : null}
-                {(toolCall.status === "pending" || toolCall.status === "in_progress") ? (
-                  <LoaderCircle size={12} className="spin" />
-                ) : null}
-                {statusLabel(toolCall.status)}
-              </span>
+              <em>{toolCall.kind === "execute" ? extractExecuteLabel(toolCall) : toolSummary(toolCall)}</em>
             </div>
-            <p>{toolCall.kind === "execute" ? extractExecuteLabel(toolCall) : toolSummary(toolCall)}</p>
           </div>
           <div className="activity-summary-side">
+            <span className={`activity-status-pill ${statusClassName(toolCall.status)}`}>
+              {toolCall.status === "completed" ? <CheckCircle2 size={12} /> : null}
+              {toolCall.status === "failed" ? <AlertCircle size={12} /> : null}
+              {(toolCall.status === "pending" || toolCall.status === "in_progress") ? (
+                <LoaderCircle size={12} className="spin" />
+              ) : null}
+              {statusLabel(toolCall.status)}
+            </span>
             <ChevronDown size={14} />
           </div>
         </summary>
@@ -1101,14 +1113,9 @@ export function ChatWorkspace({
     }
 
     const runtimeBlocks: JSX.Element[] = [];
-    const planCard = renderPlanCard();
-    if (planCard) {
-      runtimeBlocks.push(planCard);
-    }
-
-    const executeToolGroup = renderExecuteToolGroup();
-    if (executeToolGroup) {
-      runtimeBlocks.push(executeToolGroup);
+    const thinkingCard = renderThinkingCard();
+    if (thinkingCard) {
+      runtimeBlocks.push(thinkingCard);
     }
 
     runtimeToolCalls.forEach((toolCall) => {
@@ -1149,7 +1156,7 @@ export function ChatWorkspace({
 
     return (
       <div className="chat-thread-layout">
-        <div ref={messageListRef} className="message-list">
+        <div ref={messageListRef} className="message-list" data-native-wheel-scroll="true">
           {leadingMessages.map(renderMessage)}
 
           {showLoadingBubble ? (
@@ -1175,30 +1182,27 @@ export function ChatWorkspace({
       <div className="chat-column chat-workspace-shell">
         {isHome ? (
           <div className="chat-home chat-home-upgraded">
-            <div className="chat-home-hero">
-              <div className="chat-home-orb chat-home-orb-left" aria-hidden="true" />
-              <div className="chat-home-orb chat-home-orb-right" aria-hidden="true" />
-              <div className="chat-home-badge">
-                <Sparkles size={14} />
-                <span>开始新对话</span>
+            <div className="chat-home-stage">              <div className="chat-home-copy">
+                <h2>开始新会话</h2>
+                <p>直接输入问题，或选一个常用任务快速开始。</p>
               </div>
-              <div className="chat-home-copy">
-                <h2>把问题说清楚</h2>
-                <p>发出第一条消息后，会话会出现在左侧。</p>
+
+              <div className="chat-home-composer-shell">
+                {renderComposer(true)}
               </div>
             </div>
 
-            {renderComposer(true)}
-
             <div className="chat-home-prompt-grid">
-              {HOME_PROMPTS.map((prompt) => (
+              {HOME_PROMPT_CARDS.map((prompt) => (
                 <button
                   key={prompt.label}
                   className="chat-home-prompt"
-                  onClick={() => onDraftMessageChange(prompt.value)}
+                  onClick={() => applyHomePrompt(prompt.value)}
                   type="button"
                 >
+                  <span className="chat-home-prompt-kicker">快速开始</span>
                   <strong>{prompt.label}</strong>
+                  <span>{prompt.description}</span>
                 </button>
               ))}
             </div>
@@ -1210,3 +1214,4 @@ export function ChatWorkspace({
     </section>
   );
 }
+

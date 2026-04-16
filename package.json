@@ -8,7 +8,7 @@
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
     "dev:renderer": "vite --strictPort --host 127.0.0.1 --port 5173",
     "dev:main": "tsup electron/main.ts electron/preload.ts --format cjs --out-dir dist-electron --watch --sourcemap --external electron",
-    "dev:electron": "wait-on tcp:5173 file:dist-electron/main.js && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron dist-electron/main.js",
+    "dev:electron": "wait-on tcp:5173 file:dist-electron/main.js && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron --remote-debugging-port=9001 dist-electron/main.js",
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
     "build:main": "tsup electron/main.ts electron/preload.ts --format cjs --out-dir dist-electron --minify --external electron",

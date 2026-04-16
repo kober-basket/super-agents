@@ -1,69 +1,73 @@
+import { createBrowserDesktopAgent } from "./browser-desktop-agent";
+
+const desktopAgent = window.desktopAgent ?? createBrowserDesktopAgent();
+
 export const workspaceClient = {
-  bootstrap: () => window.desktopAgent.bootstrap(),
-  listConversations: () => window.desktopAgent.listConversations(),
-  getConversation: (conversationId: string) => window.desktopAgent.getConversation(conversationId),
-  startChatTurn: (payload: Parameters<typeof window.desktopAgent.startChatTurn>[0]) =>
-    window.desktopAgent.startChatTurn(payload),
-  cancelChatTurn: (conversationId: string) => window.desktopAgent.cancelChatTurn(conversationId),
-  sendChatMessage: (payload: Parameters<typeof window.desktopAgent.sendChatMessage>[0]) =>
-    window.desktopAgent.sendChatMessage(payload),
-  deleteConversation: (conversationId: string) => window.desktopAgent.deleteConversation(conversationId),
-  listKnowledgeBases: () => window.desktopAgent.listKnowledgeBases(),
-  createKnowledgeBase: (payload: Parameters<typeof window.desktopAgent.createKnowledgeBase>[0]) =>
-    window.desktopAgent.createKnowledgeBase(payload),
-  deleteKnowledgeBase: (baseId: string) => window.desktopAgent.deleteKnowledgeBase(baseId),
-  addKnowledgeFiles: (payload: Parameters<typeof window.desktopAgent.addKnowledgeFiles>[0]) =>
-    window.desktopAgent.addKnowledgeFiles(payload),
-  addKnowledgeDirectory: (payload: Parameters<typeof window.desktopAgent.addKnowledgeDirectory>[0]) =>
-    window.desktopAgent.addKnowledgeDirectory(payload),
-  addKnowledgeNote: (payload: Parameters<typeof window.desktopAgent.addKnowledgeNote>[0]) =>
-    window.desktopAgent.addKnowledgeNote(payload),
-  addKnowledgeUrl: (payload: Parameters<typeof window.desktopAgent.addKnowledgeUrl>[0]) =>
-    window.desktopAgent.addKnowledgeUrl(payload),
-  addKnowledgeWebsite: (payload: Parameters<typeof window.desktopAgent.addKnowledgeWebsite>[0]) =>
-    window.desktopAgent.addKnowledgeWebsite(payload),
-  deleteKnowledgeItem: (payload: Parameters<typeof window.desktopAgent.deleteKnowledgeItem>[0]) =>
-    window.desktopAgent.deleteKnowledgeItem(payload),
-  searchKnowledgeBases: (payload: Parameters<typeof window.desktopAgent.searchKnowledgeBases>[0]) =>
-    window.desktopAgent.searchKnowledgeBases(payload),
-  generateProjectReport: (payload: Parameters<typeof window.desktopAgent.generateProjectReport>[0]) =>
-    window.desktopAgent.generateProjectReport(payload),
-  generateEmergencyPlan: (payload: Parameters<typeof window.desktopAgent.generateEmergencyPlan>[0]) =>
-    window.desktopAgent.generateEmergencyPlan(payload),
-  uninstallSkill: (skillId: string) => window.desktopAgent.uninstallSkill(skillId),
-  updateConfig: (patch: Parameters<typeof window.desktopAgent.updateConfig>[0]) =>
-    window.desktopAgent.updateConfig(patch),
-  getRemoteControlStatus: () => window.desktopAgent.getRemoteControlStatus(),
-  startWechatLogin: () => window.desktopAgent.startWechatLogin(),
-  waitWechatLogin: (payload: Parameters<typeof window.desktopAgent.waitWechatLogin>[0]) =>
-    window.desktopAgent.waitWechatLogin(payload),
-  disconnectWechat: () => window.desktopAgent.disconnectWechat(),
-  fetchProviderModels: (payload: Parameters<typeof window.desktopAgent.fetchProviderModels>[0]) =>
-    window.desktopAgent.fetchProviderModels(payload),
-  transcribeAudio: (payload: Parameters<typeof window.desktopAgent.transcribeAudio>[0]) =>
-    window.desktopAgent.transcribeAudio(payload),
-  inspectMcpServer: (payload: Parameters<typeof window.desktopAgent.inspectMcpServer>[0]) =>
-    window.desktopAgent.inspectMcpServer(payload),
-  debugMcpTool: (payload: Parameters<typeof window.desktopAgent.debugMcpTool>[0]) =>
-    window.desktopAgent.debugMcpTool(payload),
-  listTools: () => window.desktopAgent.listTools(),
-  selectFiles: () => window.desktopAgent.selectFiles(),
-  prepareAttachments: (filePaths: string[]) => window.desktopAgent.prepareAttachments(filePaths),
-  selectWorkspaceFolder: () => window.desktopAgent.selectWorkspaceFolder(),
-  readPreview: (payload: Parameters<typeof window.desktopAgent.readPreview>[0]) =>
-    window.desktopAgent.readPreview(payload),
-  openPreviewTarget: (payload: Parameters<typeof window.desktopAgent.openPreviewTarget>[0]) =>
-    window.desktopAgent.openPreviewTarget(payload),
-  openWorkspaceFolder: () => window.desktopAgent.openWorkspaceFolder(),
-  openFolder: (targetPath: string) => window.desktopAgent.openFolder(targetPath),
-  getWindowState: () => window.desktopAgent.getWindowState(),
-  minimizeWindow: () => window.desktopAgent.minimizeWindow(),
-  toggleMaximizeWindow: () => window.desktopAgent.toggleMaximizeWindow(),
-  closeWindow: () => window.desktopAgent.closeWindow(),
-  onWorkspaceChanged: (listener: Parameters<typeof window.desktopAgent.onWorkspaceChanged>[0]) =>
-    window.desktopAgent.onWorkspaceChanged(listener),
-  onWindowStateChanged: (listener: Parameters<typeof window.desktopAgent.onWindowStateChanged>[0]) =>
-    window.desktopAgent.onWindowStateChanged(listener),
-  onChatEvent: (listener: Parameters<typeof window.desktopAgent.onChatEvent>[0]) =>
-    window.desktopAgent.onChatEvent(listener),
+  bootstrap: () => desktopAgent.bootstrap(),
+  listConversations: () => desktopAgent.listConversations(),
+  getConversation: (conversationId: string) => desktopAgent.getConversation(conversationId),
+  startChatTurn: (payload: Parameters<typeof desktopAgent.startChatTurn>[0]) =>
+    desktopAgent.startChatTurn(payload),
+  cancelChatTurn: (conversationId: string) => desktopAgent.cancelChatTurn(conversationId),
+  sendChatMessage: (payload: Parameters<typeof desktopAgent.sendChatMessage>[0]) =>
+    desktopAgent.sendChatMessage(payload),
+  deleteConversation: (conversationId: string) => desktopAgent.deleteConversation(conversationId),
+  listKnowledgeBases: () => desktopAgent.listKnowledgeBases(),
+  createKnowledgeBase: (payload: Parameters<typeof desktopAgent.createKnowledgeBase>[0]) =>
+    desktopAgent.createKnowledgeBase(payload),
+  deleteKnowledgeBase: (baseId: string) => desktopAgent.deleteKnowledgeBase(baseId),
+  addKnowledgeFiles: (payload: Parameters<typeof desktopAgent.addKnowledgeFiles>[0]) =>
+    desktopAgent.addKnowledgeFiles(payload),
+  addKnowledgeDirectory: (payload: Parameters<typeof desktopAgent.addKnowledgeDirectory>[0]) =>
+    desktopAgent.addKnowledgeDirectory(payload),
+  addKnowledgeNote: (payload: Parameters<typeof desktopAgent.addKnowledgeNote>[0]) =>
+    desktopAgent.addKnowledgeNote(payload),
+  addKnowledgeUrl: (payload: Parameters<typeof desktopAgent.addKnowledgeUrl>[0]) =>
+    desktopAgent.addKnowledgeUrl(payload),
+  addKnowledgeWebsite: (payload: Parameters<typeof desktopAgent.addKnowledgeWebsite>[0]) =>
+    desktopAgent.addKnowledgeWebsite(payload),
+  deleteKnowledgeItem: (payload: Parameters<typeof desktopAgent.deleteKnowledgeItem>[0]) =>
+    desktopAgent.deleteKnowledgeItem(payload),
+  searchKnowledgeBases: (payload: Parameters<typeof desktopAgent.searchKnowledgeBases>[0]) =>
+    desktopAgent.searchKnowledgeBases(payload),
+  generateProjectReport: (payload: Parameters<typeof desktopAgent.generateProjectReport>[0]) =>
+    desktopAgent.generateProjectReport(payload),
+  generateEmergencyPlan: (payload: Parameters<typeof desktopAgent.generateEmergencyPlan>[0]) =>
+    desktopAgent.generateEmergencyPlan(payload),
+  uninstallSkill: (skillId: string) => desktopAgent.uninstallSkill(skillId),
+  updateConfig: (patch: Parameters<typeof desktopAgent.updateConfig>[0]) =>
+    desktopAgent.updateConfig(patch),
+  getRemoteControlStatus: () => desktopAgent.getRemoteControlStatus(),
+  startWechatLogin: () => desktopAgent.startWechatLogin(),
+  waitWechatLogin: (payload: Parameters<typeof desktopAgent.waitWechatLogin>[0]) =>
+    desktopAgent.waitWechatLogin(payload),
+  disconnectWechat: () => desktopAgent.disconnectWechat(),
+  fetchProviderModels: (payload: Parameters<typeof desktopAgent.fetchProviderModels>[0]) =>
+    desktopAgent.fetchProviderModels(payload),
+  transcribeAudio: (payload: Parameters<typeof desktopAgent.transcribeAudio>[0]) =>
+    desktopAgent.transcribeAudio(payload),
+  inspectMcpServer: (payload: Parameters<typeof desktopAgent.inspectMcpServer>[0]) =>
+    desktopAgent.inspectMcpServer(payload),
+  debugMcpTool: (payload: Parameters<typeof desktopAgent.debugMcpTool>[0]) =>
+    desktopAgent.debugMcpTool(payload),
+  listTools: () => desktopAgent.listTools(),
+  selectFiles: () => desktopAgent.selectFiles(),
+  prepareAttachments: (filePaths: string[]) => desktopAgent.prepareAttachments(filePaths),
+  selectWorkspaceFolder: () => desktopAgent.selectWorkspaceFolder(),
+  readPreview: (payload: Parameters<typeof desktopAgent.readPreview>[0]) =>
+    desktopAgent.readPreview(payload),
+  openPreviewTarget: (payload: Parameters<typeof desktopAgent.openPreviewTarget>[0]) =>
+    desktopAgent.openPreviewTarget(payload),
+  openWorkspaceFolder: () => desktopAgent.openWorkspaceFolder(),
+  openFolder: (targetPath: string) => desktopAgent.openFolder(targetPath),
+  getWindowState: () => desktopAgent.getWindowState(),
+  minimizeWindow: () => desktopAgent.minimizeWindow(),
+  toggleMaximizeWindow: () => desktopAgent.toggleMaximizeWindow(),
+  closeWindow: () => desktopAgent.closeWindow(),
+  onWorkspaceChanged: (listener: Parameters<typeof desktopAgent.onWorkspaceChanged>[0]) =>
+    desktopAgent.onWorkspaceChanged(listener),
+  onWindowStateChanged: (listener: Parameters<typeof desktopAgent.onWindowStateChanged>[0]) =>
+    desktopAgent.onWindowStateChanged(listener),
+  onChatEvent: (listener: Parameters<typeof desktopAgent.onChatEvent>[0]) =>
+    desktopAgent.onChatEvent(listener),
 };

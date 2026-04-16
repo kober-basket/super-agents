@@ -616,6 +616,21 @@ export class ChatOrchestrator {
       return;
     }
 
+    if (update.sessionUpdate === "agent_thought_chunk") {
+      const textDelta = contentBlockToText(update.content);
+      if (!textDelta) {
+        return;
+      }
+
+      this.emitEvent({
+        type: "thought_delta",
+        conversationId: activeTurn.conversationId,
+        turnId: activeTurn.turnId,
+        textDelta,
+      });
+      return;
+    }
+
     if (update.sessionUpdate === "plan") {
       this.emitEvent({
         type: "plan_updated",

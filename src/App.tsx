@@ -39,7 +39,6 @@ import type { SettingsSection } from "./features/settings/types";
 import { useWorkspaceController } from "./features/workspace/useWorkspaceController";
 import { fileKind, sanitizeMcpName } from "./features/shared/utils";
 import { ChatWorkspace } from "./features/chat/ChatWorkspace";
-import { useGlobalSmoothScroll } from "./lib/useGlobalSmoothScroll";
 import {
   arrayBufferToBase64,
   buildVoiceRecordingFileName,
@@ -194,6 +193,7 @@ function createConversationRuntimeState(
     planEntries: [],
     toolCalls: [],
     terminalOutputs: {},
+    thoughtText: "",
   };
 }
 
@@ -299,8 +299,6 @@ function formatProviderModelsRefreshError(provider: Pick<ModelProviderConfig, "n
 }
 
 export default function App() {
-  useGlobalSmoothScroll();
-
   const [view, setView] = useState<AppSection>("chat");
   const [conversations, setConversations] = useState<ChatConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -910,6 +908,23 @@ export default function App() {
               error: undefined,
               stopReason: undefined,
               planEntries: event.entries,
+            },
+          };
+        });
+        return;
+      }
+
+      if (event.type === "thought_delta") {
+        setConversationRuntimeStates((current) => {
+          const previous = current[event.conversationId] ?? createConversationRuntimeState("running");
+          return {
+            ...current,
+            [event.conversationId]: {
+              ...previous,
+              status: preserveActiveTurnStatus(previous.status),
+              error: undefined,
+              stopReason: undefined,
+              thoughtText: `${previous.thoughtText}${event.textDelta}`,
             },
           };
         });
@@ -1997,6 +2012,18 @@ export default function App() {
     };
   }
 
+  function buildOptimisticConversationPreview(content: string, pendingAttachments: FileDropEntry[]) {
+    const trimmed = content.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+
+    const attachmentNames = pendingAttachments
+      .map((attachment) => attachment.name.trim())
+      .filter(Boolean);
+    return attachmentNames.join("、");
+  }
+
   async function sendChatMessage() {
     const content = draftMessage.trim();
     const pendingAttachments = attachments.map((attachment) => ({ ...attachment }));
@@ -2016,6 +2043,53 @@ export default function App() {
 
     setMessageScrollRequest((current) => current + 1);
 
+    const now = Date.now();
+    const previousConversation = activeConversation;
+    const previousConversationId = activeConversationId;
+    const previousConversations = conversations;
+    const nextConversationId = activeConversationId ?? `temp-${uid()}`;
+    const optimisticUserMessage: ChatMessage = {
+      id: `temp-user-${uid()}`,
+      role: "user",
+      content,
+      attachments: pendingAttachments,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const optimisticAssistantMessage: ChatMessage = {
+      id: `temp-assistant-${uid()}`,
+      role: "assistant",
+      content: "",
+      createdAt: now + 1,
+      updatedAt: now + 1,
+    };
+    const optimisticPreview = buildOptimisticConversationPreview(content, pendingAttachments);
+    const optimisticConversation: ChatConversation = activeConversation
+      ? {
+          ...activeConversation,
+          messages: [...activeConversation.messages, optimisticUserMessage, optimisticAssistantMessage],
+          updatedAt: now + 1,
+          lastMessageAt: now + 1,
+          messageCount: activeConversation.messageCount + 2,
+          preview: optimisticPreview || activeConversation.preview,
+          selectedKnowledgeBaseIds,
+        }
+      : {
+          id: nextConversationId,
+          title: content || pendingAttachments[0]?.name || "新对话",
+          createdAt: now,
+          updatedAt: now + 1,
+          lastMessageAt: now + 1,
+          preview: optimisticPreview,
+          messageCount: 2,
+          selectedKnowledgeBaseIds,
+          messages: [optimisticUserMessage, optimisticAssistantMessage],
+        };
+
+    syncConversationState(optimisticConversation);
+    setView("chat");
+    setDraftMessage("");
+    setAttachments([]);
     setStartingChatTurn(true);
 
     try {
@@ -2031,10 +2105,19 @@ export default function App() {
         ...current,
         [result.conversation.id]: createConversationRuntimeState("running"),
       }));
-      setView("chat");
-      setDraftMessage("");
-      setAttachments([]);
     } catch (error) {
+      if (previousConversation) {
+        setActiveConversation(previousConversation);
+        setActiveConversationId(previousConversationId);
+        upsertConversationSummary(toConversationSummary(previousConversation));
+      } else {
+        setActiveConversation(null);
+        setActiveConversationId(null);
+        setConversations(previousConversations);
+      }
+      setView("chat");
+      setDraftMessage(content);
+      setAttachments(pendingAttachments);
       /*
       setToast(error instanceof Error ? error.message : "发送消息失败");
       legacy fallback
