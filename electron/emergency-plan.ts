@@ -9,11 +9,20 @@ import {
   TextRun,
   type ISectionOptions,
 } from "docx";
+import { createRequire } from "node:module";
 import mammoth from "mammoth";
-import pdfParse from "pdf-parse";
-import WordExtractor from "word-extractor";
 
 import type { EmergencyPlanInput, FileDropEntry } from "../src/types";
+
+const runtimeRequire = createRequire(__filename);
+const pdfParse = runtimeRequire("pdf-parse") as (input: Buffer) => Promise<{ text?: string }>;
+const WordExtractor = runtimeRequire("word-extractor") as {
+  new (): {
+    extract: (filePath: string) => Promise<{
+      getBody: () => string;
+    }>;
+  };
+};
 
 export interface RecognizedTemplate {
   name: string;

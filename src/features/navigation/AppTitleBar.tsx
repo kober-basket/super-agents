@@ -8,6 +8,8 @@ const SECTION_LABELS: Record<AppSection, string> = {
   skills: "技能",
   tools: "工具",
   knowledge: "知识库",
+  reports: "报告生成",
+  emergency: "应急预案",
   settings: "设置",
 };
 

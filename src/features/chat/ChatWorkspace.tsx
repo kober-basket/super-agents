@@ -1193,7 +1193,6 @@ export function ChatWorkspace({
               <div className="chat-home-stage">
                 <div className="chat-home-center-copy">
                   <h1>开始新的对话</h1>
-                  <p>一句话描述任务，剩下的交给智能体。</p>
                 </div>
                 <div className="chat-home-composer-shell">
                   {renderComposer(true)}

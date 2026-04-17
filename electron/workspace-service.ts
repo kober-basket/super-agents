@@ -51,6 +51,7 @@ import type {
   ProjectReportInput,
   ProjectReportResult,
   ProxyConfig,
+  RuntimeSkill,
   SkillConfig,
   SkillImportResult,
   WorkspaceToolCatalog,
@@ -692,6 +693,27 @@ function parseSkillFrontmatter(content: string) {
   };
 }
 
+function stripSkillFrontmatter(content: string, skillName?: string) {
+  let next = content.replace(/\r\n/g, "\n").trim();
+  if (!next) {
+    return "";
+  }
+
+  if (next.startsWith("---\n")) {
+    const frontmatterEnd = next.indexOf("\n---\n", 4);
+    if (frontmatterEnd >= 0) {
+      next = next.slice(frontmatterEnd + 5).trimStart();
+    }
+  }
+
+  if (skillName) {
+    const escapedName = skillName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    next = next.replace(new RegExp(`^#\\s+${escapedName}\\s*\\n+`, "i"), "");
+  }
+
+  return next.trim();
+}
+
 async function readLocalCodexSkill(skillRoot: string, system: boolean): Promise<SkillConfig | null> {
   try {
     const content = await readFile(path.join(skillRoot, "SKILL.md"), "utf8");
@@ -706,6 +728,23 @@ async function readLocalCodexSkill(skillRoot: string, system: boolean): Promise<
       enabled: true,
       sourcePath: skillRoot,
       system,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function readRuntimeSkill(skillRoot: string, location: string): Promise<RuntimeSkill | null> {
+  try {
+    const content = await readFile(path.join(skillRoot, "SKILL.md"), "utf8");
+    const parsed = parseSkillFrontmatter(content);
+    const name = parsed.name || path.basename(skillRoot);
+    return {
+      id: sanitizeModelProviderId(name),
+      name,
+      description: parsed.description || "Codex local skill",
+      location,
+      content,
     };
   } catch {
     return null;
@@ -730,6 +769,114 @@ async function listCodexSkillsFromRoot(skillsRoot: string) {
     if (skill) result.push(skill);
   }
   return result;
+}
+
+async function listRuntimeSkillsFromRoot(skillsRoot: string, locationLabel: string) {
+  const result: RuntimeSkill[] = [];
+  const entries = await readdir(skillsRoot, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name === ".system") {
+      const systemEntries = await readdir(path.join(skillsRoot, entry.name), { withFileTypes: true }).catch(() => []);
+      for (const systemEntry of systemEntries) {
+        if (!systemEntry.isDirectory()) continue;
+        const skill = await readRuntimeSkill(
+          path.join(skillsRoot, entry.name, systemEntry.name),
+          `${locationLabel}/.system/${systemEntry.name}`,
+        );
+        if (skill) result.push(skill);
+      }
+      continue;
+    }
+
+    const skill = await readRuntimeSkill(path.join(skillsRoot, entry.name), `${locationLabel}/${entry.name}`);
+    if (skill) result.push(skill);
+  }
+  return result;
+}
+
+async function collectRuntimeSkills(statePath: string, workspaceRoot?: string) {
+  const managedRoots = getManagedCodexSkillsRoots(statePath, workspaceRoot);
+  const discovered = [
+    ...(await listRuntimeSkillsFromRoot(getExternalCodexSkillsRoot(), "$CODEX_HOME/skills").catch(() => [])),
+    ...(
+      await Promise.all(
+        managedRoots.map((root) =>
+          listRuntimeSkillsFromRoot(root, path.relative(path.dirname(statePath), root) || root).catch(() => []),
+        ),
+      )
+    ).flat(),
+  ];
+
+  return Array.from(new Map(discovered.map((skill) => [skill.id, skill] as const)).values()).sort((a, b) =>
+    a.name.localeCompare(b.name, "zh-CN"),
+  );
+}
+
+async function loadCodexSkillPrompt(skill: SkillConfig) {
+  if (!skill.sourcePath?.trim()) {
+    return "";
+  }
+
+  try {
+    const content = await readFile(path.join(skill.sourcePath, "SKILL.md"), "utf8");
+    return stripSkillFrontmatter(content, skill.name);
+  } catch {
+    return "";
+  }
+}
+
+async function buildEnabledSkillPromptContext(config: AppConfig) {
+  const enabledSkills = config.skills.filter((skill) => skill.enabled);
+  if (enabledSkills.length === 0) {
+    return "";
+  }
+
+  const sections = await Promise.all(
+    enabledSkills.map(async (skill) => {
+      if (skill.kind === "codex") {
+        const body = await loadCodexSkillPrompt(skill);
+        if (!body) {
+          return "";
+        }
+
+        return [
+          `## ${skill.name}`,
+          `Type: codex`,
+          skill.description ? `Description: ${skill.description}` : "",
+          "Use this skill only when it is relevant to the user's request.",
+          "",
+          body,
+        ]
+          .filter(Boolean)
+          .join("\n");
+      }
+
+      const command = skill.command.replace(/\$ARGUMENTS/g, "<user request>");
+      return [
+        `## ${skill.name}`,
+        `Type: command`,
+        skill.description ? `Description: ${skill.description}` : "",
+        "Use this skill only when it is relevant to the user's request.",
+        "Template:",
+        command,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }),
+  );
+
+  const nonEmptySections = sections.filter(Boolean);
+  if (nonEmptySections.length === 0) {
+    return "";
+  }
+
+  return [
+    "Enabled workspace skills for this turn:",
+    "Apply these skills only when they clearly match the user's intent. Do not force them into unrelated requests.",
+    "",
+    nonEmptySections.join("\n\n"),
+  ].join("\n");
 }
 
 async function assertDirectoryExists(targetPath: string) {
@@ -897,13 +1044,17 @@ export class WorkspaceService {
     return {
       snapshotAt: Date.now(),
       config: state.config,
-      availableSkills: [],
+      availableSkills: await collectRuntimeSkills(this.statePath, state.config.workspaceRoot),
       mcpStatuses: getMcpStatuses(state.config),
     };
   }
 
   async getConfigSnapshot(): Promise<AppConfig> {
     return (await this.loadState()).config;
+  }
+
+  async getEnabledSkillPromptContext(config?: AppConfig) {
+    return await buildEnabledSkillPromptContext(config ?? (await this.getConfigSnapshot()));
   }
 
   async shutdown() {

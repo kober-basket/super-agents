@@ -1,5 +1,5 @@
-import { createDecipheriv, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import mime from "mime-types";
 import QRCode from "qrcode";
@@ -43,6 +43,7 @@ type WaitForWechatQrLoginOptions = {
 type WechatCdnMedia = {
   encrypt_query_param?: string;
   aes_key?: string;
+  encrypt_type?: number;
   full_url?: string;
 };
 
@@ -53,6 +54,7 @@ type WechatTextItem = {
 type WechatImageItem = {
   media?: WechatCdnMedia;
   aeskey?: string;
+  mid_size?: number;
 };
 
 type WechatFileItem = {
@@ -219,6 +221,11 @@ async function apiPost<TResponse>(
     timeoutMs,
   );
   return (text ? JSON.parse(text) : {}) as TResponse;
+}
+
+function encryptAesEcb(plaintext: Buffer, key: Buffer) {
+  const cipher = createCipheriv("aes-128-ecb", key, null);
+  return Buffer.concat([cipher.update(plaintext), cipher.final()]);
 }
 
 function purgeExpiredLogins() {
@@ -458,6 +465,146 @@ export async function sendWechatTextMessage(params: {
     },
     params.botToken,
   );
+}
+
+type WechatUploadUrlResponse = {
+  upload_param?: string;
+  upload_full_url?: string;
+};
+
+function buildWechatUploadUrl(cdnBaseUrl: string, uploadParam: string, fileKey: string) {
+  return `${cdnBaseUrl}/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(fileKey)}`;
+}
+
+async function uploadWechatImage(params: {
+  baseUrl: string;
+  cdnBaseUrl: string;
+  botToken: string;
+  toUserId: string;
+  filePath: string;
+}) {
+  const plaintext = await readFile(params.filePath);
+  const rawSize = plaintext.length;
+  const fileSize = Math.ceil((rawSize + 1) / 16) * 16;
+  const rawFileMd5 = createHash("md5").update(plaintext).digest("hex");
+  const fileKey = randomBytes(16).toString("hex");
+  const aesKey = randomBytes(16);
+
+  const uploadUrlResponse = await apiPost<WechatUploadUrlResponse>(
+    params.baseUrl,
+    "ilink/bot/getuploadurl",
+    {
+      filekey: fileKey,
+      media_type: 1,
+      to_user_id: params.toUserId,
+      rawsize: rawSize,
+      rawfilemd5: rawFileMd5,
+      filesize: fileSize,
+      no_need_thumb: true,
+      aeskey: aesKey.toString("hex"),
+      base_info: {
+        channel_version: "super-agents",
+      },
+    },
+    params.botToken,
+  );
+
+  const uploadUrl = uploadUrlResponse.upload_full_url?.trim()
+    ? uploadUrlResponse.upload_full_url.trim()
+    : uploadUrlResponse.upload_param?.trim()
+      ? buildWechatUploadUrl(params.cdnBaseUrl, uploadUrlResponse.upload_param.trim(), fileKey)
+      : "";
+
+  if (!uploadUrl) {
+    throw new Error("微信图片上传地址缺失");
+  }
+
+  const ciphertext = encryptAesEcb(plaintext, aesKey);
+  const response = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+    },
+    body: ciphertext,
+  });
+
+  if (!response.ok) {
+    const message = response.headers.get("x-error-message") ?? (await response.text());
+    throw new Error(`微信图片上传失败: ${response.status} ${message}`);
+  }
+
+  const downloadParam = response.headers.get("x-encrypted-param")?.trim() || "";
+  if (!downloadParam) {
+    throw new Error("微信图片上传成功但缺少下载参数");
+  }
+
+  return {
+    aesKey,
+    downloadParam,
+    fileSize,
+  };
+}
+
+export async function sendWechatImageMessage(params: {
+  baseUrl: string;
+  cdnBaseUrl: string;
+  botToken: string;
+  toUserId: string;
+  filePath: string;
+  contextToken?: string;
+  text?: string;
+}) {
+  const uploaded = await uploadWechatImage({
+    baseUrl: params.baseUrl,
+    cdnBaseUrl: params.cdnBaseUrl,
+    botToken: params.botToken,
+    toUserId: params.toUserId,
+    filePath: params.filePath,
+  });
+
+  const text = params.text?.trim() || "";
+  const items: WechatMessageItem[] = [];
+  if (text) {
+    items.push({
+      type: 1,
+      text_item: {
+        text,
+      },
+    });
+  }
+  items.push({
+    type: 2,
+    image_item: {
+      media: {
+        encrypt_query_param: uploaded.downloadParam,
+        aes_key: uploaded.aesKey.toString("base64"),
+        encrypt_type: 1,
+      },
+      mid_size: uploaded.fileSize,
+    },
+  });
+
+  for (const item of items) {
+    await apiPost(
+      params.baseUrl,
+      "ilink/bot/sendmessage",
+      {
+        msg: {
+          from_user_id: "",
+          to_user_id: params.toUserId,
+          client_id: `super-agents-${randomUUID()}`,
+          message_type: 2,
+          message_state: 2,
+          item_list: [item],
+          context_token: params.contextToken || undefined,
+        },
+        base_info: {
+          channel_version: "super-agents",
+        },
+      },
+      params.botToken,
+    );
+  }
 }
 
 export function extractWechatText(message: WechatProtocolMessage) {

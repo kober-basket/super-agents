@@ -393,7 +393,6 @@ export default function App() {
     activeModel,
     appendAttachments,
     attachments,
-    availableSkills,
     commitConfig,
     composerModelId,
     config,
@@ -413,7 +412,6 @@ export default function App() {
     skillImporting,
     uninstallSkill,
     updateConfigField,
-    useReferenceSkill,
   } = useWorkspaceController({
     onToast: (message) => setToast(message),
   });
@@ -444,13 +442,6 @@ export default function App() {
         matchQuery(skillQuery, [skill.name, skill.description, skill.location]),
       ),
     [configuredSkills, skillQuery],
-  );
-  const filteredReferenceSkills = useMemo(
-    () =>
-      availableSkills.filter((skill) =>
-        matchQuery(skillQuery, [skill.name, skill.description, skill.location]),
-      ),
-    [availableSkills, skillQuery],
   );
   const reportMapTools = useMemo(
     () =>
@@ -2378,8 +2369,7 @@ export default function App() {
             : `${activeSidebarWidth}px minmax(0, 1fr)`,
         }
       : undefined;
-  const hasSkillResults =
-    filteredInstalledSkills.length > 0 || filteredReferenceSkills.length > 0;
+  const hasSkillResults = filteredInstalledSkills.length > 0;
   const activeConversationRuntimeState =
     (activeConversationId ? conversationRuntimeStates[activeConversationId] : null) ?? null;
   const activeKnowledgeBaseIds = useMemo(
@@ -2542,7 +2532,6 @@ export default function App() {
         <Suspense fallback={<LazyViewFallback />}>
           <SkillsView
             filteredInstalledSkills={filteredInstalledSkills}
-            filteredReferenceSkills={filteredReferenceSkills}
             hasResults={hasSkillResults}
             skillQuery={skillQuery}
             skillsImporting={skillImporting}
@@ -2553,7 +2542,6 @@ export default function App() {
             onSkillQueryChange={setSkillQuery}
             onUninstallSkill={uninstallSkill}
             onUpdateInstalledSkill={updateInstalledSkill}
-            onUseReferenceSkill={useReferenceSkill}
           />
         </Suspense>
       );

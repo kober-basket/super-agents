@@ -1,7 +1,11 @@
 ﻿import path from "node:path";
 
+import { stat } from "node:fs/promises";
+
 import type {
   AppConfig,
+  ChatMessage,
+  ChatMessageRuntimeTrace,
   RemoteChannelId,
   RemoteControlStatus,
   WechatLoginStartResult,
@@ -20,6 +24,7 @@ import {
   extractWechatText,
   getWechatUpdates,
   isWechatUserMessage,
+  sendWechatImageMessage,
   sendWechatTextMessage,
   startWechatQrLogin,
   waitForWechatQrLogin,
@@ -64,7 +69,12 @@ interface InboundBridgeMessage {
   text: string;
   attachmentPaths: string[];
   contextToken?: string;
-  replyText: (text: string, binding: RemotePeerBinding) => Promise<void>;
+  replyText: (reply: RemoteReplyPayload, binding: RemotePeerBinding) => Promise<void>;
+}
+
+interface RemoteReplyPayload {
+  text: string;
+  attachmentPaths?: string[];
 }
 
 const DEFAULT_STATE: RemoteControlPersistedState = {
@@ -106,6 +116,112 @@ function buildRemoteAssistantReply(text: string) {
     return trimmed;
   }
   return "The agent finished without a text reply. Please open the desktop app to review tool output and files.";
+}
+
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg"]);
+
+function collectLocalPathsFromText(value: string) {
+  const candidates = value.match(/[A-Za-z]:\\[^\s"'`|<>]+|\/[^\s"'`|<>]+/g) ?? [];
+  return candidates.filter((candidate) => path.isAbsolute(candidate));
+}
+
+function collectLocalPathsFromJson(value?: string) {
+  if (!value?.trim()) {
+    return [];
+  }
+
+  try {
+    const results = new Set<string>();
+    const queue: unknown[] = [JSON.parse(value)];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (typeof current === "string") {
+        for (const candidate of collectLocalPathsFromText(current)) {
+          results.add(candidate);
+        }
+        continue;
+      }
+      if (Array.isArray(current)) {
+        queue.push(...current);
+        continue;
+      }
+      if (current && typeof current === "object") {
+        queue.push(...Object.values(current));
+      }
+    }
+    return Array.from(results);
+  } catch {
+    return collectLocalPathsFromText(value);
+  }
+}
+
+function collectRuntimeTracePaths(runtimeTrace?: ChatMessageRuntimeTrace) {
+  if (!runtimeTrace) {
+    return [];
+  }
+
+  const paths = new Set<string>();
+  for (const toolCall of runtimeTrace.toolCalls) {
+    for (const location of toolCall.locations ?? []) {
+      if (location.path && path.isAbsolute(location.path)) {
+        paths.add(location.path);
+      }
+    }
+    for (const content of toolCall.content) {
+      if (content.type === "diff" && path.isAbsolute(content.path)) {
+        paths.add(content.path);
+      }
+    }
+    for (const candidate of collectLocalPathsFromJson(toolCall.rawInputJson)) {
+      paths.add(candidate);
+    }
+    for (const candidate of collectLocalPathsFromJson(toolCall.rawOutputJson)) {
+      paths.add(candidate);
+    }
+  }
+
+  for (const terminal of Object.values(runtimeTrace.terminalOutputs)) {
+    for (const candidate of collectLocalPathsFromText(terminal.output)) {
+      paths.add(candidate);
+    }
+  }
+
+  return Array.from(paths);
+}
+
+async function collectRemoteReplyImagePaths(assistantMessage: ChatMessage, turnStartedAt: number) {
+  const candidates = new Set<string>();
+
+  for (const attachment of assistantMessage.attachments ?? []) {
+    if (attachment.path && path.isAbsolute(attachment.path)) {
+      candidates.add(attachment.path);
+    }
+  }
+  for (const candidate of collectLocalPathsFromText(assistantMessage.content)) {
+    candidates.add(candidate);
+  }
+  for (const candidate of collectRuntimeTracePaths(assistantMessage.runtimeTrace)) {
+    candidates.add(candidate);
+  }
+
+  const images: string[] = [];
+  for (const candidate of candidates) {
+    if (!IMAGE_EXTENSIONS.has(path.extname(candidate).toLowerCase())) {
+      continue;
+    }
+
+    try {
+      const entry = await stat(candidate);
+      if (!entry.isFile() || entry.mtimeMs < turnStartedAt - 5_000) {
+        continue;
+      }
+      images.push(candidate);
+    } catch {
+      // Ignore paths that are not accessible locally.
+    }
+  }
+
+  return images.sort((left, right) => left.localeCompare(right, "zh-CN"));
 }
 
 function buildRemoteFailureReply(error: unknown) {
@@ -410,7 +526,7 @@ export class RemoteControlService {
               attachmentPaths: message.attachmentPaths,
               contextToken: message.contextToken,
               replyText: async (reply) => {
-                await message.replyText(reply);
+                await message.replyText(reply.text);
                 this.noteOutbound("dingtalk");
               },
             });
@@ -463,7 +579,7 @@ export class RemoteControlService {
               text: message.text,
               attachmentPaths: message.attachmentPaths,
               replyText: async (reply) => {
-                await message.replyText(reply);
+                await message.replyText(reply.text);
                 this.noteOutbound("feishu");
               },
             });
@@ -539,7 +655,7 @@ export class RemoteControlService {
               text: message.text,
               attachmentPaths: message.attachmentPaths,
               replyText: async (reply) => {
-                await message.replyText(reply);
+                await message.replyText(reply.text);
                 this.noteOutbound("wecom");
               },
             });
@@ -721,14 +837,29 @@ export class RemoteControlService {
         }).catch(() => []),
       contextToken: message.context_token?.trim() || undefined,
       replyText: async (reply, binding) => {
-        await sendWechatTextMessage({
-          baseUrl: profile.baseUrl,
-          botToken: profile.botToken,
-          toUserId: peerId,
-          text: reply,
-          contextToken: binding.contextToken,
-        });
-        this.noteOutbound("wechat");
+        const text = reply.text.trim();
+        if (text) {
+          await sendWechatTextMessage({
+            baseUrl: profile.baseUrl,
+            botToken: profile.botToken,
+            toUserId: peerId,
+            text,
+            contextToken: binding.contextToken,
+          });
+          this.noteOutbound("wechat");
+        }
+
+        for (const attachmentPath of reply.attachmentPaths ?? []) {
+          await sendWechatImageMessage({
+            baseUrl: profile.baseUrl,
+            cdnBaseUrl: profile.cdnBaseUrl,
+            botToken: profile.botToken,
+            toUserId: peerId,
+            filePath: attachmentPath,
+            contextToken: binding.contextToken,
+          });
+          this.noteOutbound("wechat");
+        }
       },
     });
   }
@@ -793,6 +924,7 @@ export class RemoteControlService {
     }
 
     try {
+      const turnStartedAt = Date.now();
       const turn = await this.chatOrchestrator.startTurnWithCompletion({
         conversationId: binding.conversationId,
         content: message.text,
@@ -812,14 +944,20 @@ export class RemoteControlService {
 
       const completed = await turn.completion;
       await message.replyText(
-        buildRemoteAssistantReply(completed.assistantMessage.content),
+        {
+          text: buildRemoteAssistantReply(completed.assistantMessage.content),
+          attachmentPaths: await collectRemoteReplyImagePaths(
+            completed.assistantMessage,
+            turnStartedAt,
+          ),
+        },
         binding,
       );
       await this.options.onWorkspaceChanged?.();
     } catch (error) {
       this.noteError(message.channel, error);
       await message
-        .replyText(buildRemoteFailureReply(error), binding)
+        .replyText({ text: buildRemoteFailureReply(error) }, binding)
         .catch((replyError) => this.noteError(message.channel, replyError));
       await this.options.onWorkspaceChanged?.();
     }

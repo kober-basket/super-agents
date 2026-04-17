@@ -1,7 +1,11 @@
 import clsx from "clsx";
 
 import type { AppConfig } from "../../types";
-import { APPEARANCE_THEME_OPTIONS } from "./appearance";
+import {
+  APPEARANCE_THEME_OPTIONS,
+  getAppearanceThemeOption,
+  getVisibleAppearanceThemeOption,
+} from "./appearance";
 
 interface AppearanceSettingsProps {
   appearance: AppConfig["appearance"];
@@ -12,6 +16,12 @@ export function AppearanceSettings({
   appearance,
   onThemeChange,
 }: AppearanceSettingsProps) {
+  const visibleActiveOption = getVisibleAppearanceThemeOption(appearance.theme);
+  const activeLegacyOption = visibleActiveOption ? null : getAppearanceThemeOption(appearance.theme);
+  const themeOptions = activeLegacyOption
+    ? [...APPEARANCE_THEME_OPTIONS, activeLegacyOption]
+    : APPEARANCE_THEME_OPTIONS;
+
   return (
     <section className="settings-stage">
       <header className="settings-stage-header">
@@ -29,7 +39,7 @@ export function AppearanceSettings({
           </div>
 
           <div className="appearance-theme-grid">
-            {APPEARANCE_THEME_OPTIONS.map((option) => {
+            {themeOptions.map((option) => {
               const active = option.id === appearance.theme;
 
               return (

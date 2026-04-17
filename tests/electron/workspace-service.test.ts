@@ -66,6 +66,95 @@ test("workspace service imports a local skill into the workspace skill directory
   }
 });
 
+test("workspace service bootstrap exposes discovered runtime skills", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const workspaceRoot = path.join(tempDir, "workspace");
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const skillRoot = path.join(workspaceRoot, ".codex", "skills", "doc-helper");
+  const service = new WorkspaceService(statePath);
+
+  await mkdir(skillRoot, { recursive: true });
+  await writeFile(
+    path.join(skillRoot, "SKILL.md"),
+    ["---", "name: doc-helper", "description: Helps draft docs", "---", "", "# doc-helper", "", "Document carefully."].join("\n"),
+    "utf8",
+  );
+
+  try {
+    await service.updateConfig({ workspaceRoot });
+
+    const bootstrap = await service.bootstrap();
+    const skill = bootstrap.availableSkills.find((item) => item.name === "doc-helper");
+
+    assert.ok(skill);
+    assert.equal(skill?.description, "Helps draft docs");
+    assert.match(skill?.content ?? "", /Document carefully\./);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("workspace service builds prompt context from enabled skills only", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const workspaceRoot = path.join(tempDir, "workspace");
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const codexSkillRoot = path.join(workspaceRoot, ".codex", "skills", "spec-writer");
+  const service = new WorkspaceService(statePath);
+
+  await mkdir(codexSkillRoot, { recursive: true });
+  await writeFile(
+    path.join(codexSkillRoot, "SKILL.md"),
+    ["---", "name: spec-writer", "description: Write concise specs", "---", "", "# spec-writer", "", "Focus on acceptance criteria."].join("\n"),
+    "utf8",
+  );
+
+  try {
+    await service.updateConfig({
+      workspaceRoot,
+      skills: [
+        {
+          id: "spec-writer",
+          name: "spec-writer",
+          description: "Write concise specs",
+          kind: "codex",
+          command: "",
+          enabled: true,
+          sourcePath: codexSkillRoot,
+        },
+        {
+          id: "meeting-minutes",
+          name: "meeting-minutes",
+          description: "Turn notes into minutes",
+          kind: "command",
+          command: "Summarize notes:\n$ARGUMENTS",
+          enabled: true,
+        },
+        {
+          id: "disabled-skill",
+          name: "disabled-skill",
+          description: "Should not appear",
+          kind: "command",
+          command: "Ignore this:\n$ARGUMENTS",
+          enabled: false,
+        },
+      ],
+    });
+
+    const context = await service.getEnabledSkillPromptContext();
+
+    assert.match(context, /Enabled workspace skills for this turn:/);
+    assert.match(context, /## spec-writer/);
+    assert.match(context, /Focus on acceptance criteria\./);
+    assert.match(context, /## meeting-minutes/);
+    assert.match(context, /<user request>/);
+    assert.doesNotMatch(context, /disabled-skill/);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("workspace service rejects local skill directories without SKILL.md", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
   const sourceSkillDir = path.join(tempDir, "invalid-skill");

@@ -478,11 +478,11 @@ export class ChatOrchestrator {
     const cwd = path.resolve(config.workspaceRoot.trim() || process.cwd());
     const additionalDirectories = collectAdditionalDirectories(cwd, input);
     const mcpServers = mapConfigToAcpMcpServers(config.mcpServers);
-    const injectedContext = await this.resolveKnowledgeContext(
-      config,
-      input.content,
-      selectedKnowledgeBaseIds,
-    );
+    const [skillContext, knowledgeContext] = await Promise.all([
+      this.workspaceService.getEnabledSkillPromptContext(config),
+      this.resolveKnowledgeContext(config, input.content, selectedKnowledgeBaseIds),
+    ]);
+    const injectedContext = [skillContext, knowledgeContext].filter(Boolean).join("\n\n");
 
     return {
       cwd,

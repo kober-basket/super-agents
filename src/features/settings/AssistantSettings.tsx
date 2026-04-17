@@ -138,7 +138,6 @@ export function AssistantSettings({
       <header className="settings-stage-header">
         <div className="settings-stage-heading">
           <h1>模型</h1>
-          <p className="field-note">统一管理提供商、接口配置和可用模型。</p>
         </div>
         <button className="secondary-button" onClick={onAddModelProvider}>
           <Plus size={14} />
@@ -150,10 +149,6 @@ export function AssistantSettings({
         {modelProviders.length > 0 ? (
           <div className="provider-workbench">
             <aside className="provider-rail">
-              <div className="provider-rail-header">
-                <span className="section-kicker muted">提供商</span>
-                <p>{modelProviders.length} 个来源，左侧切换，右侧编辑。</p>
-              </div>
 
               {modelProviders.map((provider) => {
                 const enabledCount = provider.models.filter((model) => model.enabled !== false).length;

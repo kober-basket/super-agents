@@ -1,16 +1,15 @@
 import clsx from "clsx";
-import { Boxes, Compass, FolderOpen, LoaderCircle, Plus, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { Boxes, FolderOpen, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { markdownToHtml } from "../../lib/format";
 import { workspaceClient } from "../../services/workspace-client";
-import type { RuntimeSkill, SkillConfig } from "../../types";
+import type { SkillConfig } from "../../types";
 
 export type InstalledSkillView = SkillConfig & { location: string };
 
 interface SkillsViewProps {
   filteredInstalledSkills: InstalledSkillView[];
-  filteredReferenceSkills: RuntimeSkill[];
   hasResults: boolean;
   skillQuery: string;
   skillsImporting: boolean;
@@ -21,12 +20,9 @@ interface SkillsViewProps {
   onSkillQueryChange: (value: string) => void;
   onUninstallSkill: (skill: SkillConfig) => void | Promise<void>;
   onUpdateInstalledSkill: (skillId: string, patch: Partial<SkillConfig>) => void;
-  onUseReferenceSkill: (skill: RuntimeSkill) => void;
 }
 
-type SkillModalState =
-  | { kind: "installed"; skill: InstalledSkillView }
-  | { kind: "reference"; skill: RuntimeSkill };
+type SkillModalState = { kind: "installed"; skill: InstalledSkillView };
 
 const SKILL_ACCENTS = [
   "skill-accent-sky",
@@ -39,7 +35,6 @@ const SKILL_ACCENTS = [
 
 export function SkillsView({
   filteredInstalledSkills,
-  filteredReferenceSkills,
   hasResults,
   skillQuery,
   skillsImporting,
@@ -50,7 +45,6 @@ export function SkillsView({
   onSkillQueryChange,
   onUninstallSkill,
   onUpdateInstalledSkill,
-  onUseReferenceSkill,
 }: SkillsViewProps) {
   const [activeSkill, setActiveSkill] = useState<SkillModalState | null>(null);
   const [modalHtml, setModalHtml] = useState("");
@@ -100,7 +94,6 @@ export function SkillsView({
         <header className="skills-toolbar">
           <div className="skills-toolbar-copy">
             <h2>技能</h2>
-            <p>把常用能力整理成技能，方便重复使用和快速调用。</p>
           </div>
 
           <div className="skills-toolbar-actions">
@@ -137,7 +130,6 @@ export function SkillsView({
         <section className="skills-section">
           <div className="skills-section-head">
             <div>
-              <span className="section-kicker muted">已安装</span>
               <h3>已安装技能</h3>
             </div>
             <span className="section-count">{filteredInstalledSkills.length}</span>
@@ -172,7 +164,7 @@ export function SkillsView({
           ) : (
             <div className="empty-panel">
               <strong>还没有已安装技能</strong>
-              <p>可以先新建一个，或者先从下方可用技能里挑一个试用。</p>
+              <p>可以先新建一个，或者导入本地技能。</p>
               <button className="secondary-button" onClick={() => onPrepareSkillDraft()}>
                 <Plus size={14} />
                 创建第一个技能
@@ -181,43 +173,8 @@ export function SkillsView({
           )}
         </section>
 
-        {filteredReferenceSkills.length > 0 ? (
-          <section className="skills-section">
-            <div className="skills-section-head">
-              <div>
-                <span className="section-kicker muted">发现</span>
-                <h3>可用技能</h3>
-              </div>
-              <span className="section-count">{filteredReferenceSkills.length}</span>
-            </div>
-
-            <div className="skills-gallery">
-              {filteredReferenceSkills.map((skill, index) => (
-                <button
-                  key={skill.id}
-                  className="skill-tile"
-                  onClick={() => setActiveSkill({ kind: "reference", skill })}
-                  type="button"
-                >
-                  <div className={clsx("skill-icon-shell", resolveAccent(index + 2))}>
-                    <Boxes size={20} />
-                  </div>
-                  <div className="skill-tile-copy">
-                    <strong title={skill.name}>{skill.name}</strong>
-                    <p title={skill.description || "运行时发现的技能"}>
-                      {compactSkillDescription(skill.description, "运行时发现的技能")}
-                    </p>
-                  </div>
-                  <div className="skill-tile-status skill-tile-status-empty" />
-                </button>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
         {hasResults ? null : (
           <div className="skills-empty-banner">
-            <Compass size={18} />
             <span>当前搜索没有结果，试试更短的关键词。</span>
           </div>
         )}
@@ -273,34 +230,25 @@ export function SkillsView({
             </div>
 
             <div className="skill-detail-footer">
-              {activeSkill.kind === "installed" ? (
-                <>
-                  <button
-                    className={clsx("toggle-button", activeSkill.skill.enabled && "active")}
-                    onClick={() =>
-                      onUpdateInstalledSkill(activeSkill.skill.id, {
-                        enabled: !activeSkill.skill.enabled,
-                      })
-                    }
-                    type="button"
-                  >
-                    {activeSkill.skill.enabled ? "停用" : "启用"}
-                  </button>
-                  <button
-                    className="ghost-text-button danger"
-                    onClick={() => void onUninstallSkill(activeSkill.skill)}
-                    type="button"
-                  >
-                    <X size={14} />
-                    卸载
-                  </button>
-                </>
-              ) : (
-                <button className="primary-button" onClick={() => onUseReferenceSkill(activeSkill.skill)} type="button">
-                  <Sparkles size={14} />
-                  试用
-                </button>
-              )}
+              <button
+                className={clsx("toggle-button", activeSkill.skill.enabled && "active")}
+                onClick={() =>
+                  onUpdateInstalledSkill(activeSkill.skill.id, {
+                    enabled: !activeSkill.skill.enabled,
+                  })
+                }
+                type="button"
+              >
+                {activeSkill.skill.enabled ? "停用" : "启用"}
+              </button>
+              <button
+                className="ghost-text-button danger"
+                onClick={() => void onUninstallSkill(activeSkill.skill)}
+                type="button"
+              >
+                <X size={14} />
+                卸载
+              </button>
             </div>
           </div>
         </div>
@@ -323,34 +271,10 @@ function appendSkillFilePath(sourcePath: string) {
 }
 
 function resolveSkillFolderPath(activeSkill: SkillModalState) {
-  if (activeSkill.kind === "installed") {
-    return activeSkill.skill.sourcePath?.trim() || "";
-  }
-
-  return folderPathFromLocation(activeSkill.skill.location);
-}
-
-function folderPathFromLocation(location: string) {
-  const trimmed = location.trim();
-  if (!trimmed) return "";
-  if (/^(https?:)?\/\//i.test(trimmed)) return "";
-
-  const normalized = trimmed.replace(/[\\/]+$/, "");
-  if (/[/\\]SKILL\.md$/i.test(normalized)) {
-    return normalized.replace(/[/\\]SKILL\.md$/i, "");
-  }
-
-  return normalized;
+  return activeSkill.skill.sourcePath?.trim() || "";
 }
 
 async function resolveSkillMarkdown(activeSkill: SkillModalState) {
-  if (activeSkill.kind === "reference") {
-    return cleanSkillMarkdown(
-      activeSkill.skill.content || fallbackMarkdown(activeSkill),
-      activeSkill.skill.name,
-    );
-  }
-
   if (activeSkill.skill.sourcePath) {
     const preview = await workspaceClient.readPreview({
       path: appendSkillFilePath(activeSkill.skill.sourcePath),
@@ -384,18 +308,6 @@ async function resolveSkillMarkdown(activeSkill: SkillModalState) {
 }
 
 function fallbackMarkdown(activeSkill: SkillModalState) {
-  if (activeSkill.kind === "reference") {
-    return [
-      `# ${activeSkill.skill.name}`,
-      "",
-      activeSkill.skill.description || "运行时发现的技能",
-      "",
-      "## 位置",
-      "",
-      `\`${activeSkill.skill.location}\``,
-    ].join("\n");
-  }
-
   return [
     `# ${activeSkill.skill.name}`,
     "",
