@@ -30,6 +30,69 @@ test("audio transcription candidates prefer configured speech models before fall
   ]);
 });
 
+test("workspace service keeps full filesystem access disabled by default", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const service = new WorkspaceService(statePath);
+
+  try {
+    const bootstrap = await service.bootstrap();
+    assert.equal(bootstrap.config.security.fullFileSystemAccess, false);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("workspace service bootstraps copied built-in skill creator without legacy sample skills", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const service = new WorkspaceService(statePath);
+
+  try {
+    const bootstrap = await service.bootstrap();
+    const skillNames = bootstrap.config.skills.map((skill) => skill.name).sort();
+    const skillCreator = bootstrap.config.skills.find((skill) => skill.id === "skill-creator");
+
+    assert.deepEqual(skillNames, ["skill-creator"]);
+    assert.ok(skillCreator);
+    assert.equal(skillCreator?.system, true);
+    assert.equal(skillCreator?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "skill-creator"));
+    await access(path.join(skillCreator?.sourcePath ?? "", "SKILL.md"));
+    assert.match(skillCreator?.command ?? "", /Anatomy of a Skill/);
+    assert.equal(bootstrap.config.skills.some((skill) => skill.id === "meeting-minutes"), false);
+
+    const context = await service.getEnabledSkillPromptContext();
+    assert.match(context, /## skill-creator/);
+    assert.match(context, /Anatomy of a Skill/);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("workspace service persists full filesystem access setting", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const service = new WorkspaceService(statePath);
+
+  try {
+    await service.updateConfig({
+      security: {
+        fullFileSystemAccess: true,
+      },
+    });
+
+    const nextService = new WorkspaceService(statePath);
+    const bootstrap = await nextService.bootstrap();
+    assert.equal(bootstrap.config.security.fullFileSystemAccess, true);
+    await nextService.shutdown();
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("workspace service imports a local skill into the workspace skill directory", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
   const sourceSkillDir = path.join(tempDir, "local-skill");
@@ -49,14 +112,14 @@ test("workspace service imports a local skill into the workspace skill directory
     await service.updateConfig({ workspaceRoot });
 
     const result = await service.importLocalSkill(sourceSkillDir);
-    const importedPath = path.join(workspaceRoot, ".codex", "skills", "local-skill", "SKILL.md");
+    const importedPath = path.join(workspaceRoot, ".super-agents", "skills", "local-skill", "SKILL.md");
 
     await access(importedPath);
     assert.equal(result.importedSkillName, "local-helper");
     assert.equal(result.importedTo, path.dirname(importedPath));
     assert.equal(
       result.bootstrap.config.skills.some(
-        (skill) => skill.kind === "codex" && skill.name === "local-helper" && skill.sourcePath === path.dirname(importedPath),
+        (skill) => skill.kind === "command" && skill.name === "local-helper" && skill.sourcePath === path.dirname(importedPath),
       ),
       true,
     );
@@ -70,7 +133,7 @@ test("workspace service bootstrap exposes discovered runtime skills", async () =
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
   const workspaceRoot = path.join(tempDir, "workspace");
   const statePath = path.join(tempDir, "data", "workspace.json");
-  const skillRoot = path.join(workspaceRoot, ".codex", "skills", "doc-helper");
+  const skillRoot = path.join(workspaceRoot, ".super-agents", "skills", "doc-helper");
   const service = new WorkspaceService(statePath);
 
   await mkdir(skillRoot, { recursive: true });
@@ -95,16 +158,50 @@ test("workspace service bootstrap exposes discovered runtime skills", async () =
   }
 });
 
+test("workspace service lists built-in agent tools instead of runtime tools", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const service = new WorkspaceService(statePath);
+
+  try {
+    const catalog = await service.listBuiltinTools();
+    const names = catalog.tools.map((tool) => tool.name).sort();
+
+    assert.deepEqual(names, [
+      "apply_patch",
+      "bash",
+      "edit",
+      "glob",
+      "grep",
+      "list",
+      "multi_edit",
+      "question",
+      "read",
+      "todo_read",
+      "todo_write",
+      "web_fetch",
+      "web_search",
+      "write",
+    ]);
+    assert.equal(catalog.tools.every((tool) => tool.source === "builtin"), true);
+    assert.equal(catalog.tools.some((tool) => String(tool.source) === "runtime"), false);
+    assert.match(catalog.tools.find((tool) => tool.name === "read")?.description ?? "", /UTF-8 text file/i);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("workspace service builds prompt context from enabled skills only", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
   const workspaceRoot = path.join(tempDir, "workspace");
   const statePath = path.join(tempDir, "data", "workspace.json");
-  const codexSkillRoot = path.join(workspaceRoot, ".codex", "skills", "spec-writer");
+  const localSkillRoot = path.join(workspaceRoot, ".super-agents", "skills", "spec-writer");
   const service = new WorkspaceService(statePath);
 
-  await mkdir(codexSkillRoot, { recursive: true });
+  await mkdir(localSkillRoot, { recursive: true });
   await writeFile(
-    path.join(codexSkillRoot, "SKILL.md"),
+    path.join(localSkillRoot, "SKILL.md"),
     ["---", "name: spec-writer", "description: Write concise specs", "---", "", "# spec-writer", "", "Focus on acceptance criteria."].join("\n"),
     "utf8",
   );
@@ -117,15 +214,15 @@ test("workspace service builds prompt context from enabled skills only", async (
           id: "spec-writer",
           name: "spec-writer",
           description: "Write concise specs",
-          kind: "codex",
-          command: "",
+          kind: "command",
+          command: "Focus on acceptance criteria.",
           enabled: true,
-          sourcePath: codexSkillRoot,
+          sourcePath: localSkillRoot,
         },
         {
-          id: "meeting-minutes",
-          name: "meeting-minutes",
-          description: "Turn notes into minutes",
+          id: "brief-writer",
+          name: "brief-writer",
+          description: "Turn notes into a brief",
           kind: "command",
           command: "Summarize notes:\n$ARGUMENTS",
           enabled: true,
@@ -145,8 +242,10 @@ test("workspace service builds prompt context from enabled skills only", async (
 
     assert.match(context, /Enabled workspace skills for this turn:/);
     assert.match(context, /## spec-writer/);
+    assert.ok(context.includes(`Skill directory: ${localSkillRoot}`));
+    assert.match(context, /Resolve relative files and scripts for this skill from its skill directory\./);
     assert.match(context, /Focus on acceptance criteria\./);
-    assert.match(context, /## meeting-minutes/);
+    assert.match(context, /## brief-writer/);
     assert.match(context, /<user request>/);
     assert.doesNotMatch(context, /disabled-skill/);
   } finally {

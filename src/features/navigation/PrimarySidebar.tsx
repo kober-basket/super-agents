@@ -1,11 +1,9 @@
 import clsx from "clsx";
 import {
   Database,
-  FileText,
   Layers3,
   MessageSquarePlus,
   Settings2,
-  ShieldAlert,
   Trash2,
   Wrench,
 } from "lucide-react";
@@ -78,22 +76,6 @@ export function PrimarySidebar({
             <Database size={16} />
             <span>知识库</span>
           </button>
-          <button
-            className={clsx("sidebar-link", view === "reports" && "active")}
-            onClick={() => onSetView("reports")}
-            type="button"
-          >
-            <FileText size={16} />
-            <span>报告生成</span>
-          </button>
-          <button
-            className={clsx("sidebar-link", view === "emergency" && "active")}
-            onClick={() => onSetView("emergency")}
-            type="button"
-          >
-            <ShieldAlert size={16} />
-            <span>应急预案</span>
-          </button>
 
           <div className="sidebar-conversation-section">
             <div className="sidebar-section-label">
@@ -122,17 +104,21 @@ export function PrimarySidebar({
                           <div className="sidebar-conversation-dot" aria-hidden="true" />
                           <div className="sidebar-conversation-copy">
                             <strong title={conversation.title}>{conversation.title}</strong>
-                            <span>{formatRelativeTime(conversation.createdAt)}</span>
                           </div>
                         </button>
-                        <button
-                          aria-label={`删除会话 ${conversation.title}`}
-                          className="sidebar-conversation-delete"
-                          onClick={() => onDeleteConversation(conversation.id)}
-                          type="button"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <div className="sidebar-conversation-action">
+                          <span className="sidebar-conversation-time">
+                            {formatRelativeTime(conversation.createdAt)}
+                          </span>
+                          <button
+                            aria-label={`删除会话 ${conversation.title}`}
+                            className="sidebar-conversation-delete"
+                            onClick={() => onDeleteConversation(conversation.id)}
+                            type="button"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
                     );
                   })

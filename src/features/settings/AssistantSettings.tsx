@@ -209,11 +209,7 @@ export function AssistantSettings({
                             <strong>{provider.name}</strong>
                           </div>
                           <div className="provider-nav-meta">
-                            {provider.system ? <span className="stack-badge">内置</span> : null}
-                            {!provider.system ? <span className="stack-badge">自定义</span> : null}
-                            {activeModel?.providerId === provider.id ? (
-                              <span className="stack-badge active">默认</span>
-                            ) : null}
+                            <span className="stack-badge">{provider.system ? "内置" : "自定义"}</span>
                             <span className="provider-count-pill">
                               {enabledCount}/{provider.models.length}
                             </span>

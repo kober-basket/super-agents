@@ -14,19 +14,16 @@ import type {
   AppConfig,
   AppSection,
   ChatConversation,
+  ChatConversationExportFormat,
   ChatMessage,
   ChatConversationRuntimeState,
   ChatConversationSummary,
   DesktopWindowState,
-  EmergencyPlanInput,
-  EmergencyPlanResult,
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeBaseSummary,
   McpServerConfig,
   ModelProviderConfig,
-  ProjectReportInput,
-  ProjectReportResult,
   RemoteControlStatus,
   SkillConfig,
   WorkspaceTool,
@@ -37,8 +34,12 @@ import { AppTitleBar } from "./features/navigation/AppTitleBar";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
 import { useWorkspaceController } from "./features/workspace/useWorkspaceController";
-import { fileKind, sanitizeMcpName } from "./features/shared/utils";
+import { fileKind } from "./features/shared/utils";
 import { ChatWorkspace } from "./features/chat/ChatWorkspace";
+import {
+  upsertConversationSummaryList,
+  type UpsertConversationSummaryOptions,
+} from "./features/chat/conversation-list";
 import {
   arrayBufferToBase64,
   buildVoiceRecordingFileName,
@@ -46,6 +47,11 @@ import {
   mergeTranscriptIntoDraft,
   type VoiceInputState,
 } from "./lib/voice-input";
+import {
+  appendTimelineTextItem,
+  syncTimelineActivityItems,
+  upsertTimelineToolItem,
+} from "./lib/runtime-timeline";
 
 const PreviewPane = lazy(async () => {
   const module = await import("./features/chat/PreviewPane");
@@ -63,14 +69,6 @@ const KnowledgeView = lazy(async () => {
   const module = await import("./features/knowledge/KnowledgeView");
   return { default: module.KnowledgeView };
 });
-const ReportsView = lazy(async () => {
-  const module = await import("./features/reports/ReportsView");
-  return { default: module.ReportsView };
-});
-const EmergencyPlanView = lazy(async () => {
-  const module = await import("./features/emergency/EmergencyPlanView");
-  return { default: module.EmergencyPlanView };
-});
 const AssistantSettings = lazy(async () => {
   const module = await import("./features/settings/AssistantSettings");
   return { default: module.AssistantSettings };
@@ -82,6 +80,10 @@ const AppearanceSettings = lazy(async () => {
 const RemoteControlSettings = lazy(async () => {
   const module = await import("./features/settings/RemoteControlSettings");
   return { default: module.RemoteControlSettings };
+});
+const PermissionsSettings = lazy(async () => {
+  const module = await import("./features/settings/PermissionsSettings");
+  return { default: module.PermissionsSettings };
 });
 
 function uid() {
@@ -127,6 +129,10 @@ function resolveConversationKnowledgeBaseSelection(
 function formatConversationPreview(value: string | undefined) {
   const base = (value ?? "").replace(/\s+/g, " ").trim();
   return base.length > 120 ? `${base.slice(0, 120)}...` : base;
+}
+
+function isConversationNotFoundError(error: unknown) {
+  return error instanceof Error && error.message.includes("Conversation not found");
 }
 
 function describeMessagePreview(message: Pick<ChatMessage, "content" | "visuals"> | null | undefined) {
@@ -194,6 +200,8 @@ function createConversationRuntimeState(
 ): ChatConversationRuntimeState {
   return {
     status,
+    activityItems: [],
+    timelineItems: [],
     planEntries: [],
     toolCalls: [],
     terminalOutputs: {},
@@ -207,6 +215,10 @@ function isConversationTurnActive(status?: ChatConversationRuntimeState["status"
 
 function preserveActiveTurnStatus(status?: ChatConversationRuntimeState["status"]) {
   return status === "cancelling" ? "cancelling" : "running";
+}
+
+function createRuntimeTimelineId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function looksLikeTurnCancellation(value?: string) {
@@ -310,7 +322,10 @@ export default function App() {
   const [conversationRuntimeStates, setConversationRuntimeStates] = useState<
     Record<string, ChatConversationRuntimeState>
   >({});
+  const streamingPreviewByMessageRef = useRef<Record<string, string>>({});
   const [startingChatTurn, setStartingChatTurn] = useState(false);
+  const [exportingConversationFormat, setExportingConversationFormat] =
+    useState<ChatConversationExportFormat | null>(null);
   const [draftMessage, setDraftMessage] = useState("");
   const [draftKnowledgeBaseIds, setDraftKnowledgeBaseIds] = useState<string[]>([]);
   const [messageScrollRequest, setMessageScrollRequest] = useState(0);
@@ -333,38 +348,6 @@ export default function App() {
   const [providerRefreshErrors, setProviderRefreshErrors] = useState<Record<string, string>>({});
   const [selectedModelProviderId, setSelectedModelProviderId] = useState("");
   const [windowState, setWindowState] = useState<DesktopWindowState | null>(null);
-  const [reportGenerating, setReportGenerating] = useState(false);
-  const [reportResult, setReportResult] = useState<ProjectReportResult | null>(null);
-  const [emergencyGenerating, setEmergencyGenerating] = useState(false);
-  const [emergencyResult, setEmergencyResult] = useState<EmergencyPlanResult | null>(null);
-  const [reportForm, setReportForm] = useState<ProjectReportInput>({
-    knowledgeBaseId: "",
-    projectName: "",
-    projectType: "",
-    projectLocation: "",
-    longitude: "",
-    latitude: "",
-    projectOverview: "",
-    policyFocus: "",
-    outputDirectory: "",
-    outputFileName: "",
-    workspaceRoot: "",
-  });
-  const [emergencyForm, setEmergencyForm] = useState<EmergencyPlanInput>({
-    projectName: "",
-    companyName: "",
-    projectType: "",
-    industryCategory: "",
-    projectLocation: "",
-    projectOverview: "",
-    riskSources: "",
-    emergencyResources: "",
-    specialRequirements: "",
-    templateFiles: [],
-    outputDirectory: "",
-    outputFileName: "",
-    workspaceRoot: "",
-  });
   const [remoteStatus, setRemoteStatus] = useState<RemoteControlStatus | null>(null);
   const [remoteStatusRefreshing, setRemoteStatusRefreshing] = useState(false);
   const [wechatConnecting, setWechatConnecting] = useState(false);
@@ -427,12 +410,7 @@ export default function App() {
     () =>
       config.skills.map((skill) => ({
         ...skill,
-        location:
-          skill.kind === "codex"
-            ? skill.system
-              ? "Codex 系统技能"
-              : skill.sourcePath || "Codex 本地技能"
-            : "内置技能",
+        location: skill.sourcePath || "内置技能",
       })),
     [config.skills],
   );
@@ -442,15 +420,6 @@ export default function App() {
         matchQuery(skillQuery, [skill.name, skill.description, skill.location]),
       ),
     [configuredSkills, skillQuery],
-  );
-  const reportMapTools = useMemo(
-    () =>
-      tools.filter((tool) =>
-        /(map|geo|geocode|coordinate|location|amap|gaode|baidu|tencent|place|poi|reverse)/i.test(
-          [tool.name, tool.title, tool.description, tool.origin].filter(Boolean).join(" "),
-        ),
-      ),
-    [tools],
   );
   useEffect(() => {
     if (!toast) return undefined;
@@ -598,7 +567,7 @@ export default function App() {
   }, [config.appearance.theme]);
 
   useEffect(() => {
-    if ((view !== "tools" && view !== "reports") || toolsRefreshing || toolsLoadedRef.current) {
+    if (view !== "tools" || toolsRefreshing || toolsLoadedRef.current) {
       return;
     }
 
@@ -606,37 +575,12 @@ export default function App() {
   }, [toolsRefreshing, view]);
 
   useEffect(() => {
-    if ((view !== "knowledge" && view !== "chat" && view !== "reports") || knowledgeRefreshing || knowledgeLoadedRef.current) {
+    if ((view !== "knowledge" && view !== "chat") || knowledgeRefreshing || knowledgeLoadedRef.current) {
       return;
     }
 
     void refreshKnowledgeView({ silent: true });
   }, [knowledgeRefreshing, view]);
-
-  useEffect(() => {
-    if (reportForm.workspaceRoot) {
-      return;
-    }
-    setReportForm((current) => ({ ...current, workspaceRoot: config.workspaceRoot || "" }));
-  }, [config.workspaceRoot, reportForm.workspaceRoot]);
-
-  useEffect(() => {
-    if (emergencyForm.workspaceRoot) {
-      return;
-    }
-    setEmergencyForm((current) => ({ ...current, workspaceRoot: config.workspaceRoot || "" }));
-  }, [config.workspaceRoot, emergencyForm.workspaceRoot]);
-
-  useEffect(() => {
-    if (reportForm.knowledgeBaseId) {
-      return;
-    }
-    const fallbackId = config.knowledgeBase.selectedBaseIds[0] || knowledgeBases[0]?.id || "";
-    if (!fallbackId) {
-      return;
-    }
-    setReportForm((current) => ({ ...current, knowledgeBaseId: fallbackId }));
-  }, [config.knowledgeBase.selectedBaseIds, knowledgeBases, reportForm.knowledgeBaseId]);
 
   useEffect(() => {
     if (view !== "settings" || settingsSection !== "remote-control") {
@@ -726,18 +670,22 @@ export default function App() {
     };
   }
 
-  function upsertConversationSummary(summary: ChatConversationSummary) {
+  function upsertConversationSummary(
+    summary: ChatConversationSummary,
+    options?: UpsertConversationSummaryOptions,
+  ) {
     setConversations((current) =>
-      [summary, ...current.filter((conversation) => conversation.id !== summary.id)].sort(
-        (left, right) => right.lastMessageAt - left.lastMessageAt || right.createdAt - left.createdAt,
-      ),
+      upsertConversationSummaryList(current, summary, options),
     );
   }
 
-  function syncConversationState(conversation: ChatConversation) {
+  function syncConversationState(
+    conversation: ChatConversation,
+    options?: UpsertConversationSummaryOptions,
+  ) {
     setActiveConversation(conversation);
     setActiveConversationId(conversation.id);
-    upsertConversationSummary(toConversationSummary(conversation));
+    upsertConversationSummary(toConversationSummary(conversation), options);
   }
 
   useEffect(() => {
@@ -801,6 +749,7 @@ export default function App() {
     return workspaceClient.onChatEvent((event) => {
       if (event.type === "message_updated") {
         const now = Date.now();
+        delete streamingPreviewByMessageRef.current[`${event.conversationId}:${event.messageId}`];
         const preview = describeMessagePreview({
           content: event.content,
           visuals: event.visuals,
@@ -851,6 +800,9 @@ export default function App() {
 
       if (event.type === "message_delta") {
         const now = Date.now();
+        const previewKey = `${event.conversationId}:${event.messageId}`;
+        const streamingPreview = `${streamingPreviewByMessageRef.current[previewKey] ?? ""}${event.textDelta}`;
+        streamingPreviewByMessageRef.current[previewKey] = streamingPreview;
 
         setActiveConversation((current) => {
           if (!current || current.id !== event.conversationId) {
@@ -882,7 +834,7 @@ export default function App() {
               conversation.id === event.conversationId
                 ? {
                     ...conversation,
-                    preview: `${conversation.preview}${event.textDelta}`,
+                    preview: streamingPreview,
                     updatedAt: now,
                     lastMessageAt: now,
                   }
@@ -948,6 +900,56 @@ export default function App() {
               error: undefined,
               stopReason: undefined,
               thoughtText: `${previous.thoughtText}${event.textDelta}`,
+              timelineItems: appendTimelineTextItem(
+                previous.timelineItems,
+                "thought",
+                event.textDelta,
+                createRuntimeTimelineId("thought"),
+              ),
+            },
+          };
+        });
+        return;
+      }
+
+      if (event.type === "status_delta") {
+        setConversationRuntimeStates((current) => {
+          const previous = current[event.conversationId] ?? createConversationRuntimeState("running");
+          return {
+            ...current,
+            [event.conversationId]: {
+              ...previous,
+              status: preserveActiveTurnStatus(previous.status),
+              error: undefined,
+              stopReason: undefined,
+              timelineItems: appendTimelineTextItem(
+                previous.timelineItems,
+                "status",
+                event.textDelta,
+                createRuntimeTimelineId("status"),
+              ),
+            },
+          };
+        });
+        return;
+      }
+
+      if (event.type === "activity_summary") {
+        setConversationRuntimeStates((current) => {
+          const previous = current[event.conversationId] ?? createConversationRuntimeState("running");
+          return {
+            ...current,
+            [event.conversationId]: {
+              ...previous,
+              status: preserveActiveTurnStatus(previous.status),
+              error: undefined,
+              stopReason: undefined,
+              activityItems: event.items,
+              timelineItems: syncTimelineActivityItems(
+                previous.timelineItems,
+                event.items,
+                (activity) => createRuntimeTimelineId(`activity-${activity.id}`),
+              ),
             },
           };
         });
@@ -968,6 +970,11 @@ export default function App() {
                 ...previous.toolCalls.filter((toolCall) => toolCall.toolCallId !== event.toolCall.toolCallId),
                 event.toolCall,
               ],
+              timelineItems: upsertTimelineToolItem(
+                previous.timelineItems,
+                event.toolCall.toolCallId,
+                createRuntimeTimelineId(`tool-${event.toolCall.toolCallId}`),
+              ),
             },
           };
         });
@@ -1360,62 +1367,6 @@ export default function App() {
       },
     ];
     void commitConfig({ ...cloneConfig(config), mcpServers }, "已添加 MCP 服务");
-  }
-
-  function addRecommendedMcpServer(server: {
-    id: string;
-    name: string;
-    transport: "local" | "remote";
-    command?: string;
-    args?: string[];
-    url?: string;
-    headersJson?: string;
-    envJson?: string;
-    enabled?: boolean;
-  }) {
-    const normalized = sanitizeMcpName(server.name);
-    if (config.mcpServers.some((item) => sanitizeMcpName(item.name) === normalized)) {
-      setToast("这个服务草稿已经存在");
-      return;
-    }
-
-    const mcpServers = [
-      ...config.mcpServers,
-      {
-        id: `mcp-${uid()}`,
-        name: server.name,
-        transport: server.transport,
-        command: server.command ?? (server.transport === "local" ? "node" : ""),
-        args: server.args ?? [],
-        url: server.url ?? "",
-        headersJson: server.headersJson ?? "{}",
-        envJson: server.envJson ?? "{}",
-        enabled: server.enabled ?? false,
-        timeoutMs: 30000,
-      },
-    ];
-
-    void commitConfig({ ...cloneConfig(config), mcpServers }, "已添加推荐的 MCP 服务");
-  }
-
-  async function addRecommendedMapMcpServer() {
-    addRecommendedMcpServer({
-      id: "amap-maps",
-      name: "AMap Maps",
-      transport: "local",
-      command: "npx",
-      args: ["-y", "@amap/amap-maps-mcp-server"],
-      envJson: JSON.stringify(
-        {
-          AMAP_MAPS_API_KEY: "",
-        },
-        null,
-        2,
-      ),
-      enabled: true,
-    });
-    setToast("已添加高德地图 MCP，请在工具页填写 AMAP_MAPS_API_KEY");
-    await refreshToolsView({ silent: true });
   }
 
   async function refreshSkillsView() {
@@ -1814,111 +1765,6 @@ export default function App() {
     }
   }
 
-  function updateReportForm(patch: Partial<ProjectReportInput>) {
-    setReportForm((current) => ({ ...current, ...patch }));
-  }
-
-  async function chooseReportOutputDirectory() {
-    try {
-      const directory = await workspaceClient.selectWorkspaceFolder();
-      if (!directory) return;
-      updateReportForm({ outputDirectory: directory });
-    } catch {
-      setToast("选择输出目录失败");
-    }
-  }
-
-  function updateEmergencyForm(patch: Partial<EmergencyPlanInput>) {
-    setEmergencyForm((current) => ({ ...current, ...patch }));
-  }
-
-  async function pickEmergencyTemplates() {
-    try {
-      const files = await workspaceClient.selectFiles();
-      const nextFiles = files.filter((file) => /\.(pdf|doc|docx)$/i.test(file.name));
-      if (nextFiles.length === 0) {
-        setToast("请选择 PDF、DOC 或 DOCX 模板文件");
-        return;
-      }
-      setEmergencyForm((current) => {
-        const existing = new Map(current.templateFiles.map((file) => [file.path, file]));
-        for (const file of nextFiles) {
-          existing.set(file.path, file);
-        }
-        return { ...current, templateFiles: Array.from(existing.values()) };
-      });
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "选择模板文件失败");
-    }
-  }
-
-  function removeEmergencyTemplate(fileId: string) {
-    setEmergencyForm((current) => ({
-      ...current,
-      templateFiles: current.templateFiles.filter((file) => file.id !== fileId),
-    }));
-  }
-
-  async function chooseEmergencyOutputDirectory() {
-    try {
-      const directory = await workspaceClient.selectWorkspaceFolder();
-      if (!directory) return;
-      setEmergencyForm((current) => ({ ...current, outputDirectory: directory }));
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "选择输出目录失败");
-    }
-  }
-
-  async function generateProjectReport() {
-    if (!reportForm.knowledgeBaseId) {
-      setToast("请先选择知识库");
-      return;
-    }
-    if (!reportForm.projectName.trim()) {
-      setToast("请先输入项目名称");
-      return;
-    }
-
-    setReportGenerating(true);
-    try {
-      const payload = await workspaceClient.generateProjectReport({
-        ...reportForm,
-        workspaceRoot: reportForm.workspaceRoot || config.workspaceRoot,
-      });
-      setReportResult(payload);
-      setToast(`报告已生成：${payload.fileName}`);
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "生成报告失败");
-    } finally {
-      setReportGenerating(false);
-    }
-  }
-
-  async function generateEmergencyPlan() {
-    if (!emergencyForm.projectName.trim()) {
-      setToast("请先填写项目名称");
-      return;
-    }
-    if (emergencyForm.templateFiles.length === 0) {
-      setToast("请先选择应急预案模板");
-      return;
-    }
-
-    setEmergencyGenerating(true);
-    try {
-      const result = await workspaceClient.generateEmergencyPlan({
-        ...emergencyForm,
-        workspaceRoot: emergencyForm.workspaceRoot || config.workspaceRoot,
-      });
-      setEmergencyResult(result);
-      setToast(`应急预案已生成：${result.fileName}`);
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "生成应急预案失败");
-    } finally {
-      setEmergencyGenerating(false);
-    }
-  }
-
   function updateAppearanceTheme(theme: AppConfig["appearance"]["theme"]) {
     if (config.appearance.theme === theme) {
       return;
@@ -1982,8 +1828,18 @@ export default function App() {
       const conversation = await workspaceClient.getConversation(conversationId);
       syncConversationState(conversation);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "加载会话失败");
-      setToast(error instanceof Error ? error.message : "加载会话失败");
+      if (isConversationNotFoundError(error)) {
+        setConversations((current) => current.filter((conversation) => conversation.id !== conversationId));
+        try {
+          const payload = await workspaceClient.listConversations();
+          setConversations(payload.conversations);
+        } catch {
+          // Keep the local stale-item removal if refreshing the list also fails.
+        }
+        setToast("会话已不存在，已刷新列表");
+      } else {
+        setToast(error instanceof Error ? error.message : "加载会话失败");
+      }
       setActiveConversationId(null);
     }
   }
@@ -2016,6 +1872,26 @@ export default function App() {
       }
     } catch (error) {
       setToast(error instanceof Error ? error.message : "删除会话失败");
+    }
+  }
+
+  async function exportActiveConversation(format: ChatConversationExportFormat) {
+    if (!activeConversationId) {
+      setToast("请先打开一个会话");
+      return;
+    }
+
+    setExportingConversationFormat(format);
+    try {
+      const result = await workspaceClient.exportConversation({
+        conversationId: activeConversationId,
+        format,
+      });
+      setToast(`已导出：${result.fileName}`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "导出会话失败");
+    } finally {
+      setExportingConversationFormat(null);
     }
   }
 
@@ -2123,7 +1999,9 @@ export default function App() {
         selectedKnowledgeBaseIds,
       });
 
-      syncConversationState(result.conversation);
+      syncConversationState(result.conversation, {
+        replaceConversationId: nextConversationId.startsWith("temp-") ? nextConversationId : null,
+      });
       setConversationRuntimeStates((current) => ({
         ...current,
         [result.conversation.id]: createConversationRuntimeState("running"),
@@ -2469,6 +2347,22 @@ export default function App() {
       );
     }
 
+    if (settingsSection === "permissions") {
+      return (
+        <Suspense fallback={<LazyViewFallback />}>
+          <PermissionsSettings
+            security={config.security}
+            onToggleFullFileSystemAccess={(enabled) =>
+              updateConfigField("security", {
+                ...config.security,
+                fullFileSystemAccess: enabled,
+              })
+            }
+          />
+        </Suspense>
+      );
+    }
+
     if (settingsSection === "remote-control") {
       return (
         <Suspense fallback={<LazyViewFallback />}>
@@ -2506,6 +2400,7 @@ export default function App() {
           knowledgeEnabled={activeKnowledgeBaseIds.length > 0}
           knowledgeRefreshing={knowledgeRefreshing}
           onDraftMessageChange={setDraftMessage}
+          onExportConversation={(format) => void exportActiveConversation(format)}
           onClearKnowledgeBases={clearKnowledgeBaseSelection}
           onManageKnowledgeBases={() => setView("knowledge")}
           onModelChange={(value) => updateConfigField("activeModelId", value)}
@@ -2523,6 +2418,8 @@ export default function App() {
           selectableModels={selectableModels}
           selectedKnowledgeBaseIds={activeKnowledgeBaseIds}
           scrollToBottomRequest={messageScrollRequest}
+          exportingConversationFormat={exportingConversationFormat}
+          onToast={(message) => setToast(message)}
         />
       );
     }
@@ -2602,41 +2499,6 @@ export default function App() {
             onAddKnowledgeUrl={addKnowledgeUrl}
             onAddKnowledgeWebsite={addKnowledgeWebsite}
             onDeleteKnowledgeItem={deleteKnowledgeItem}
-          />
-        </Suspense>
-      );
-    }
-
-    if (view === "reports") {
-      return (
-        <Suspense fallback={<LazyViewFallback />}>
-          <ReportsView
-            form={reportForm}
-            generating={reportGenerating}
-            knowledgeBases={knowledgeBases}
-            mapTools={reportMapTools}
-            result={reportResult}
-            onAddMapTool={addRecommendedMapMcpServer}
-            onChange={updateReportForm}
-            onChooseOutputDirectory={chooseReportOutputDirectory}
-            onGenerate={generateProjectReport}
-          />
-        </Suspense>
-      );
-    }
-
-    if (view === "emergency") {
-      return (
-        <Suspense fallback={<LazyViewFallback />}>
-          <EmergencyPlanView
-            form={emergencyForm}
-            generating={emergencyGenerating}
-            result={emergencyResult}
-            onChange={updateEmergencyForm}
-            onPickTemplates={pickEmergencyTemplates}
-            onRemoveTemplate={removeEmergencyTemplate}
-            onChooseOutputDirectory={chooseEmergencyOutputDirectory}
-            onGenerate={generateEmergencyPlan}
           />
         </Suspense>
       );
@@ -2743,4 +2605,3 @@ export default function App() {
     </div>
   );
 }
-

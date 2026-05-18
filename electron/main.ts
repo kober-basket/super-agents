@@ -7,22 +7,19 @@ import {
   APP_WINDOW_TITLE,
   migrateLegacyAppData,
 } from "./app-identity";
-import { AcpRuntimeManager } from "./acp-runtime-manager";
 import { ChatOrchestrator } from "./chat-orchestrator";
+import { exportConversationToFile } from "./conversation-export";
+import type { ToolApprovalDecision, ToolApprovalRequest } from "./agent-core";
 import { ConversationService } from "./conversation-service";
 import { McpInspector } from "./mcp-inspector";
-import { summarizeMapToolResult } from "./project-report";
 import { RemoteControlService } from "./remote-control-service";
+import { buildWorkspaceToolCatalog } from "./tool-catalog";
 import { WorkspaceService } from "./workspace-service";
 import type {
   AppConfig,
+  ChatConversationExportFormat,
   ChatEvent,
   DesktopWindowState,
-  EmergencyPlanInput,
-  McpServerConfig,
-  McpToolInfo,
-  ProjectReportInput,
-  WorkspaceTool,
 } from "../src/types";
 
 app.setName(APP_NAME);
@@ -32,9 +29,158 @@ let mainWindow: BrowserWindow | null = null;
 let service: WorkspaceService | null = null;
 let conversationService: ConversationService | null = null;
 let remoteControlService: RemoteControlService | null = null;
-let acpRuntimeManager: AcpRuntimeManager | null = null;
 let chatOrchestrator: ChatOrchestrator | null = null;
 const mcpInspector = new McpInspector();
+const approvedExternalDirectories = new Set<string>();
+
+function isInsideDirectory(candidatePath: string, directoryPath: string) {
+  const relative = path.relative(path.resolve(directoryPath), path.resolve(candidatePath));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function getApprovalWindow() {
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+}
+
+function externalDirectoryFromRequest(request: ToolApprovalRequest) {
+  const directory = request.metadata?.directory;
+  if (typeof directory === "string" && directory.trim()) {
+    return path.resolve(directory);
+  }
+  if (typeof request.targetPath === "string" && request.targetPath.trim()) {
+    return path.resolve(request.targetPath);
+  }
+  return "";
+}
+
+async function showApprovalMessageBox(options: Electron.MessageBoxOptions) {
+  const approvalWindow = getApprovalWindow();
+  return approvalWindow
+    ? await dialog.showMessageBox(approvalWindow, options)
+    : await dialog.showMessageBox(options);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function questionOptionText(option: unknown) {
+  if (!isRecord(option)) return null;
+  const label = typeof option.label === "string" ? option.label.trim() : "";
+  if (!label) return null;
+  const description = typeof option.description === "string" ? option.description.trim() : "";
+  return { label, description };
+}
+
+async function requestExternalDirectoryApproval(
+  request: ToolApprovalRequest,
+): Promise<ToolApprovalDecision> {
+  const directory = externalDirectoryFromRequest(request);
+  if (!directory) {
+    return { type: "deny", reason: "External directory approval request did not include a directory." };
+  }
+
+  for (const approvedDirectory of approvedExternalDirectories) {
+    if (isInsideDirectory(directory, approvedDirectory)) {
+      return { type: "allow" };
+    }
+  }
+
+  const result = await showApprovalMessageBox({
+    type: "warning",
+    title: "授权访问外部目录",
+    message: "允许 agent 访问项目外目录吗？",
+    detail: [
+      `工具：${request.toolCall.name}`,
+      `目录：${directory}`,
+      request.targetPath && path.resolve(request.targetPath) !== directory
+        ? `目标：${path.resolve(request.targetPath)}`
+        : "",
+      request.reason,
+    ].filter(Boolean).join("\n"),
+    buttons: ["允许一次", "始终允许此目录", "拒绝"],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  });
+
+  if (result.response === 0) {
+    return { type: "allow" };
+  }
+  if (result.response === 1) {
+    approvedExternalDirectories.add(directory);
+    return { type: "allow" };
+  }
+  return { type: "deny", reason: "User denied external directory access." };
+}
+
+async function requestQuestionApproval(request: ToolApprovalRequest): Promise<ToolApprovalDecision> {
+  const rawQuestions = Array.isArray(request.metadata?.questions) ? request.metadata.questions : [];
+  const answers: Array<{ id: string; question: string; answer: string }> = [];
+
+  for (const rawQuestion of rawQuestions) {
+    if (!isRecord(rawQuestion)) continue;
+
+    const id = typeof rawQuestion.id === "string" && rawQuestion.id.trim()
+      ? rawQuestion.id.trim()
+      : `question-${answers.length + 1}`;
+    const question = typeof rawQuestion.question === "string" && rawQuestion.question.trim()
+      ? rawQuestion.question.trim()
+      : "Agent needs your input.";
+    const header = typeof rawQuestion.header === "string" && rawQuestion.header.trim()
+      ? rawQuestion.header.trim()
+      : "需要你的选择";
+    const options = Array.isArray(rawQuestion.options)
+      ? rawQuestion.options.map(questionOptionText).filter((option): option is { label: string; description: string } => Boolean(option))
+      : [];
+    const optionLabels = options.map((option) => option.label);
+    const buttons = optionLabels.length > 0 ? [...optionLabels, "跳过"] : ["继续"];
+    const detail = options.length > 0
+      ? options.map((option) => option.description ? `${option.label}: ${option.description}` : option.label).join("\n")
+      : request.reason;
+
+    const result = await showApprovalMessageBox({
+      type: "question",
+      title: header,
+      message: question,
+      detail,
+      buttons,
+      defaultId: 0,
+      cancelId: buttons.length - 1,
+      noLink: true,
+    });
+
+    const answer = optionLabels[result.response] ?? "";
+    answers.push({ id, question, answer });
+  }
+
+  return { type: "allow", metadata: { answers } };
+}
+
+async function requestToolApproval(request: ToolApprovalRequest): Promise<ToolApprovalDecision> {
+  if (request.kind === "question") {
+    return await requestQuestionApproval(request);
+  }
+
+  if (request.kind === "external_directory") {
+    return await requestExternalDirectoryApproval(request);
+  }
+
+  const result = await showApprovalMessageBox({
+    type: "question",
+    title: "授权执行工具",
+    message: "允许 agent 执行这个工具吗？",
+    detail: [`工具：${request.toolCall.name}`, request.reason].filter(Boolean).join("\n"),
+    buttons: ["允许", "拒绝"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+
+  return result.response === 0
+    ? { type: "allow" }
+    : { type: "deny", reason: "User denied tool execution." };
+}
 
 function isTrustedDesktopOrigin(origin: string) {
   return (
@@ -42,103 +188,6 @@ function isTrustedDesktopOrigin(origin: string) {
     /^https?:\/\/127\.0\.0\.1(?::\d+)?$/i.test(origin) ||
     /^https?:\/\/localhost(?::\d+)?$/i.test(origin)
   );
-}
-
-function isLikelyMapTool(tool: Pick<WorkspaceTool, "name" | "title" | "description">) {
-  const text = [tool.name, tool.title, tool.description].filter(Boolean).join(" ").toLowerCase();
-  return /(map|geo|geocode|coordinate|location|amap|gaode|baidu|tencent|place|poi|reverse)/i.test(text);
-}
-
-function inferMapArguments(tool: McpToolInfo, input: ProjectReportInput) {
-  const params = tool.parameters.map((item) => item.name);
-  const lowerMap = new Map(params.map((name) => [name.toLowerCase(), name]));
-  const args: Record<string, unknown> = {};
-  const query = [input.projectName, input.projectLocation, input.projectType].filter(Boolean).join(" ").trim();
-  const lng = input.longitude?.trim();
-  const lat = input.latitude?.trim();
-  const location = lng && lat ? `${lng},${lat}` : "";
-
-  const assign = (candidates: string[], value: unknown) => {
-    if (value === undefined || value === null || value === "") return;
-    for (const key of candidates) {
-      const matched = lowerMap.get(key);
-      if (matched && args[matched] === undefined) {
-        args[matched] = value;
-        return;
-      }
-    }
-  };
-
-  assign(["query", "q", "keyword", "keywords", "address", "input", "text"], query);
-  assign(["projectname", "project_name", "name"], input.projectName.trim());
-  assign(["location", "coordinates", "coord", "center", "lnglat"], location || input.projectLocation?.trim());
-  assign(["longitude", "lng", "lon"], lng);
-  assign(["latitude", "lat"], lat);
-  assign(["addressdetail", "formatted_address", "region", "city"], input.projectLocation?.trim());
-
-  if (Object.keys(args).length === 0 && params.length > 0) {
-    args[params[0]] = location || query || input.projectName.trim();
-  }
-
-  return args;
-}
-
-async function resolveMapSummary(input: ProjectReportInput, config: AppConfig) {
-  const selectedServerId = input.preferredMapServerId?.trim();
-  const selectedToolName = input.preferredMapToolName?.trim();
-  const servers = config.mcpServers.filter((server) => server.enabled !== false);
-
-  const candidates: Array<{ server: McpServerConfig; toolName?: string }> = selectedServerId
-    ? servers
-        .filter((server) => server.id === selectedServerId)
-        .map((server) => ({ server, toolName: selectedToolName }))
-    : servers.map((server) => ({ server }));
-
-  for (const candidate of candidates) {
-    try {
-      const inspected = await mcpInspector.inspectServer({
-        server: candidate.server,
-        workspaceRoot: input.workspaceRoot || config.workspaceRoot,
-      });
-      const tool =
-        (candidate.toolName
-          ? inspected.tools.find((item) => item.name === candidate.toolName)
-          : inspected.tools.find((item) =>
-              isLikelyMapTool({
-                name: item.name,
-                title: item.title,
-                description: item.description,
-              }),
-            )) ?? null;
-      if (!tool) continue;
-
-      const argumentsJson = JSON.stringify(inferMapArguments(tool, input));
-      const result = await mcpInspector.debugTool({
-        server: candidate.server,
-        workspaceRoot: input.workspaceRoot || config.workspaceRoot,
-        toolName: tool.name,
-        argumentsJson,
-      });
-      if (result.isError) continue;
-
-      return {
-        mapSummary: summarizeMapToolResult(result),
-        mapToolUsed: `${candidate.server.name} / ${tool.name}`,
-      };
-    } catch {
-      continue;
-    }
-  }
-
-  return {
-    mapSummary: [
-      input.projectLocation?.trim(),
-      input.longitude && input.latitude ? `Coordinates: ${input.longitude}, ${input.latitude}` : "",
-    ]
-      .filter(Boolean)
-      .join("; "),
-    mapToolUsed: undefined,
-  };
 }
 
 function configureMediaPermissions() {
@@ -259,6 +308,40 @@ function getWindowState(): DesktopWindowState {
   };
 }
 
+function normalizeConversationExportFormat(value: unknown): ChatConversationExportFormat {
+  if (value === "markdown" || value === "pdf" || value === "word") {
+    return value;
+  }
+
+  throw new Error("不支持的导出格式");
+}
+
+async function renderPdfFromHtml(html: string) {
+  const pdfWindow = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  try {
+    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    return await pdfWindow.webContents.printToPDF({
+      printBackground: true,
+      pageSize: "A4",
+      margins: {
+        marginType: "default",
+      },
+    });
+  } finally {
+    if (!pdfWindow.isDestroyed()) {
+      pdfWindow.close();
+    }
+  }
+}
+
 app.whenReady().then(async () => {
   await migrateLegacyAppData(app.getPath("appData"));
   const statePath = path.join(app.getPath("userData"), "workspace.json");
@@ -266,7 +349,6 @@ app.whenReady().then(async () => {
   service = new WorkspaceService(statePath);
   conversationService = new ConversationService(conversationDatabasePath);
   await conversationService.initialize();
-  acpRuntimeManager = new AcpRuntimeManager(app.getPath("appData"));
   configureMediaPermissions();
   const emitChatEvent = (event: ChatEvent) => {
     if (!mainWindow || mainWindow.isDestroyed()) {
@@ -278,8 +360,8 @@ app.whenReady().then(async () => {
   chatOrchestrator = new ChatOrchestrator(
     conversationService,
     service,
-    acpRuntimeManager,
     emitChatEvent,
+    requestToolApproval,
   );
   remoteControlService = new RemoteControlService(statePath, service, chatOrchestrator, {
     onWorkspaceChanged: async () => {
@@ -322,6 +404,28 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("desktop:delete-conversation", async (_event, conversationId: string) => {
     return await conversationService!.deleteConversation(conversationId);
+  });
+
+  ipcMain.handle("desktop:export-conversation", async (_event, payload: { conversationId?: string; format?: unknown }) => {
+    const conversationId = String(payload?.conversationId ?? "").trim();
+    if (!conversationId) {
+      throw new Error("缺少会话 ID");
+    }
+
+    const format = normalizeConversationExportFormat(payload?.format);
+    const config = await service!.getConfigSnapshot();
+    const workspaceRoot = config.workspaceRoot.trim();
+    if (!workspaceRoot) {
+      throw new Error("请先选择工作区后再导出会话");
+    }
+
+    const conversation = await conversationService!.getConversation(conversationId);
+    return await exportConversationToFile({
+      workspaceRoot,
+      conversation,
+      format,
+      renderPdf: format === "pdf" ? renderPdfFromHtml : undefined,
+    });
   });
 
   ipcMain.handle("desktop:list-knowledge-bases", async () => {
@@ -372,24 +476,6 @@ app.whenReady().then(async () => {
       return await service!.searchKnowledgeBases(payload);
     },
   );
-
-  ipcMain.handle("desktop:generate-project-report", async (_event, payload: ProjectReportInput) => {
-    const bootstrap = await service!.bootstrap();
-    const mapPayload = await resolveMapSummary(payload, bootstrap.config);
-    return await service!.generateProjectReport({
-      ...payload,
-      workspaceRoot: payload.workspaceRoot || bootstrap.config.workspaceRoot,
-      ...mapPayload,
-    });
-  });
-
-  ipcMain.handle("desktop:generate-emergency-plan", async (_event, payload: EmergencyPlanInput) => {
-    const bootstrap = await service!.bootstrap();
-    return await service!.generateEmergencyPlan({
-      ...payload,
-      workspaceRoot: payload.workspaceRoot || bootstrap.config.workspaceRoot,
-    });
-  });
 
   ipcMain.handle("desktop:select-skill-folder", async () => {
     const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
@@ -503,9 +589,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("desktop:list-tools", async () => {
-    const observed = await service!.listObservedTools();
     const config = await service!.getConfigSnapshot();
-    const mcpTools: WorkspaceTool[] = [];
     const inspectedServers = await Promise.all(
       config.mcpServers
         .filter((server) => server.enabled)
@@ -521,35 +605,7 @@ app.whenReady().then(async () => {
         }),
     );
 
-    for (const result of inspectedServers) {
-      if (!result) continue;
-
-      for (const tool of result.tools) {
-        mcpTools.push({
-          id: `mcp:${tool.serverId}:${tool.name}`,
-          name: tool.name,
-          title: tool.title,
-          description: tool.description,
-          source: "mcp",
-          origin: `${tool.serverName} MCP`,
-          serverId: tool.serverId,
-          serverName: tool.serverName,
-          parameters: tool.parameters,
-          taskSupport: tool.taskSupport,
-          observed: true,
-        });
-      }
-    }
-
-    const toolMap = new Map<string, WorkspaceTool>();
-    for (const tool of [...observed.tools, ...mcpTools]) {
-      toolMap.set(tool.id, tool);
-    }
-
-    return {
-      fetchedAt: Date.now(),
-      tools: Array.from(toolMap.values()).sort((left, right) => left.name.localeCompare(right.name, "zh-CN")),
-    };
+    return buildWorkspaceToolCatalog(inspectedServers);
   });
 
   ipcMain.handle("desktop:select-files", async () => {

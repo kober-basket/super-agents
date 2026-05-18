@@ -114,6 +114,8 @@ function parseVisuals(value: string | null): ChatVisual[] {
 
 function createEmptyRuntimeTrace(): ChatMessageRuntimeTrace {
   return {
+    activityItems: [],
+    timelineItems: [],
     planEntries: [],
     toolCalls: [],
     terminalOutputs: {},
@@ -133,6 +135,8 @@ function parseRuntimeTrace(value: string | null): ChatMessageRuntimeTrace | unde
     }
 
     return {
+      activityItems: Array.isArray(parsed.activityItems) ? parsed.activityItems : [],
+      timelineItems: Array.isArray(parsed.timelineItems) ? parsed.timelineItems : [],
       planEntries: Array.isArray(parsed.planEntries) ? parsed.planEntries : [],
       toolCalls: Array.isArray(parsed.toolCalls) ? parsed.toolCalls : [],
       terminalOutputs:

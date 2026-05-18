@@ -7,11 +7,17 @@
     "noEmit": false,
     "sourceMap": false,
     "declaration": false,
-    "declarationMap": false
+    "declarationMap": false,
+    "types": ["node", "react", "react-dom"]
   },
   "include": [
+    "electron/agent-core/**/*.ts",
+    "electron/streaming-message-persister.ts",
     "electron/workspace-service.ts",
+    "src/desktop-agent.d.ts",
     "src/features/navigation/AppTitleBar.tsx",
+    "src/features/navigation/PrimarySidebar.tsx",
+    "src/lib/format.ts",
     "src/features/shared/utils.ts",
     "src/features/workspace/labels.ts",
     "tests/electron/**/*.ts",

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
-
-import type * as acp from "@agentclientprotocol/sdk";
 
 import type {
   AppConfig,
@@ -9,23 +8,35 @@ import type {
   ChatEvent,
   ChatMessageRuntimeTrace,
   ChatMessage,
-  ChatPlanEntry,
   ChatSendInput,
-  ChatTerminalOutput,
   ChatToolCall,
-  ChatToolCallContent,
   ChatTurnStartResult,
   ChatVisual,
 } from "../src/types";
 import { parseChatMessageContent } from "../src/lib/chat-visuals";
+import { buildRuntimeActivityItems } from "../src/lib/runtime-activity";
 import {
-  AcpRuntimeManager,
-  contentBlockToText,
-  mapConfigToAcpMcpServers,
-  toPromptBlocks,
-} from "./acp-runtime-manager";
+  appendTimelineTextItem,
+  syncTimelineActivityItems,
+  upsertTimelineToolItem,
+} from "../src/lib/runtime-timeline";
+import {
+  AgentCore,
+  DEFAULT_AGENT_ID,
+  OpenAICompatibleModelGateway,
+  SkillRegistry,
+  ToolRegistry,
+  createBuiltinToolDefinitions,
+  createDefaultAgentRegistry,
+  type AgentEvent,
+  type ToolApprovalDecision,
+  type ToolApprovalRequest,
+} from "./agent-core";
 import { ConversationService } from "./conversation-service";
+import { StreamingMessagePersister } from "./streaming-message-persister";
 import { WorkspaceService } from "./workspace-service";
+
+const STREAMING_MESSAGE_PERSIST_INTERVAL_MS = 200;
 
 interface ActiveTurn {
   conversationId: string;
@@ -36,17 +47,20 @@ interface ActiveTurn {
   assistantContent: string;
   assistantVisuals: ChatVisual[];
   assistantVisualsSignature: string;
+  assistantLastEmittedContent: string;
+  assistantLastEmittedVisualsSignature: string;
   runtimeTrace: ChatMessageRuntimeTrace;
+  messagePersister: StreamingMessagePersister;
   completion: Deferred<ChatTurnCompletionResult>;
   unregisterSessionHandlers: () => void;
   closed: boolean;
 }
 
 interface PreparedPrompt {
-  cwd: string;
-  additionalDirectories: string[];
-  mcpServers: acp.McpServer[];
-  prompt: acp.ContentBlock[];
+  content: string;
+  workspacePrompt: string;
+  workspaceRoot: string;
+  fullFileSystemAccess: boolean;
 }
 
 interface Deferred<T> {
@@ -101,94 +115,13 @@ function stringifyJson(value: unknown) {
 
 function createEmptyRuntimeTrace(): ChatMessageRuntimeTrace {
   return {
+    activityItems: [],
+    timelineItems: [],
     planEntries: [],
     toolCalls: [],
     terminalOutputs: {},
     thoughtText: "",
   };
-}
-
-function mapPlanEntries(entries: acp.PlanEntry[]): ChatPlanEntry[] {
-  return entries.map((entry) => ({
-    content: entry.content,
-    priority: entry.priority,
-    status: entry.status,
-  }));
-}
-
-function mapToolContent(content: acp.ToolCallContent[]): ChatToolCallContent[] {
-  return content.map((entry) => {
-    if (entry.type === "content") {
-      return {
-        type: "text",
-        text: contentBlockToText(entry.content),
-      };
-    }
-
-    if (entry.type === "diff") {
-      return {
-        type: "diff",
-        path: entry.path,
-        oldText: entry.oldText,
-        newText: entry.newText,
-      };
-    }
-
-    return {
-      type: "terminal",
-      terminalId: entry.terminalId,
-    };
-  });
-}
-
-function mapToolCall(toolCall: acp.ToolCall): ChatToolCall {
-  return {
-    toolCallId: toolCall.toolCallId,
-    title: toolCall.title,
-    status: toolCall.status,
-    kind: toolCall.kind,
-    content: toolCall.content ? mapToolContent(toolCall.content) : [],
-    locations: toolCall.locations?.map((location) => ({
-      path: location.path,
-      line: location.line,
-    })),
-    rawInputJson: stringifyJson(toolCall.rawInput),
-    rawOutputJson: stringifyJson(toolCall.rawOutput),
-  };
-}
-
-function mapToolCallPatch(
-  toolCall: acp.ToolCallUpdate,
-): Partial<Omit<ChatToolCall, "toolCallId">> {
-  const patch: Partial<Omit<ChatToolCall, "toolCallId">> = {};
-
-  if (toolCall.title !== undefined) {
-    patch.title = toolCall.title;
-  }
-  if (toolCall.status !== undefined) {
-    patch.status = toolCall.status;
-  }
-  if (toolCall.kind !== undefined) {
-    patch.kind = toolCall.kind ?? undefined;
-  }
-  if (toolCall.content !== undefined) {
-    patch.content = toolCall.content ? mapToolContent(toolCall.content) : [];
-  }
-  if (toolCall.locations !== undefined) {
-    patch.locations =
-      toolCall.locations?.map((location) => ({
-        path: location.path,
-        line: location.line,
-      })) ?? [];
-  }
-  if (toolCall.rawInput !== undefined) {
-    patch.rawInputJson = stringifyJson(toolCall.rawInput);
-  }
-  if (toolCall.rawOutput !== undefined) {
-    patch.rawOutputJson = stringifyJson(toolCall.rawOutput);
-  }
-
-  return patch;
 }
 
 function buildKnowledgeContext(search: {
@@ -225,6 +158,39 @@ function collectAdditionalDirectories(cwd: string, input: ChatSendInput) {
     .map((attachmentPath) => path.dirname(attachmentPath));
 
   return uniquePaths(attachmentDirectories).filter((directoryPath) => directoryPath !== cwd);
+}
+
+export function buildLocalDirectoryContext(homeDirectory = os.homedir()) {
+  const home = path.resolve(homeDirectory);
+  const directories = [
+    ["Home / 家目录", home],
+    ["Desktop / 桌面", path.join(home, "Desktop")],
+    ["Downloads / 下载", path.join(home, "Downloads")],
+    ["Documents / 文档", path.join(home, "Documents")],
+  ];
+
+  return [
+    `User home directory: ${home}`,
+    "Common local directories:",
+    ...directories.map(([label, directoryPath]) => `- ${label}: ${directoryPath}`),
+    "Path selection rule: when the user asks for a named local directory such as Desktop/桌面, Downloads/下载, Documents/文档, or provides an absolute path, call file tools with that absolute target. Use the workspace root only for project/workspace requests or when no target is specified.",
+  ].join("\n");
+}
+
+function buildAttachmentContext(input: ChatSendInput) {
+  const sections = (input.attachments ?? []).map((attachment, index) => {
+    const header = `${index + 1}. ${attachment.name} (${attachment.mimeType || "unknown"})`;
+    if (attachment.content?.trim()) {
+      return `${header}\n${attachment.content.trim()}`;
+    }
+    return `${header}\nAttached file path: ${attachment.path}`;
+  });
+
+  if (sections.length === 0) {
+    return "";
+  }
+
+  return `Attached files:\n${sections.join("\n\n")}`;
 }
 
 function normalizeKnowledgeBaseIds(value: string[] | undefined) {
@@ -323,14 +289,31 @@ function looksLikeTurnCancellation(value?: string) {
 
 export class ChatOrchestrator {
   private readonly activeTurns = new Map<string, ActiveTurn>();
-  private readonly agentCore = "opencode";
+  private readonly agentCoreId = "native";
+  private readonly defaultAgentId = DEFAULT_AGENT_ID;
+  private readonly nativeCore: AgentCore;
 
   constructor(
     private readonly conversationService: ConversationService,
     private readonly workspaceService: WorkspaceService,
-    private readonly runtime: AcpRuntimeManager,
     private readonly emitEvent: (event: ChatEvent) => void,
-  ) {}
+    private readonly approvalHandler?: (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>,
+  ) {
+    const agents = createDefaultAgentRegistry();
+    const skills = new SkillRegistry();
+    const tools = new ToolRegistry();
+    for (const tool of createBuiltinToolDefinitions()) {
+      tools.register(tool);
+    }
+
+    this.nativeCore = new AgentCore({
+      agents,
+      skills,
+      tools,
+      modelGateway: new OpenAICompatibleModelGateway(async () => await this.workspaceService.getConfigSnapshot()),
+      approvalHandler: this.approvalHandler,
+    });
+  }
 
   async startTurn(input: ChatSendInput): Promise<ChatTurnStartResult> {
     return (await this.startTurnWithCompletion(input)).result;
@@ -347,39 +330,26 @@ export class ChatOrchestrator {
     }
 
     const started = await this.conversationService.startTurn(input, {
-      agentCore: this.agentCore,
+      agentCore: this.agentCoreId,
     });
     const turnId = randomUUID();
     const baseConversation = {
       ...started.conversation,
-      agentCore: this.agentCore,
+      agentCore: this.agentCoreId,
     };
     const completion = createDeferred<ChatTurnCompletionResult>();
     void completion.promise.catch(() => undefined);
 
     try {
-      await this.runtime.ensureInitialized();
       const prepared = await this.preparePrompt(input, started.conversation.selectedKnowledgeBaseIds);
-      const sessionId = started.conversation.agentSessionId?.trim()
-        ? await this.runtime.ensureSession(started.conversation.agentSessionId, {
-            cwd: prepared.cwd,
-            additionalDirectories: prepared.additionalDirectories,
-            mcpServers: prepared.mcpServers,
-          })
-        : (
-            await this.runtime.createSession({
-              cwd: prepared.cwd,
-              additionalDirectories: prepared.additionalDirectories,
-              mcpServers: prepared.mcpServers,
-            })
-          ).sessionId;
+      const sessionId = started.conversation.agentSessionId?.trim() || randomUUID();
 
       await this.conversationService.setConversationAgentSession(started.conversation.id, {
-        agentCore: this.agentCore,
+        agentCore: this.agentCoreId,
         agentSessionId: sessionId,
       });
 
-      const activeTurn: ActiveTurn = {
+      const activeTurn = {
         conversationId: started.conversation.id,
         turnId,
         sessionId,
@@ -388,44 +358,26 @@ export class ChatOrchestrator {
         assistantContent: started.assistantMessage.content,
         assistantVisuals: started.assistantMessage.visuals ?? [],
         assistantVisualsSignature: serializeVisuals(started.assistantMessage.visuals ?? []),
+        assistantLastEmittedContent: started.assistantMessage.content,
+        assistantLastEmittedVisualsSignature: serializeVisuals(started.assistantMessage.visuals ?? []),
         runtimeTrace: started.assistantMessage.runtimeTrace ?? createEmptyRuntimeTrace(),
+        messagePersister: null as unknown as StreamingMessagePersister,
         completion,
         unregisterSessionHandlers: () => undefined,
         closed: false,
-      };
+      } satisfies ActiveTurn;
 
-      activeTurn.unregisterSessionHandlers = this.runtime.registerSessionHandlers(sessionId, {
-        onUpdate: async (update) => {
-          await this.handleSessionUpdate(activeTurn, update);
-        },
-        onTerminalOutput: async (terminal) => {
-          activeTurn.runtimeTrace.terminalOutputs[terminal.terminalId] = {
-            terminalId: terminal.terminalId,
-            output: terminal.output,
-            truncated: terminal.truncated,
-            exitCode: terminal.exitCode,
-            signal: terminal.signal,
-          };
-
-          this.emitEvent({
-            type: "terminal_output",
-            conversationId: activeTurn.conversationId,
-            turnId: activeTurn.turnId,
-            terminal: {
-              terminalId: terminal.terminalId,
-              output: terminal.output,
-              truncated: terminal.truncated,
-              exitCode: terminal.exitCode,
-              signal: terminal.signal,
-            } satisfies ChatTerminalOutput,
-          });
+      activeTurn.messagePersister = new StreamingMessagePersister({
+        intervalMs: STREAMING_MESSAGE_PERSIST_INTERVAL_MS,
+        persist: async () => {
+          await this.persistAssistantState(activeTurn, { emitUpdate: false });
         },
       });
 
       this.activeTurns.set(started.conversation.id, activeTurn);
 
       queueMicrotask(() => {
-        void this.runPrompt(activeTurn, started.userMessage.id, prepared.prompt);
+        void this.runPrompt(activeTurn, prepared);
       });
 
       return {
@@ -467,7 +419,32 @@ export class ChatOrchestrator {
       return;
     }
 
-    await this.runtime.cancel(activeTurn.sessionId);
+    activeTurn.assistantRawText = activeTurn.assistantRawText.trim()
+      ? activeTurn.assistantRawText
+      : INTERRUPTED_ASSISTANT_REPLY_TEXT;
+    await this.persistAndEmitAssistantState(activeTurn);
+    activeTurn.runtimeTrace.stopReason = "cancelled";
+    activeTurn.completion.resolve({
+      conversation: await this.conversationService.getConversation(activeTurn.conversationId),
+      assistantMessage: {
+        id: activeTurn.assistantMessageId,
+        role: "assistant",
+        content: activeTurn.assistantContent,
+        visuals: activeTurn.assistantVisuals,
+        attachments: [],
+        runtimeTrace: activeTurn.runtimeTrace,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      stopReason: "cancelled",
+    });
+    this.emitEvent({
+      type: "turn_finished",
+      conversationId: activeTurn.conversationId,
+      turnId: activeTurn.turnId,
+      stopReason: "cancelled",
+    });
+    this.cleanupTurn(activeTurn);
   }
 
   private async preparePrompt(
@@ -477,23 +454,27 @@ export class ChatOrchestrator {
     const config = await this.workspaceService.getConfigSnapshot();
     const cwd = path.resolve(config.workspaceRoot.trim() || process.cwd());
     const additionalDirectories = collectAdditionalDirectories(cwd, input);
-    const mcpServers = mapConfigToAcpMcpServers(config.mcpServers);
     const [skillContext, knowledgeContext] = await Promise.all([
       this.workspaceService.getEnabledSkillPromptContext(config),
       this.resolveKnowledgeContext(config, input.content, selectedKnowledgeBaseIds),
     ]);
-    const injectedContext = [skillContext, knowledgeContext].filter(Boolean).join("\n\n");
+    const attachmentContext = buildAttachmentContext(input);
+    const workspacePrompt = [
+      `Workspace root: ${cwd}`,
+      buildLocalDirectoryContext(),
+      additionalDirectories.length > 0
+        ? `Additional attachment directories:\n${additionalDirectories.join("\n")}`
+        : "",
+      skillContext,
+      knowledgeContext,
+      attachmentContext,
+    ].filter(Boolean).join("\n\n");
 
     return {
-      cwd,
-      additionalDirectories,
-      mcpServers,
-      prompt: toPromptBlocks(
-        buildTurnPromptContent(input),
-        input.attachments ?? [],
-        this.runtime.promptCapabilities,
-        injectedContext,
-      ),
+      content: buildTurnPromptContent(input),
+      workspacePrompt,
+      workspaceRoot: cwd,
+      fullFileSystemAccess: config.security.fullFileSystemAccess === true,
     };
   }
 
@@ -525,20 +506,32 @@ export class ChatOrchestrator {
     }
   }
 
-  private async runPrompt(
-    activeTurn: ActiveTurn,
-    userMessageId: string,
-    prompt: acp.ContentBlock[],
-  ) {
+  private async runPrompt(activeTurn: ActiveTurn, prepared: PreparedPrompt) {
     try {
-      const response = await this.runtime.prompt({
+      let stopReason = "end_turn";
+      for await (const event of this.nativeCore.sendTurn({
         sessionId: activeTurn.sessionId,
-        messageId: userMessageId,
-        prompt,
-      });
-      await this.ensureInterruptedReplyHint(activeTurn, response.stopReason);
-      activeTurn.runtimeTrace.stopReason = response.stopReason;
+        agentId: this.defaultAgentId,
+        content: prepared.content,
+        workspacePrompt: prepared.workspacePrompt,
+        workspaceRoot: prepared.workspaceRoot,
+        fullFileSystemAccess: prepared.fullFileSystemAccess,
+      })) {
+        if (activeTurn.closed) {
+          return;
+        }
+
+        await this.handleAgentEvent(activeTurn, event);
+        if (event.type === "turn_finished") {
+          stopReason = event.stopReason;
+        }
+      }
+
+      await activeTurn.messagePersister.flush();
+      await this.ensureInterruptedReplyHint(activeTurn, stopReason);
+      activeTurn.runtimeTrace.stopReason = stopReason;
       activeTurn.runtimeTrace.error = undefined;
+      await this.persistAssistantState(activeTurn, { emitUpdate: true });
       try {
         await this.persistRuntimeTrace(activeTurn);
       } catch {
@@ -560,16 +553,17 @@ export class ChatOrchestrator {
       activeTurn.completion.resolve({
         conversation,
         assistantMessage,
-        stopReason: response.stopReason,
+        stopReason,
       });
 
       this.emitEvent({
         type: "turn_finished",
         conversationId: activeTurn.conversationId,
         turnId: activeTurn.turnId,
-        stopReason: response.stopReason,
+        stopReason,
       });
     } catch (error) {
+      await activeTurn.messagePersister.flush();
       await this.ensureInterruptedReplyHint(
         activeTurn,
         error instanceof Error ? error.message : String(error),
@@ -604,27 +598,44 @@ export class ChatOrchestrator {
   }
 
   private async persistAndEmitAssistantState(activeTurn: ActiveTurn) {
+    await this.persistAssistantState(activeTurn, { emitUpdate: true });
+  }
+
+  private async persistAssistantState(
+    activeTurn: ActiveTurn,
+    options: { emitUpdate: boolean; forceEmitUpdate?: boolean },
+  ) {
     const parsed = parseChatMessageContent(activeTurn.assistantRawText);
     const nextVisualsSignature = serializeVisuals(parsed.visuals);
+    const stateChanged =
+      parsed.text !== activeTurn.assistantContent ||
+      nextVisualsSignature !== activeTurn.assistantVisualsSignature;
+
+    if (stateChanged || options.forceEmitUpdate) {
+      activeTurn.assistantContent = parsed.text;
+      activeTurn.assistantVisuals = parsed.visuals;
+      activeTurn.assistantVisualsSignature = nextVisualsSignature;
+
+      await this.conversationService.updateAssistantMessage(
+        activeTurn.conversationId,
+        activeTurn.assistantMessageId,
+        activeTurn.assistantContent,
+        activeTurn.assistantVisuals,
+        activeTurn.runtimeTrace,
+      );
+    }
 
     if (
-      parsed.text === activeTurn.assistantContent &&
-      nextVisualsSignature === activeTurn.assistantVisualsSignature
+      !options.emitUpdate ||
+      (!options.forceEmitUpdate &&
+        activeTurn.assistantContent === activeTurn.assistantLastEmittedContent &&
+        activeTurn.assistantVisualsSignature === activeTurn.assistantLastEmittedVisualsSignature)
     ) {
       return;
     }
 
-    activeTurn.assistantContent = parsed.text;
-    activeTurn.assistantVisuals = parsed.visuals;
-    activeTurn.assistantVisualsSignature = nextVisualsSignature;
-
-    await this.conversationService.updateAssistantMessage(
-      activeTurn.conversationId,
-      activeTurn.assistantMessageId,
-      activeTurn.assistantContent,
-      activeTurn.assistantVisuals,
-      activeTurn.runtimeTrace,
-    );
+    activeTurn.assistantLastEmittedContent = activeTurn.assistantContent;
+    activeTurn.assistantLastEmittedVisualsSignature = activeTurn.assistantVisualsSignature;
 
     this.emitEvent({
       type: "message_updated",
@@ -637,6 +648,12 @@ export class ChatOrchestrator {
   }
 
   private async persistRuntimeTrace(activeTurn: ActiveTurn) {
+    activeTurn.runtimeTrace.activityItems = buildRuntimeActivityItems(activeTurn.runtimeTrace.toolCalls);
+    activeTurn.runtimeTrace.timelineItems = syncTimelineActivityItems(
+      activeTurn.runtimeTrace.timelineItems,
+      activeTurn.runtimeTrace.activityItems,
+      (activity) => `activity-${activity.id}-${randomUUID()}`,
+    );
     await this.conversationService.updateAssistantMessage(
       activeTurn.conversationId,
       activeTurn.assistantMessageId,
@@ -654,30 +671,97 @@ export class ChatOrchestrator {
     });
   }
 
-  private async handleSessionUpdate(activeTurn: ActiveTurn, update: acp.SessionUpdate) {
+  private appendTextTimelineItem(activeTurn: ActiveTurn, type: "thought" | "status", text: string) {
+    activeTurn.runtimeTrace.timelineItems = appendTimelineTextItem(
+      activeTurn.runtimeTrace.timelineItems,
+      type,
+      text,
+      `${type}-${randomUUID()}`,
+    );
+  }
+
+  private appendToolTimelineItem(activeTurn: ActiveTurn, toolCallId: string) {
+    activeTurn.runtimeTrace.timelineItems = upsertTimelineToolItem(
+      activeTurn.runtimeTrace.timelineItems,
+      toolCallId,
+      `tool-${toolCallId}-${randomUUID()}`,
+    );
+  }
+
+  private async sealAssistantCandidateAsProcess(activeTurn: ActiveTurn) {
+    const processText = activeTurn.assistantRawText;
+    if (!processText.trim()) {
+      return;
+    }
+
+    activeTurn.assistantRawText = "";
+    this.appendTextTimelineItem(activeTurn, "status", processText);
+    this.emitEvent({
+      type: "status_delta",
+      conversationId: activeTurn.conversationId,
+      turnId: activeTurn.turnId,
+      textDelta: processText,
+    });
+    await this.persistAssistantState(activeTurn, { emitUpdate: true, forceEmitUpdate: true });
+  }
+
+  private emitActivitySummary(activeTurn: ActiveTurn) {
+    const items = buildRuntimeActivityItems(activeTurn.runtimeTrace.toolCalls);
+    activeTurn.runtimeTrace.activityItems = items;
+    activeTurn.runtimeTrace.timelineItems = syncTimelineActivityItems(
+      activeTurn.runtimeTrace.timelineItems,
+      items,
+      (activity) => `activity-${activity.id}-${randomUUID()}`,
+    );
+    if (items.length === 0) {
+      return;
+    }
+
+    this.emitEvent({
+      type: "activity_summary",
+      conversationId: activeTurn.conversationId,
+      turnId: activeTurn.turnId,
+      items,
+    });
+  }
+
+  private async handleAgentEvent(activeTurn: ActiveTurn, event: AgentEvent) {
     if (activeTurn.closed) {
       return;
     }
 
-    if (update.sessionUpdate === "agent_message_chunk") {
-      const textDelta = contentBlockToText(update.content);
+    if (event.type === "message_delta") {
+      const textDelta = event.text;
       if (!textDelta) {
         return;
       }
 
       activeTurn.assistantRawText += textDelta;
+      this.emitEvent({
+        type: "message_delta",
+        conversationId: activeTurn.conversationId,
+        turnId: activeTurn.turnId,
+        messageId: activeTurn.assistantMessageId,
+        textDelta,
+      });
+      activeTurn.messagePersister.schedule();
+      return;
+    }
+
+    if (event.type === "message_replace") {
+      activeTurn.assistantRawText = event.text;
       await this.persistAndEmitAssistantState(activeTurn);
       return;
     }
 
-    if (update.sessionUpdate === "agent_thought_chunk") {
-      const textDelta = contentBlockToText(update.content);
+    if (event.type === "thought_delta") {
+      const textDelta = event.text;
       if (!textDelta) {
         return;
       }
 
       activeTurn.runtimeTrace.thoughtText += textDelta;
-
+      this.appendTextTimelineItem(activeTurn, "thought", textDelta);
       this.emitEvent({
         type: "thought_delta",
         conversationId: activeTurn.conversationId,
@@ -687,44 +771,62 @@ export class ChatOrchestrator {
       return;
     }
 
-    if (update.sessionUpdate === "plan") {
-      activeTurn.runtimeTrace.planEntries = mapPlanEntries(update.entries);
+    if (event.type === "status_delta") {
+      const textDelta = event.text;
+      if (!textDelta) {
+        return;
+      }
 
+      this.appendTextTimelineItem(activeTurn, "status", textDelta);
       this.emitEvent({
-        type: "plan_updated",
+        type: "status_delta",
         conversationId: activeTurn.conversationId,
         turnId: activeTurn.turnId,
-        entries: activeTurn.runtimeTrace.planEntries,
+        textDelta,
       });
       return;
     }
 
-    if (update.sessionUpdate === "tool_call") {
+    if (event.type === "tool_call_started") {
+      await this.sealAssistantCandidateAsProcess(activeTurn);
+      const toolCall: ChatToolCall = {
+        toolCallId: event.toolCall.id,
+        title: event.toolCall.name,
+        status: "in_progress",
+        kind: "other",
+        content: [],
+        rawInputJson: stringifyJson(event.toolCall.input),
+      };
       activeTurn.runtimeTrace.toolCalls = [
         ...activeTurn.runtimeTrace.toolCalls.filter(
-          (toolCall) => toolCall.toolCallId !== update.toolCallId,
+          (entry) => entry.toolCallId !== event.toolCall.id,
         ),
-        mapToolCall(update),
+        toolCall,
       ];
 
+      this.emitActivitySummary(activeTurn);
+      this.appendToolTimelineItem(activeTurn, event.toolCall.id);
       this.emitEvent({
         type: "tool_call_started",
         conversationId: activeTurn.conversationId,
         turnId: activeTurn.turnId,
-        toolCall: activeTurn.runtimeTrace.toolCalls[activeTurn.runtimeTrace.toolCalls.length - 1],
+        toolCall,
       });
       return;
     }
 
-    if (update.sessionUpdate === "tool_call_update") {
-      const patch = mapToolCallPatch(update);
+    if (event.type === "tool_call_finished") {
+      const patch: Partial<Omit<ChatToolCall, "toolCallId">> = {
+        status: "completed",
+        content: [{ type: "text", text: event.result.content }],
+        rawOutputJson: stringifyJson(event.result),
+      };
       activeTurn.runtimeTrace.toolCalls = activeTurn.runtimeTrace.toolCalls.map((toolCall) =>
-        toolCall.toolCallId === update.toolCallId
+        toolCall.toolCallId === event.toolCall.id
           ? {
               ...toolCall,
               ...patch,
               content: patch.content ?? toolCall.content,
-              locations: patch.locations ?? toolCall.locations,
             }
           : toolCall,
       );
@@ -733,8 +835,63 @@ export class ChatOrchestrator {
         type: "tool_call_updated",
         conversationId: activeTurn.conversationId,
         turnId: activeTurn.turnId,
-        toolCallId: update.toolCallId,
+        toolCallId: event.toolCall.id,
         patch,
+      });
+      this.emitActivitySummary(activeTurn);
+      return;
+    }
+
+    if (event.type === "permission_denied" || event.type === "permission_requested") {
+      await this.sealAssistantCandidateAsProcess(activeTurn);
+      const patch: Partial<Omit<ChatToolCall, "toolCallId">> = {
+        title: event.toolCall.name,
+        status: event.type === "permission_denied" ? "failed" : "pending",
+        kind: "other",
+        content: [{ type: "text", text: event.reason }],
+        rawInputJson: stringifyJson(event.toolCall.input),
+      };
+      const existing = activeTurn.runtimeTrace.toolCalls.some(
+        (toolCall) => toolCall.toolCallId === event.toolCall.id,
+      );
+
+      if (existing) {
+        activeTurn.runtimeTrace.toolCalls = activeTurn.runtimeTrace.toolCalls.map((toolCall) =>
+          toolCall.toolCallId === event.toolCall.id
+            ? {
+                ...toolCall,
+                ...patch,
+                content: patch.content ?? toolCall.content,
+              }
+            : toolCall,
+        );
+        this.emitEvent({
+          type: "tool_call_updated",
+          conversationId: activeTurn.conversationId,
+          turnId: activeTurn.turnId,
+          toolCallId: event.toolCall.id,
+          patch,
+        });
+        this.emitActivitySummary(activeTurn);
+        return;
+      }
+
+      const toolCall: ChatToolCall = {
+        toolCallId: event.toolCall.id,
+        title: event.toolCall.name,
+        status: patch.status,
+        kind: "other",
+        content: patch.content ?? [],
+        rawInputJson: patch.rawInputJson,
+      };
+      activeTurn.runtimeTrace.toolCalls = [...activeTurn.runtimeTrace.toolCalls, toolCall];
+      this.emitActivitySummary(activeTurn);
+      this.appendToolTimelineItem(activeTurn, event.toolCall.id);
+      this.emitEvent({
+        type: "tool_call_started",
+        conversationId: activeTurn.conversationId,
+        turnId: activeTurn.turnId,
+        toolCall,
       });
     }
   }
@@ -745,6 +902,7 @@ export class ChatOrchestrator {
     }
 
     activeTurn.closed = true;
+    activeTurn.messagePersister.cancel();
     activeTurn.unregisterSessionHandlers();
     this.activeTurns.delete(activeTurn.conversationId);
   }

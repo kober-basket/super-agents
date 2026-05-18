@@ -1,0 +1,107 @@
+# Super Agents - Agent Guide
+
+本文件用于指导自动化 agent 和 AI coding assistant 在本仓库中工作。人类维护者的明确指令优先于本文件；如果发现本文件与实际代码不一致，先以代码为准，并在相关改动中同步更新本文件。
+
+## Project Overview
+
+`super-agents` 是一个基于 Electron、Vite、React 和 TypeScript 的桌面 agent 工作台外壳。当前重点不是单纯聊天 UI，而是逐步形成一个本地原生 agent runtime：会话、工具、技能、MCP、权限、知识库、远程控制和可视化运行轨迹都应该作为同一个能力系统来演进。
+
+关键入口：
+
+- `electron/main.ts`：Electron 主进程入口。
+- `electron/chat-orchestrator.ts`：聊天回合编排，把前端输入、知识库、附件、workspace context 和 agent runtime 串起来。
+- `electron/agent-core/`：原生 agent 能力层，包括 agent 定义、prompt 组合、工具注册、权限、会话和模型网关。
+- `electron/tool-catalog.ts`：内置工具与 MCP 工具汇总成工作区工具目录。
+- `electron/builtin-skills/`：随应用打包的内置技能。
+- `src/features/chat/`：聊天工作区、预览和消息可视化。
+- `src/features/tools/`：工具目录与 MCP 管理界面。
+- `src/features/skills/`：技能列表、导入和新建界面。
+- `src/features/settings/`：模型、MCP、权限、远程控制和外观等设置。
+- `tests/electron/`、`tests/frontend/`：Electron 侧与前端纯逻辑测试。
+
+## Development Commands
+
+使用仓库已有 npm scripts，除非任务明确要求切换包管理器。
+
+```bash
+npm install
+npm run dev
+npm run build
+npm run test:electron
+npm run preview
+```
+
+常用验证：
+
+- 修改 TypeScript 或 Electron 逻辑后，优先运行 `npm run test:electron`。
+- 修改前端纯逻辑后，仍使用 `npm run test:electron`，当前测试脚本会先编译 `tsconfig.test.json` 并运行 `.test-dist` 下的 Node tests。
+- 修改打包入口、预加载、Electron 主进程或 Vite 配置后，运行 `npm run build`。
+- UI 交互改动需要人工或浏览器实际检查，尤其是聊天、工具、技能和设置页面。
+
+## Architecture Principles
+
+### Agent 能力层优先
+
+设计 agent 能力层时，重点参考上级目录中的这些项目：
+
+- `../hermes-agent`：参考它的 agent loop、toolset、skill/plugin、gateway 和多平台编排思路。
+- `../opencode`：参考它机器友好的 agent 约定、工具执行边界、包级命令和自动化安全规则。
+- `../claude-code`：参考它的工具系统、权限提示、计划/任务 agent、ACP/remote control、系统 prompt 与上下文装载方式。
+
+参考这些项目时只吸收架构和行为边界，不要直接照搬大型实现。`super-agents` 当前更适合先把能力层做薄、清晰、可替换，再逐步扩展。
+
+### 当前能力分层
+
+- Agent profile：`AgentDefinition` 描述 agent 的身份、角色、prompt、模型、工具、技能、权限模式和最大轮次。
+- Prompt composition：`PromptComposer` 负责组合 runtime prompt、active agent instructions、skills、memory、workspace 和 additional instructions。
+- Tool system：`ToolDefinition` 定义工具 schema、risk 和 `execute`；内置工具在 `electron/agent-core/builtin-tools.ts`，MCP 工具通过 adapter 进入工作区工具目录。
+- Permission system：`PermissionManager` 根据 agent policy、工具风险、审批要求和 full filesystem access 做 allow/ask/deny。
+- Execution loop：`AgentCore.sendTurn()` 负责流式模型事件、工具调用、重复工具调用去重、工具结果截断、错误净化和最终回答合成。
+- Skills：`SkillDefinition` 是可注入 prompt 的程序化知识；内置 skill 放在 `electron/builtin-skills/`，用户技能通过界面导入或创建。
+- Runtime trace：聊天编排层把 thought、status、tool calls、timeline 和 visual blocks 映射到前端展示。
+
+新增能力时先判断它属于哪一层。不要把 agent runtime 规则硬塞进 React 组件，也不要把 UI 状态混进 `electron/agent-core/`。
+
+## Coding Guidelines
+
+- 优先沿用现有 TypeScript 风格：明确类型、小函数、早返回、只在必要处添加注释。
+- 前端组件保持领域化目录结构，聊天、工具、技能、设置等功能分别放在对应 `src/features/*` 下。
+- Electron 主进程代码避免直接依赖 React 层类型；共享类型放在 `src/types.ts` 或 agent-core 自己的 `types.ts`。
+- 内置工具必须有明确 `inputSchema`、`risk` 和错误处理；不要允许空对象调用必填参数工具。
+- 文件/目录工具要尊重 workspace root；当用户明确给出绝对路径或桌面/下载/文档等本地目录时，才使用绝对目标。
+- 权限相关改动要保持保守：写入、shell、网络和 destructive 风险要能被 policy 或审批流程约束。
+- Skill 内容应短而可执行。复杂参考资料放到 skill 目录的 `references/`，不要把长篇说明全部塞进 `SKILL.md`。
+- UI 文案以中文为主，技术标识、工具名、命令和路径保留英文。
+
+## Agent Capability Work
+
+开发 agent 能力时优先维护这些不变量：
+
+- Agent、tool、skill、permission、model gateway 是独立边界，可以单测。
+- Runtime prompt 只描述稳定约束；具体 persona 和任务规则放到 agent profile 或 skill。
+- 工具调用输入必须被 schema 校验；错误结果要可读、可截断、不能污染后续 prompt。
+- 工具结果过长时截断并写入 metadata，而不是让模型上下文失控。
+- 同一 turn 内重复的同签名工具调用应复用已有结果或给出明确提示。
+- Coordinator/worker/specialist agent 应该通过清晰的任务边界协作，简单任务由当前 agent 直接完成。
+- MCP 是外部能力入口，内置工具是本地基础能力；两者在 UI 中统一展示，但实现边界不要混淆。
+
+新增或调整 agent 能力时，优先补齐对应测试：
+
+- `tests/electron/agent-core.test.ts`
+- `tests/electron/builtin-tools.test.ts`
+- `tests/electron/tool-catalog.test.ts`
+- `tests/electron/chat-orchestrator.test.ts`
+- `tests/frontend/runtime-activity.test.ts`
+- `tests/frontend/runtime-timeline.test.ts`
+- `tests/frontend/runtime-tool-visibility.test.ts`
+
+## Git And Safety
+
+- 工作区可能已有用户改动。不要还原、覆盖或整理与当前任务无关的文件。
+- 不要运行 `git reset --hard`、`git checkout -- <file>`、强推、改写历史等破坏性命令，除非人类明确要求。
+- 不要替用户创建 commit，除非任务明确要求。
+- 涉及密钥、模型配置、远程控制、消息平台 webhook、CI/release 的改动要格外保守，并在结果中说明验证情况。
+
+## Documentation Maintenance
+
+当新增 agent 能力层、内置工具、权限策略、技能系统、MCP 行为或开发命令变化时，同步更新本文件。保持它短、可执行、贴近代码；不要把它变成完整设计文档。

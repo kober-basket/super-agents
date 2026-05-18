@@ -12,6 +12,8 @@ export const workspaceClient = {
   sendChatMessage: (payload: Parameters<typeof desktopAgent.sendChatMessage>[0]) =>
     desktopAgent.sendChatMessage(payload),
   deleteConversation: (conversationId: string) => desktopAgent.deleteConversation(conversationId),
+  exportConversation: (payload: Parameters<typeof desktopAgent.exportConversation>[0]) =>
+    desktopAgent.exportConversation(payload),
   listKnowledgeBases: () => desktopAgent.listKnowledgeBases(),
   createKnowledgeBase: (payload: Parameters<typeof desktopAgent.createKnowledgeBase>[0]) =>
     desktopAgent.createKnowledgeBase(payload),
@@ -30,10 +32,6 @@ export const workspaceClient = {
     desktopAgent.deleteKnowledgeItem(payload),
   searchKnowledgeBases: (payload: Parameters<typeof desktopAgent.searchKnowledgeBases>[0]) =>
     desktopAgent.searchKnowledgeBases(payload),
-  generateProjectReport: (payload: Parameters<typeof desktopAgent.generateProjectReport>[0]) =>
-    desktopAgent.generateProjectReport(payload),
-  generateEmergencyPlan: (payload: Parameters<typeof desktopAgent.generateEmergencyPlan>[0]) =>
-    desktopAgent.generateEmergencyPlan(payload),
   selectSkillFolder: () => desktopAgent.selectSkillFolder(),
   importLocalSkill: (sourcePath: string) => desktopAgent.importLocalSkill(sourcePath),
   uninstallSkill: (skillId: string) => desktopAgent.uninstallSkill(skillId),

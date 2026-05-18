@@ -1,6 +1,6 @@
 ﻿import { randomUUID } from "node:crypto";
-import { access, cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { access, cp, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import mammoth from "mammoth";
@@ -30,8 +30,6 @@ import type {
   AudioTranscriptionInput,
   AudioTranscriptionResult,
   BootstrapPayload,
-  EmergencyPlanInput,
-  EmergencyPlanResult,
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeAddDirectoryInput,
@@ -48,31 +46,15 @@ import type {
   ModelProviderFetchInput,
   ModelProviderFetchResult,
   PreviewKind,
-  ProjectReportInput,
-  ProjectReportResult,
   ProxyConfig,
   RuntimeSkill,
   SkillConfig,
   SkillImportResult,
   WorkspaceToolCatalog,
 } from "../src/types";
-import {
-  buildEmergencyPlanPrompt,
-  createDefaultEmergencyPlanFileName,
-  createEmergencyPlanDocBuffer,
-  recognizeEmergencyTemplate,
-  sanitizeEmergencyPlanFileName,
-} from "./emergency-plan";
 import { KnowledgeService } from "./knowledge-service";
-import {
-  buildProjectReportPrompt,
-  createDefaultReportFileName,
-  createProjectReportDocBuffer,
-  mergeKnowledgeResults,
-  resolveReportOutputPath,
-  sanitizeReportFileName,
-} from "./project-report";
 import { readJsonFile, writeJsonFile } from "./store";
+import { buildWorkspaceToolCatalog } from "./tool-catalog";
 
 interface PersistedWorkspaceState {
   config: AppConfig;
@@ -89,35 +71,8 @@ const LEGACY_DEFAULT_PROVIDER_MODEL_IDS = [
 
 const DEFAULT_MODEL_PROVIDERS: ModelProviderConfig[] = getDefaultModelProviders();
 
-const DEFAULT_SKILLS: SkillConfig[] = [
-  {
-    id: "meeting-minutes",
-    name: "meeting-minutes",
-    description: "Turn meeting notes into minutes and action items",
-    kind: "command",
-    command:
-      "Please turn the following input into concise Chinese meeting minutes. Include topic, key decisions, action items, owners, and due dates.\n\nInput:\n$ARGUMENTS",
-    enabled: true,
-  },
-  {
-    id: "email-draft",
-    name: "email-draft",
-    description: "Draft a professional Chinese work email from requirements",
-    kind: "command",
-    command:
-      "Draft a professional and concise Chinese work email from the following requirements. Output the subject line and the body.\n\nRequirements:\n$ARGUMENTS",
-    enabled: true,
-  },
-  {
-    id: "schedule-summary",
-    name: "schedule-summary",
-    description: "Summarize schedules and flag conflicts or risks",
-    kind: "command",
-    command:
-      "Summarize the following schedule in clear Chinese. Point out time conflicts, risks, and recommended adjustments.\n\nSchedule:\n$ARGUMENTS",
-    enabled: true,
-  },
-];
+const LEGACY_DEFAULT_SKILL_IDS = new Set(["meeting-minutes", "email-draft", "schedule-summary"]);
+const DEFAULT_SKILLS: SkillConfig[] = readBuiltinSkillConfigs();
 
 const DEFAULT_CONFIG: AppConfig = {
   workspaceRoot: "",
@@ -131,7 +86,6 @@ const DEFAULT_CONFIG: AppConfig = {
   modelProviders: DEFAULT_MODEL_PROVIDERS,
   mcpServers: [],
   skills: DEFAULT_SKILLS,
-  hiddenCodexSkillIds: [],
   knowledgeBase: {
     enabled: false,
     embeddingProviderId: DEFAULT_EMBEDDING_PROVIDER_ID,
@@ -142,6 +96,9 @@ const DEFAULT_CONFIG: AppConfig = {
     chunkOverlap: 160,
   },
   remoteControl: DEFAULT_REMOTE_CONTROL_CONFIG,
+  security: {
+    fullFileSystemAccess: false,
+  },
 };
 
 const DOCX_MIME_TYPES = new Set([
@@ -236,7 +193,8 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
   const rawConfig = (state?.config ?? {}) as Partial<AppConfig> & {
     customModels?: any[];
   } & Record<string, unknown>;
-  const { customModels, workspaceRoot, ...restConfigWithLegacy } = rawConfig;
+  const legacyHiddenSkillKey = ["hidden", "Code", "x", "SkillIds"].join("");
+  const { customModels, workspaceRoot, [legacyHiddenSkillKey]: _legacyHiddenSkillIds, ...restConfigWithLegacy } = rawConfig;
   const legacyWorkspaceRootKey = ["open", "codeRoot"].join("");
   const { [legacyWorkspaceRootKey]: _legacyWorkspaceRoot, ...restConfig } = restConfigWithLegacy;
   const legacyModels = Array.isArray(customModels) ? customModels.filter(Boolean) : [];
@@ -289,9 +247,7 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
         ...(rawConfig.proxy ?? {}),
       },
       modelProviders,
-      hiddenCodexSkillIds: Array.isArray(rawConfig.hiddenCodexSkillIds)
-        ? rawConfig.hiddenCodexSkillIds.map((item) => String(item))
-        : [],
+      skills: normalizeSkillList(rawConfig.skills),
       knowledgeBase: {
         ...DEFAULT_CONFIG.knowledgeBase,
         ...(rawConfig.knowledgeBase ?? {}),
@@ -309,8 +265,12 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
           : [],
       },
       remoteControl: normalizeRemoteControlConfig(rawConfig.remoteControl),
+      security: {
+        ...DEFAULT_CONFIG.security,
+        ...(rawConfig.security ?? {}),
+        fullFileSystemAccess: rawConfig.security?.fullFileSystemAccess === true,
+      },
       mcpServers: Array.isArray(rawConfig.mcpServers) ? rawConfig.mcpServers : DEFAULT_CONFIG.mcpServers,
-      skills: Array.isArray(rawConfig.skills) && rawConfig.skills.length > 0 ? rawConfig.skills : DEFAULT_CONFIG.skills,
     },
   };
 }
@@ -407,113 +367,6 @@ function extractStringList(value: unknown): string[] {
   return value
     .map((item) => (typeof item === "string" ? item.trim().toLowerCase() : ""))
     .filter(Boolean);
-}
-
-function createChatCompletionsUrl(baseUrl: string) {
-  const normalized = normalizeBaseUrl(baseUrl);
-  if (!normalized) {
-    throw new Error("请先填写提供商接口地址");
-  }
-
-  return normalized.endsWith("/chat/completions")
-    ? normalized
-    : `${normalized}/chat/completions`;
-}
-
-function extractTextFromCompletionPayload(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  const record = payload as Record<string, unknown>;
-  const choices = Array.isArray(record.choices) ? record.choices : [];
-  const firstChoice =
-    choices.length > 0 && choices[0] && typeof choices[0] === "object"
-      ? (choices[0] as Record<string, unknown>)
-      : null;
-  const message =
-    firstChoice?.message && typeof firstChoice.message === "object"
-      ? (firstChoice.message as Record<string, unknown>)
-      : null;
-
-  if (typeof message?.content === "string") {
-    return message.content;
-  }
-
-  if (Array.isArray(message?.content)) {
-    return message.content
-      .map((part) => {
-        if (typeof part === "string") {
-          return part;
-        }
-        if (!part || typeof part !== "object") {
-          return "";
-        }
-        const value = part as Record<string, unknown>;
-        if (typeof value.text === "string") {
-          return value.text;
-        }
-        const nestedText =
-          value.text && typeof value.text === "object" ? (value.text as Record<string, unknown>).value : undefined;
-        return typeof nestedText === "string" ? nestedText : "";
-      })
-      .filter(Boolean)
-      .join("\n");
-  }
-
-  if (typeof record.output_text === "string") {
-    return record.output_text;
-  }
-
-  return "";
-}
-
-async function generateTextWithActiveModel(config: AppConfig, prompt: string): Promise<string> {
-  const activeModel = getActiveModelOption(config.modelProviders, config.activeModelId);
-  if (!activeModel) {
-    throw new Error("请先配置可用的默认模型");
-  }
-
-  const provider = config.modelProviders.find((item) => item.id === activeModel.providerId) ?? null;
-  if (!provider || provider.enabled === false) {
-    throw new Error("当前默认模型所属提供商不可用");
-  }
-  if (provider.kind !== "openai-compatible") {
-    throw new Error("当前仅支持 OpenAI 兼容模型生成报告");
-  }
-
-  const response = await fetch(createChatCompletionsUrl(provider.baseUrl), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...createOpenAiCompatibleHeaders(provider.apiKey),
-    },
-    body: JSON.stringify({
-      model: activeModel.modelId,
-      temperature: provider.temperature,
-      max_tokens: provider.maxTokens,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    }),
-  });
-
-  const rawText = await response.text();
-  const parsed = safeParseJson(rawText);
-
-  if (!response.ok) {
-    throw new Error(extractResponseErrorMessage(parsed ?? rawText, "模型生成失败"));
-  }
-
-  const content = extractTextFromCompletionPayload(parsed);
-  if (!content.trim()) {
-    throw new Error("模型未返回有效文本内容");
-  }
-
-  return content.trim();
 }
 
 function inferVendorName(record: Record<string, unknown>, id: string, label: string, description: string, group?: string) {
@@ -656,29 +509,29 @@ async function fetchOpenAiCompatibleModelsEnhanced(input: ModelProviderFetchInpu
   return models;
 }
 
-function getExternalCodexSkillsRoot() {
-  return path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "skills");
+function getManagedLocalSkillsRoot(statePath: string) {
+  return path.join(path.dirname(statePath), "skills", "local");
 }
 
-function getLegacyManagedCodexSkillsRoot(statePath: string) {
-  return path.join(path.dirname(statePath), "skills", "codex");
+function getManagedBuiltinSkillsRoot(statePath: string) {
+  return path.join(path.dirname(statePath), "skills", "builtin");
 }
 
-function getProjectCodexSkillsRoot(workspaceRoot: string) {
-  return path.join(workspaceRoot, ".codex", "skills");
+function getProjectLocalSkillsRoot(workspaceRoot: string) {
+  return path.join(workspaceRoot, ".super-agents", "skills");
 }
 
-function getManagedCodexSkillsRoots(statePath: string, workspaceRoot?: string) {
-  const roots = [getLegacyManagedCodexSkillsRoot(statePath)];
+function getManagedLocalSkillsRoots(statePath: string, workspaceRoot?: string) {
+  const roots = [getManagedLocalSkillsRoot(statePath)];
   const normalizedWorkspaceRoot = workspaceRoot?.trim();
   if (normalizedWorkspaceRoot) {
-    roots.unshift(getProjectCodexSkillsRoot(normalizedWorkspaceRoot));
+    roots.unshift(getProjectLocalSkillsRoot(normalizedWorkspaceRoot));
   }
   return Array.from(new Set(roots));
 }
 
-function getPreferredManagedCodexSkillsRoot(statePath: string, workspaceRoot?: string) {
-  return getManagedCodexSkillsRoots(statePath, workspaceRoot)[0];
+function getPreferredManagedLocalSkillsRoot(statePath: string, workspaceRoot?: string) {
+  return getManagedLocalSkillsRoots(statePath, workspaceRoot)[0];
 }
 
 function parseSkillFrontmatter(content: string) {
@@ -714,20 +567,102 @@ function stripSkillFrontmatter(content: string, skillName?: string) {
   return next.trim();
 }
 
-async function readLocalCodexSkill(skillRoot: string, system: boolean): Promise<SkillConfig | null> {
+function resolveBuiltinSkillsRoot() {
+  const candidates = [
+    path.resolve(process.cwd(), "electron", "builtin-skills"),
+    path.resolve(process.cwd(), "..", "electron", "builtin-skills"),
+    path.resolve(__dirname, "builtin-skills"),
+    path.resolve(__dirname, "..", "electron", "builtin-skills"),
+    path.resolve(__dirname, "..", "..", "electron", "builtin-skills"),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
+function readBuiltinSkillConfigs(): SkillConfig[] {
+  const root = resolveBuiltinSkillsRoot();
+
+  try {
+    return readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const skillRoot = path.join(root, entry.name);
+        const content = readFileSync(path.join(skillRoot, "SKILL.md"), "utf8");
+        const parsed = parseSkillFrontmatter(content);
+        const name = parsed.name || entry.name;
+        return {
+          id: sanitizeModelProviderId(name),
+          name,
+          description: parsed.description || "Built-in skill",
+          kind: "command" as const,
+          command: stripSkillFrontmatter(content, name),
+          enabled: true,
+          sourcePath: skillRoot,
+          system: true,
+        };
+      })
+      .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeSkillList(rawSkills: unknown, builtinSkills: SkillConfig[] = DEFAULT_SKILLS): SkillConfig[] {
+  const source = Array.isArray(rawSkills) ? rawSkills : [];
+  const previousById = new Map<string, any>();
+  for (const item of source) {
+    const id = String(item?.id ?? "").trim();
+    if (id) previousById.set(id, item);
+  }
+
+  const builtinIds = new Set(builtinSkills.map((skill) => skill.id));
+  const normalizedBuiltinSkills = builtinSkills.map((skill) => {
+    const previous = previousById.get(skill.id);
+    return {
+      ...skill,
+      enabled: previous?.enabled === false ? false : skill.enabled,
+    };
+  });
+
+  const customSkills = source.flatMap((item): SkillConfig[] => {
+    const id = String(item?.id ?? "").trim();
+    const name = String(item?.name ?? id).trim();
+    const kind = item?.kind;
+    if (!id || !name || kind !== "command") return [];
+    if (builtinIds.has(id)) return [];
+    if (!item?.sourcePath && (LEGACY_DEFAULT_SKILL_IDS.has(id) || LEGACY_DEFAULT_SKILL_IDS.has(name))) return [];
+
+    return [
+      {
+        id,
+        name,
+        description: String(item?.description ?? ""),
+        kind: "command",
+        command: String(item?.command ?? ""),
+        enabled: item?.enabled !== false,
+        sourcePath: typeof item?.sourcePath === "string" ? item.sourcePath : undefined,
+        system: item?.system === true,
+      },
+    ];
+  });
+
+  return [...normalizedBuiltinSkills, ...customSkills];
+}
+
+async function readLocalSkill(skillRoot: string): Promise<SkillConfig | null> {
   try {
     const content = await readFile(path.join(skillRoot, "SKILL.md"), "utf8");
     const parsed = parseSkillFrontmatter(content);
     const name = parsed.name || path.basename(skillRoot);
+    const body = stripSkillFrontmatter(content, name);
     return {
       id: sanitizeModelProviderId(name),
       name,
-      description: parsed.description || "Codex local skill",
-      kind: "codex",
-      command: "",
+      description: parsed.description || "Local skill",
+      kind: "command",
+      command: body,
       enabled: true,
       sourcePath: skillRoot,
-      system,
     };
   } catch {
     return null;
@@ -742,7 +677,7 @@ async function readRuntimeSkill(skillRoot: string, location: string): Promise<Ru
     return {
       id: sanitizeModelProviderId(name),
       name,
-      description: parsed.description || "Codex local skill",
+      description: parsed.description || "Local skill",
       location,
       content,
     };
@@ -751,21 +686,12 @@ async function readRuntimeSkill(skillRoot: string, location: string): Promise<Ru
   }
 }
 
-async function listCodexSkillsFromRoot(skillsRoot: string) {
+async function listLocalSkillsFromRoot(skillsRoot: string) {
   const result: SkillConfig[] = [];
   const entries = await readdir(skillsRoot, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    if (entry.name === ".system") {
-      const systemEntries = await readdir(path.join(skillsRoot, entry.name), { withFileTypes: true }).catch(() => []);
-      for (const systemEntry of systemEntries) {
-        if (!systemEntry.isDirectory()) continue;
-        const skill = await readLocalCodexSkill(path.join(skillsRoot, entry.name, systemEntry.name), true);
-        if (skill) result.push(skill);
-      }
-      continue;
-    }
-    const skill = await readLocalCodexSkill(path.join(skillsRoot, entry.name), false);
+    const skill = await readLocalSkill(path.join(skillsRoot, entry.name));
     if (skill) result.push(skill);
   }
   return result;
@@ -796,9 +722,8 @@ async function listRuntimeSkillsFromRoot(skillsRoot: string, locationLabel: stri
 }
 
 async function collectRuntimeSkills(statePath: string, workspaceRoot?: string) {
-  const managedRoots = getManagedCodexSkillsRoots(statePath, workspaceRoot);
+  const managedRoots = getManagedLocalSkillsRoots(statePath, workspaceRoot);
   const discovered = [
-    ...(await listRuntimeSkillsFromRoot(getExternalCodexSkillsRoot(), "$CODEX_HOME/skills").catch(() => [])),
     ...(
       await Promise.all(
         managedRoots.map((root) =>
@@ -813,19 +738,6 @@ async function collectRuntimeSkills(statePath: string, workspaceRoot?: string) {
   );
 }
 
-async function loadCodexSkillPrompt(skill: SkillConfig) {
-  if (!skill.sourcePath?.trim()) {
-    return "";
-  }
-
-  try {
-    const content = await readFile(path.join(skill.sourcePath, "SKILL.md"), "utf8");
-    return stripSkillFrontmatter(content, skill.name);
-  } catch {
-    return "";
-  }
-}
-
 async function buildEnabledSkillPromptContext(config: AppConfig) {
   const enabledSkills = config.skills.filter((skill) => skill.enabled);
   if (enabledSkills.length === 0) {
@@ -834,29 +746,15 @@ async function buildEnabledSkillPromptContext(config: AppConfig) {
 
   const sections = await Promise.all(
     enabledSkills.map(async (skill) => {
-      if (skill.kind === "codex") {
-        const body = await loadCodexSkillPrompt(skill);
-        if (!body) {
-          return "";
-        }
-
-        return [
-          `## ${skill.name}`,
-          `Type: codex`,
-          skill.description ? `Description: ${skill.description}` : "",
-          "Use this skill only when it is relevant to the user's request.",
-          "",
-          body,
-        ]
-          .filter(Boolean)
-          .join("\n");
-      }
-
       const command = skill.command.replace(/\$ARGUMENTS/g, "<user request>");
       return [
         `## ${skill.name}`,
         `Type: command`,
         skill.description ? `Description: ${skill.description}` : "",
+        skill.sourcePath?.trim() ? `Skill directory: ${skill.sourcePath.trim()}` : "",
+        skill.sourcePath?.trim()
+          ? "Resolve relative files and scripts for this skill from its skill directory."
+          : "",
         "Use this skill only when it is relevant to the user's request.",
         "Template:",
         command,
@@ -915,25 +813,60 @@ async function resolveImportDestination(rootPath: string, preferredName: string)
   }
 }
 
-async function syncManagedCodexSkills(statePath: string, state: PersistedWorkspaceState) {
-  const hidden = new Set(state.config.hiddenCodexSkillIds);
-  const managedRoots = getManagedCodexSkillsRoots(statePath, state.config.workspaceRoot);
+async function syncManagedBuiltinSkills(statePath: string) {
+  const builtinRoot = getManagedBuiltinSkillsRoot(statePath);
+  await mkdir(builtinRoot, { recursive: true });
+
+  await Promise.all(
+    DEFAULT_SKILLS.map(async (skill) => {
+      const sourcePath = skill.sourcePath?.trim();
+      if (!sourcePath) return;
+
+      const folderName = path.basename(sourcePath) || skill.id;
+      const targetPath = path.join(builtinRoot, folderName);
+      const existingSkillFile = await stat(path.join(targetPath, "SKILL.md")).catch(() => null);
+      if (existingSkillFile?.isFile()) return;
+
+      await rm(targetPath, { recursive: true, force: true }).catch(() => undefined);
+      await cp(sourcePath, targetPath, {
+        recursive: true,
+        force: true,
+      });
+    }),
+  );
+
+  return DEFAULT_SKILLS.map((skill) => {
+    const folderName = path.basename(skill.sourcePath?.trim() || "") || skill.id;
+    return {
+      ...skill,
+      sourcePath: path.join(builtinRoot, folderName),
+    };
+  });
+}
+
+async function syncManagedLocalSkills(statePath: string, state: PersistedWorkspaceState) {
+  const builtinSkills = await syncManagedBuiltinSkills(statePath);
+  const managedRoots = getManagedLocalSkillsRoots(statePath, state.config.workspaceRoot);
   await Promise.all(managedRoots.map((root) => mkdir(root, { recursive: true }).catch(() => undefined)));
   const discovered = [
-    ...(await listCodexSkillsFromRoot(getExternalCodexSkillsRoot()).catch(() => [])),
-    ...(
-      await Promise.all(managedRoots.map((root) => listCodexSkillsFromRoot(root).catch(() => [])))
-    ).flat(),
+    ...(await Promise.all(managedRoots.map((root) => listLocalSkillsFromRoot(root).catch(() => [])))).flat(),
   ];
-  const codexSkills = new Map(
-    discovered.filter((skill) => !hidden.has(skill.id)).map((skill) => [skill.id, skill] as const),
+  const localSkills = new Map(discovered.map((skill) => [skill.id, skill] as const));
+  const configuredSkills = normalizeSkillList(
+    state.config.skills.filter((skill) => !skill.sourcePath || skill.system),
+    builtinSkills,
   );
-  const commandSkills = state.config.skills.filter((skill) => skill.kind !== "codex");
+  const configuredIds = new Set(configuredSkills.map((skill) => skill.id));
   return {
     ...state,
     config: {
       ...state.config,
-      skills: [...commandSkills, ...Array.from(codexSkills.values()).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"))],
+      skills: [
+        ...configuredSkills,
+        ...Array.from(localSkills.values())
+          .filter((skill) => !configuredIds.has(skill.id))
+          .sort((a, b) => a.name.localeCompare(b.name, "zh-CN")),
+      ],
     },
   };
 }
@@ -1077,9 +1010,12 @@ export class WorkspaceService {
       modelProviders: patch.modelProviders ?? state.config.modelProviders,
       mcpServers: patch.mcpServers ?? state.config.mcpServers,
       skills: patch.skills ?? state.config.skills,
-      hiddenCodexSkillIds: patch.hiddenCodexSkillIds ?? state.config.hiddenCodexSkillIds,
       knowledgeBase: patch.knowledgeBase ?? state.config.knowledgeBase,
       remoteControl: patch.remoteControl ?? state.config.remoteControl,
+      security: {
+        ...state.config.security,
+        ...(patch.security ?? {}),
+      },
     };
     await this.saveState(state);
     return await this.bootstrap();
@@ -1094,7 +1030,7 @@ export class WorkspaceService {
 
     await assertSkillDirectory(normalizedSourcePath);
 
-    const targetRoot = getPreferredManagedCodexSkillsRoot(this.statePath, state.config.workspaceRoot);
+    const targetRoot = getPreferredManagedLocalSkillsRoot(this.statePath, state.config.workspaceRoot);
     await mkdir(targetRoot, { recursive: true });
 
     let importedTo = normalizedSourcePath;
@@ -1108,12 +1044,11 @@ export class WorkspaceService {
       });
     }
 
-    const importedSkill = await readLocalCodexSkill(importedTo, false);
+    const importedSkill = await readLocalSkill(importedTo);
     if (!importedSkill) {
       throw new Error("技能导入失败，无法解析 SKILL.md");
     }
 
-    state.config.hiddenCodexSkillIds = state.config.hiddenCodexSkillIds.filter((id) => id !== importedSkill.id);
     await this.saveState(state);
 
     return {
@@ -1130,13 +1065,12 @@ export class WorkspaceService {
       return await this.bootstrap();
     }
 
-    if (target.kind === "codex") {
-      if (target.system !== true && target.sourcePath) {
-        await rm(target.sourcePath, { recursive: true, force: true }).catch(() => undefined);
-      }
-      if (target.system === true) {
-        state.config.hiddenCodexSkillIds = Array.from(new Set([...state.config.hiddenCodexSkillIds, target.id]));
-      }
+    if (target.system) {
+      throw new Error("内置技能不可卸载");
+    }
+
+    if (target.sourcePath) {
+      await rm(target.sourcePath, { recursive: true, force: true }).catch(() => undefined);
     }
 
     state.config.skills = state.config.skills.filter((skill) => skill.id !== skillId);
@@ -1287,134 +1221,6 @@ export class WorkspaceService {
     return await this.knowledge.deleteItem(input);
   }
 
-  async generateProjectReport(
-    input: ProjectReportInput & { mapSummary?: string; mapToolUsed?: string },
-  ): Promise<ProjectReportResult> {
-    const state = await this.loadState();
-    const knowledgeBaseId = input.knowledgeBaseId.trim();
-    if (!knowledgeBaseId) {
-      throw new Error("请先选择知识库");
-    }
-    if (!input.projectName.trim()) {
-      throw new Error("请先输入项目名称");
-    }
-
-    const workspaceRoot = input.workspaceRoot?.trim() || state.config.workspaceRoot || process.cwd();
-    const outputDirectory = input.outputDirectory?.trim() || path.join(workspaceRoot, "reports");
-    const outputFileName = (() => {
-      const raw = input.outputFileName?.trim();
-      if (!raw) return createDefaultReportFileName(input);
-      return `${sanitizeReportFileName(raw.replace(/\.docx?$/i, ""))}.docx`;
-    })();
-
-    await mkdir(outputDirectory, { recursive: true });
-
-    const knowledgeQueries = [
-      input.projectName.trim(),
-      `${input.projectName.trim()} 环评 编制依据`,
-      `${input.projectName.trim()} 评价等级`,
-      `${input.projectName.trim()} 选址符合性`,
-      `${input.projectName.trim()} 政策符合性`,
-      input.projectLocation?.trim() ? `${input.projectLocation.trim()} ${input.projectName.trim()}` : "",
-    ].filter(Boolean);
-
-    const searchResults = await Promise.all(
-      knowledgeQueries.map((query) =>
-        this.searchKnowledgeBases({
-          query,
-          knowledgeBaseIds: [knowledgeBaseId],
-          documentCount: 6,
-        }).catch(() => ({
-          query,
-          total: 0,
-          results: [],
-          searchedBases: [],
-          warnings: [],
-        })),
-      ),
-    );
-
-    const references = mergeKnowledgeResults(searchResults.map((item) => item.results));
-    const draft = await generateTextWithActiveModel(
-      state.config,
-      buildProjectReportPrompt(input, references, input.mapSummary),
-    );
-    const filePath = resolveReportOutputPath(outputDirectory, outputFileName);
-    const buffer = await createProjectReportDocBuffer({
-      title: `${input.projectName.trim()} 环评分析报告`,
-      content: draft,
-      meta: [
-        `项目名称：${input.projectName.trim()}`,
-        input.projectLocation?.trim() ? `项目位置：${input.projectLocation.trim()}` : "",
-        input.mapToolUsed ? `地图工具：${input.mapToolUsed}` : "",
-        input.mapSummary ? `定位摘要：${input.mapSummary.slice(0, 140)}` : "",
-      ],
-    });
-
-    await writeFile(filePath, buffer);
-
-    return {
-      outputPath: filePath,
-      fileName: outputFileName,
-      generatedAt: Date.now(),
-      locationSummary: input.mapSummary,
-      mapToolUsed: input.mapToolUsed,
-      references,
-      content: draft,
-    };
-  }
-
-  async generateEmergencyPlan(input: EmergencyPlanInput): Promise<EmergencyPlanResult> {
-    const state = await this.loadState();
-    const projectName = input.projectName.trim();
-    if (!projectName) {
-      throw new Error("请先填写项目名称");
-    }
-    if (!Array.isArray(input.templateFiles) || input.templateFiles.length === 0) {
-      throw new Error("请至少选择一个 PDF 或 Word 模板文件");
-    }
-
-    const workspaceRoot = input.workspaceRoot?.trim() || state.config.workspaceRoot || process.cwd();
-    const outputDirectory = input.outputDirectory?.trim() || path.join(workspaceRoot, "emergency-plans");
-    await mkdir(outputDirectory, { recursive: true });
-
-    const recognizedTemplates = await Promise.all(input.templateFiles.map((file) => recognizeEmergencyTemplate(file)));
-    const fileName = sanitizeEmergencyPlanFileName(
-      input.outputFileName?.trim() || createDefaultEmergencyPlanFileName(input),
-    ).replace(/(?:\.docx)?$/i, ".docx");
-    const outputPath = path.join(outputDirectory, fileName);
-    const draft = await generateTextWithActiveModel(
-      state.config,
-      buildEmergencyPlanPrompt(input, recognizedTemplates),
-    );
-    const buffer = await createEmergencyPlanDocBuffer({
-      title: `${projectName} 突发环境事件应急预案`,
-      content: draft,
-      meta: [
-        input.companyName ? `企业名称：${input.companyName}` : "",
-        input.projectLocation ? `项目位置：${input.projectLocation}` : "",
-        `模板数量：${recognizedTemplates.length}`,
-        `生成时间：${new Date().toLocaleString("zh-CN", { hour12: false })}`,
-      ],
-    });
-
-    await writeFile(outputPath, buffer);
-
-    return {
-      outputPath,
-      fileName,
-      generatedAt: Date.now(),
-      templateCount: recognizedTemplates.length,
-      recognizedTemplates: recognizedTemplates.map((template) => ({
-        name: template.name,
-        path: template.path,
-        kind: template.kind,
-        excerpt: template.excerpt,
-      })),
-      content: draft,
-    };
-  }
-
   async searchKnowledgeBases(input: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }): Promise<KnowledgeSearchPayload> {
     return await this.knowledge.search((await this.loadState()).config, input);
   }
@@ -1550,8 +1356,8 @@ export class WorkspaceService {
     };
   }
 
-  async listObservedTools(): Promise<WorkspaceToolCatalog> {
-    return { fetchedAt: Date.now(), tools: [] };
+  async listBuiltinTools(): Promise<WorkspaceToolCatalog> {
+    return buildWorkspaceToolCatalog([]);
   }
 
   private async readSelectedFile(filePath: string): Promise<FileDropEntry> {
@@ -1597,7 +1403,7 @@ export class WorkspaceService {
 
   private async loadState(): Promise<PersistedWorkspaceState> {
     const rawState = await readJsonFile<any>(this.statePath, createEmptyState());
-    const normalized = await syncManagedCodexSkills(this.statePath, normalizeState(rawState));
+    const normalized = await syncManagedLocalSkills(this.statePath, normalizeState(rawState));
     if (JSON.stringify(rawState?.config ?? null) !== JSON.stringify(normalized.config)) {
       await this.saveState(normalized);
     }

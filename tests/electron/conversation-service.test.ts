@@ -66,7 +66,7 @@ test("conversation service keeps knowledge base selection per conversation", asy
         content: "Use the product docs for this thread",
         selectedKnowledgeBaseIds: ["kb-product", "kb-faq", "kb-product"],
       },
-      { agentCore: "opencode" },
+      { agentCore: "native" },
     );
 
     assert.deepEqual(started.conversation.selectedKnowledgeBaseIds, ["kb-product", "kb-faq"]);
@@ -76,7 +76,7 @@ test("conversation service keeps knowledge base selection per conversation", asy
         conversationId: started.conversation.id,
         content: "Keep going without changing the knowledge bases",
       },
-      { agentCore: "opencode" },
+      { agentCore: "native" },
     );
 
     assert.deepEqual(continued.conversation.selectedKnowledgeBaseIds, ["kb-product", "kb-faq"]);
@@ -87,7 +87,7 @@ test("conversation service keeps knowledge base selection per conversation", asy
         content: "Switch this thread to another knowledge base",
         selectedKnowledgeBaseIds: ["kb-release-notes"],
       },
-      { agentCore: "opencode" },
+      { agentCore: "native" },
     );
 
     assert.deepEqual(switched.conversation.selectedKnowledgeBaseIds, ["kb-release-notes"]);
@@ -111,7 +111,7 @@ test("conversation service persists assistant visuals separately from text", asy
       {
         content: "Show me the execution flow",
       },
-      { agentCore: "opencode" },
+      { agentCore: "native" },
     );
 
     await service.updateAssistantMessage(

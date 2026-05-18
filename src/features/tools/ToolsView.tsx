@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LoaderCircle, Plus, RefreshCw } from "lucide-react";
+import { LoaderCircle, Plus, RefreshCw, Settings2 } from "lucide-react";
 
 import type {
   McpServerConfig,
@@ -8,7 +8,6 @@ import type {
   McpToolDebugResult,
   WorkspaceTool,
 } from "../../types";
-import { formatMcpStatusLabel, sanitizeMcpName } from "../shared/utils";
 import { McpSettings } from "../settings/McpSettings";
 
 interface ToolsViewProps {
@@ -48,7 +47,8 @@ export function ToolsView({
   const [mcpModalServerId, setMcpModalServerId] = useState<string | null>(null);
   const [pendingNewServer, setPendingNewServer] = useState(false);
 
-  const runtimeTools = tools.filter((tool) => tool.source === "runtime");
+  const builtinTools = tools.filter((tool) => tool.source === "builtin");
+  const mcpTools = tools.filter((tool) => tool.source === "mcp");
 
   useEffect(() => {
     if (!pendingNewServer || mcpServers.length === 0) return;
@@ -68,13 +68,21 @@ export function ToolsView({
     onAddMcpServer();
   }
 
+  function formatParameterSummary(tool: WorkspaceTool, displayName = tool.name) {
+    const count = tool.parameters?.length ?? 0;
+    if (tool.source === "builtin") return null;
+
+    const serverName = tool.serverName && tool.serverName !== displayName ? tool.serverName : "";
+    if (count === 0) return serverName || null;
+    return serverName ? `${serverName} · ${count} 个参数` : `${count} 个参数`;
+  }
+
   return (
     <section className="skills-page">
       <div className="skills-inner">
         <header className="skills-toolbar">
           <div className="skills-toolbar-copy">
             <h2>工具</h2>
-            <p>查看运行时工具和 MCP 服务，常用入口都放在这里。</p>
           </div>
 
           <div className="skills-toolbar-actions">
@@ -87,28 +95,27 @@ export function ToolsView({
 
         <section className="skills-section">
           <div className="skills-section-head">
-            <h3>运行时工具</h3>
+            <h3>内置工具</h3>
           </div>
 
-          {runtimeTools.length > 0 ? (
+          {builtinTools.length > 0 ? (
             <div className="tool-grid">
-              {runtimeTools.map((tool) => (
+              {builtinTools.map((tool) => (
                 <article key={tool.id} className="tool-card">
                   <div className="tool-card-head">
                     <div>
                       <strong>{tool.name}</strong>
-                      <span>运行时工具</span>
                     </div>
-                    <span className="tool-chip">{tool.observed ? "观察到" : "内置"}</span>
+                    <span className="tool-chip">内置</span>
                   </div>
-                  <p>{tool.description || "运行时工具"}</p>
+                  {tool.description ? <p>{tool.description}</p> : null}
                 </article>
               ))}
             </div>
           ) : (
             <div className="empty-panel compact">
-              <strong>还没有运行时工具</strong>
-              <p>执行任务后，运行时工具会自动出现在这里。</p>
+              <strong>还没有内置工具</strong>
+              <p>刷新后会显示 read、write、edit、list、grep、glob、web_search、web_fetch、bash。</p>
             </div>
           )}
         </section>
@@ -116,41 +123,51 @@ export function ToolsView({
         <section className="skills-section">
           <div className="skills-section-head with-action">
             <h3>MCP 工具</h3>
-            <button className="primary-button" onClick={createMcpServer} type="button">
-              <Plus size={14} />
-              添加 MCP
-            </button>
+            <div className="skills-toolbar-actions inline">
+              <button className="secondary-button" onClick={() => openMcpModal()} type="button">
+                <Settings2 size={14} />
+                管理 MCP
+              </button>
+              <button className="primary-button" onClick={createMcpServer} type="button">
+                <Plus size={14} />
+                添加 MCP
+              </button>
+            </div>
           </div>
 
-          {mcpServers.length > 0 ? (
+          {mcpTools.length > 0 ? (
             <div className="tool-grid">
-              {mcpServers.map((server) => {
-                const normalized = sanitizeMcpName(server.name);
-                const status = mcpStatusMap[normalized]?.status ?? (server.enabled ? "connecting" : "disabled");
+              {mcpTools.map((tool) => {
+                const displayName = tool.title || tool.name;
+                const summary = formatParameterSummary(tool, displayName);
 
                 return (
                   <button
-                    key={server.id}
+                    key={tool.id}
                     className="tool-card tool-card-button"
-                    onClick={() => openMcpModal(server.id)}
+                    onClick={() => openMcpModal(tool.serverId)}
                     type="button"
                   >
                     <div className="tool-card-head">
                       <div>
-                        <strong>{server.name}</strong>
-                        <span>MCP 服务</span>
+                        <strong>{displayName}</strong>
+                        {summary ? <span>{summary}</span> : null}
                       </div>
-                      <span className="tool-chip">{server.enabled ? "已启用" : "未启用"}</span>
+                      <span className="tool-chip">MCP</span>
                     </div>
-                    <p>{formatMcpStatusLabel(status)}</p>
+                    {tool.description ? <p>{tool.description}</p> : null}
                   </button>
                 );
               })}
             </div>
           ) : (
             <div className="empty-panel compact">
-              <strong>还没有 MCP</strong>
-              <p>添加一个 MCP 服务后，就能在这里统一查看和调试。</p>
+              <strong>还没有 MCP 工具</strong>
+              <p>
+                {mcpServers.length > 0
+                  ? "启用 MCP 服务后点击刷新工具，这里会显示实际可调用的 MCP 工具。"
+                  : "添加一个 MCP 服务后，就能在这里统一查看和调试工具。"}
+              </p>
             </div>
           )}
         </section>

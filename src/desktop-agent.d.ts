@@ -4,14 +4,14 @@ import type {
   AudioTranscriptionResult,
   ChatEvent,
   ChatConversation,
+  ChatConversationExportInput,
+  ChatConversationExportResult,
   ChatConversationListPayload,
   ChatSendInput,
   ChatSendResult,
   ChatTurnStartResult,
   BootstrapPayload,
   DesktopWindowState,
-  EmergencyPlanInput,
-  EmergencyPlanResult,
   FileDropEntry,
   KnowledgeCatalogPayload,
   KnowledgeAddDirectoryInput,
@@ -28,8 +28,6 @@ import type {
   McpToolDebugResult,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
-  ProjectReportInput,
-  ProjectReportResult,
   RemoteControlStatus,
   SkillImportResult,
   WechatLoginStartResult,
@@ -47,6 +45,8 @@ declare global {
       cancelChatTurn: (conversationId: string) => Promise<void>;
       sendChatMessage: (payload: ChatSendInput) => Promise<ChatSendResult>;
       deleteConversation: (conversationId: string) => Promise<ChatConversationListPayload>;
+      exportConversation: (payload: ChatConversationExportInput) => Promise<ChatConversationExportResult>;
+      writeClipboardText: (text: string) => Promise<void>;
       listKnowledgeBases: () => Promise<KnowledgeCatalogPayload>;
       createKnowledgeBase: (payload: KnowledgeBaseCreateInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeFiles: (payload: KnowledgeAddFilesInput) => Promise<KnowledgeCatalogPayload>;
@@ -57,8 +57,6 @@ declare global {
       deleteKnowledgeBase: (baseId: string) => Promise<KnowledgeCatalogPayload>;
       deleteKnowledgeItem: (payload: KnowledgeDeleteItemInput) => Promise<KnowledgeCatalogPayload>;
       searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) => Promise<KnowledgeSearchPayload>;
-      generateProjectReport: (payload: ProjectReportInput) => Promise<ProjectReportResult>;
-      generateEmergencyPlan: (payload: EmergencyPlanInput) => Promise<EmergencyPlanResult>;
       selectSkillFolder: () => Promise<string>;
       importLocalSkill: (sourcePath: string) => Promise<SkillImportResult>;
       uninstallSkill: (skillId: string) => Promise<BootstrapPayload>;

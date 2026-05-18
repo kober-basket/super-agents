@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { clipboard, contextBridge, ipcRenderer } from "electron";
 
 import type {
   AppConfig,
@@ -6,14 +6,14 @@ import type {
   AudioTranscriptionResult,
   ChatEvent,
   ChatConversation,
+  ChatConversationExportInput,
+  ChatConversationExportResult,
   ChatConversationListPayload,
   ChatSendInput,
   ChatSendResult,
   ChatTurnStartResult,
   BootstrapPayload,
   DesktopWindowState,
-  EmergencyPlanInput,
-  EmergencyPlanResult,
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeCatalogPayload,
@@ -30,8 +30,6 @@ import type {
   McpToolDebugResult,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
-  ProjectReportInput,
-  ProjectReportResult,
   RemoteControlStatus,
   SkillImportResult,
   WechatLoginStartResult,
@@ -53,6 +51,12 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:send-chat-message", payload) as Promise<ChatSendResult>,
   deleteConversation: (conversationId: string) =>
     ipcRenderer.invoke("desktop:delete-conversation", conversationId) as Promise<ChatConversationListPayload>,
+  exportConversation: (payload: ChatConversationExportInput) =>
+    ipcRenderer.invoke("desktop:export-conversation", payload) as Promise<ChatConversationExportResult>,
+  writeClipboardText: (text: string) => {
+    clipboard.writeText(text);
+    return Promise.resolve();
+  },
   listKnowledgeBases: () =>
     ipcRenderer.invoke("desktop:list-knowledge-bases") as Promise<KnowledgeCatalogPayload>,
   createKnowledgeBase: (payload: KnowledgeBaseCreateInput) =>
@@ -73,10 +77,6 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:delete-knowledge-item", payload) as Promise<KnowledgeCatalogPayload>,
   searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) =>
     ipcRenderer.invoke("desktop:search-knowledge-bases", payload) as Promise<KnowledgeSearchPayload>,
-  generateProjectReport: (payload: ProjectReportInput) =>
-    ipcRenderer.invoke("desktop:generate-project-report", payload) as Promise<ProjectReportResult>,
-  generateEmergencyPlan: (payload: EmergencyPlanInput) =>
-    ipcRenderer.invoke("desktop:generate-emergency-plan", payload) as Promise<EmergencyPlanResult>,
   selectSkillFolder: () => ipcRenderer.invoke("desktop:select-skill-folder") as Promise<string>,
   importLocalSkill: (sourcePath: string) =>
     ipcRenderer.invoke("desktop:import-local-skill", sourcePath) as Promise<SkillImportResult>,

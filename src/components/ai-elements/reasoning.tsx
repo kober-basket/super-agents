@@ -11,6 +11,7 @@ import {
   type HTMLAttributes,
   type ReactNode,
 } from "react";
+import { shouldAutoScrollReasoningContent } from "../../lib/runtime-timeline";
 
 interface ReasoningContextValue {
   duration: number;
@@ -169,7 +170,21 @@ export interface ReasoningContentProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 export function ReasoningContent({ children, className, ...props }: ReasoningContentProps) {
-  const { isOpen } = useReasoningContext();
+  const { isOpen, isStreaming } = useReasoningContext();
+  const contentRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    if (!shouldAutoScrollReasoningContent({ isOpen, isStreaming })) {
+      return;
+    }
+
+    const content = contentRef.current;
+    if (!content) {
+      return;
+    }
+
+    content.scrollTop = content.scrollHeight;
+  }, [children, isOpen, isStreaming]);
 
   if (!isOpen) {
     return null;
@@ -177,7 +192,7 @@ export function ReasoningContent({ children, className, ...props }: ReasoningCon
 
   return (
     <div className={clsx("reasoning-content", className)} {...props}>
-      <pre>{children}</pre>
+      <pre ref={contentRef}>{children}</pre>
     </div>
   );
 }

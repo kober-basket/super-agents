@@ -28,7 +28,6 @@ const EMPTY_CONFIG: AppConfig = {
   modelProviders: [],
   mcpServers: [],
   skills: [],
-  hiddenCodexSkillIds: [],
   knowledgeBase: {
     enabled: false,
     embeddingProviderId: "",
@@ -37,6 +36,9 @@ const EMPTY_CONFIG: AppConfig = {
     documentCount: 5,
     chunkSize: 1200,
     chunkOverlap: 160,
+  },
+  security: {
+    fullFileSystemAccess: false,
   },
   remoteControl: {
     dingtalk: {

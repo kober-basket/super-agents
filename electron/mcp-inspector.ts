@@ -7,6 +7,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { EventSourceInit } from "eventsource";
 
 import type {
   McpInspectInput,
@@ -85,6 +86,23 @@ function parseJsonRecord(input: string, label: string) {
       .filter(([, value]) => value !== undefined && value !== null)
       .map(([key, value]) => [key, String(value)]),
   ) as Record<string, string>;
+}
+
+function createEventSourceInit(headers: Record<string, string>): EventSourceInit | undefined {
+  if (Object.keys(headers).length === 0) {
+    return undefined;
+  }
+
+  return {
+    fetch: (eventSourceUrl, init) =>
+      fetch(eventSourceUrl, {
+        ...init,
+        headers: {
+          ...init.headers,
+          ...headers,
+        },
+      }),
+  };
 }
 
 function parseArgumentsJson(input: string) {
@@ -524,7 +542,7 @@ async function connectWithServer(input: McpInspectInput): Promise<ConnectionHand
     const fallbackClient = new Client(CLIENT_INFO);
     const sseTransport = new SSEClientTransport(url, {
       requestInit,
-      eventSourceInit: requestInit ? { headers } : undefined,
+      eventSourceInit: createEventSourceInit(headers),
     });
 
     await fallbackClient.connect(sseTransport).catch((sseError) => {

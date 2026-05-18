@@ -35,9 +35,6 @@ export async function migrateLegacyAppData(appDataRoot: string) {
   return targetDir;
 }
 
-export function resolveOpencodeConfigDir(appDataRoot: string) {
-  return path.join(appDataRoot, APP_DATA_DIR, "opencode");
-}
 
 export function resolveGeneratedSupportDir(appDataRoot: string) {
   return path.join(appDataRoot, APP_DATA_DIR, "runtime-support");

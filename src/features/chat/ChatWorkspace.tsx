@@ -5,6 +5,9 @@
   Check,
   CheckCircle2,
   ChevronDown,
+  Copy,
+  Download,
+  FileText,
   LoaderCircle,
   Mic,
   Paperclip,
@@ -20,22 +23,46 @@ import {
   useState,
   type KeyboardEvent,
   type MouseEvent,
+  type UIEvent,
+  type WheelEvent,
 } from "react";
 
 import { parseChatMessageContent } from "../../lib/chat-visuals";
 import { formatBytes, markdownToHtml } from "../../lib/format";
+import { shouldRenderRuntimeToolCard } from "../../lib/runtime-tool-visibility";
+import {
+  buildRuntimeToolDiffs,
+  getRuntimeToolDisplay,
+  shouldShowRawToolPayload,
+  type RuntimeToolDiff,
+} from "../../lib/runtime-tool-display";
+import {
+  buildRuntimeTimelineRenderItems,
+  isStreamingTimelineThoughtItem,
+  runtimeTraceGroupSummaryLabel,
+  sanitizeTimelineStatusText,
+  shouldOpenRuntimeTraceGroup,
+} from "../../lib/runtime-timeline";
+import {
+  isScrollNearBottom,
+  shouldReleaseAutoScrollOnWheel,
+  shouldAutoScrollMessageList,
+} from "../../lib/chat-scroll";
+import { copyTextToClipboard } from "./clipboard";
 import type {
   ChatConversation,
+  ChatConversationExportFormat,
   ChatMessage,
   ChatMessageRuntimeTrace,
   ChatConversationRuntimeState,
+  ChatRuntimeTimelineItem,
   ChatToolCall,
   FileDropEntry,
   KnowledgeBaseSummary,
   RuntimeModelOption,
 } from "../../types";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "../../components/ai-elements/reasoning";
 import { ChatVisualBlock } from "./ChatVisualBlock";
+import { shouldSubmitComposerKeyDown } from "./composer-keyboard";
 import { fileKind, getFileExtension, isOfficeDocument } from "../shared/utils";
 
 interface ChatWorkspaceProps {
@@ -54,6 +81,7 @@ interface ChatWorkspaceProps {
   selectableModels: RuntimeModelOption[];
   selectedKnowledgeBaseIds: string[];
   onDraftMessageChange: (value: string) => void;
+  onExportConversation: (format: ChatConversationExportFormat) => void;
   onClearKnowledgeBases: () => void;
   onManageKnowledgeBases: () => void;
   onModelChange: (modelId: string) => void;
@@ -68,7 +96,83 @@ interface ChatWorkspaceProps {
   voiceInputState: "idle" | "recording" | "transcribing";
   voiceInputSupported: boolean;
   scrollToBottomRequest: number;
+  exportingConversationFormat: ChatConversationExportFormat | null;
+  onToast: (message: string) => void;
 }
+
+function RuntimeTraceGroup({
+  children,
+  endedAt,
+  hasError,
+  isStreaming,
+  startedAt,
+}: {
+  children: JSX.Element[];
+  endedAt?: number;
+  hasError?: boolean;
+  isStreaming?: boolean;
+  startedAt?: number;
+}) {
+  const [open, setOpen] = useState(() => shouldOpenRuntimeTraceGroup(isStreaming));
+  const fallbackStartedAt = useRef(Date.now());
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    setOpen(shouldOpenRuntimeTraceGroup(isStreaming));
+  }, [isStreaming]);
+
+  useEffect(() => {
+    if (!isStreaming) {
+      setNow(Date.now());
+      return undefined;
+    }
+
+    const tick = () => setNow(Date.now());
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [isStreaming]);
+
+  if (children.length === 0 && !isStreaming) {
+    return null;
+  }
+
+  const start = startedAt ?? fallbackStartedAt.current;
+  const end = isStreaming ? now : endedAt ?? now;
+  const durationMs = Math.max(0, end - start);
+  const label = runtimeTraceGroupSummaryLabel({ isStreaming, hasError, durationMs });
+
+  return (
+    <details
+      className={`runtime-trace-group ${open ? "open" : ""} ${isStreaming ? "streaming" : ""}`}
+      onToggle={(event) => {
+        const nextOpen = event.currentTarget.open;
+        if (isStreaming && !nextOpen) {
+          setOpen(true);
+          return;
+        }
+        setOpen(nextOpen);
+      }}
+      open={open}
+    >
+      <summary className="runtime-trace-summary">
+        <span className="runtime-trace-summary-copy">{label}</span>
+        <ChevronDown size={14} />
+      </summary>
+      {children.length > 0 ? <div className="message-runtime-stack">{children}</div> : null}
+    </details>
+  );
+}
+
+const CONVERSATION_EXPORT_OPTIONS: Array<{
+  format: ChatConversationExportFormat;
+  label: string;
+  detail: string;
+}> = [
+  { format: "pdf", label: "PDF", detail: ".pdf" },
+  { format: "markdown", label: "Markdown", detail: ".md" },
+  { format: "word", label: "Word", detail: ".docx" },
+];
 
 function formatCompactModelLabel(label: string) {
   const trimmed = label.trim();
@@ -111,18 +215,6 @@ function statusLabel(status?: ChatToolCall["status"]) {
   return "处理中";
 }
 
-function toolSummary(toolCall: ChatToolCall) {
-  if (toolCall.locations?.length) {
-    return toolCall.locations.map((location) => location.path).join(", ");
-  }
-
-  if (toolCall.kind) {
-    return toolCall.kind.replaceAll("_", " ");
-  }
-
-  return "执行详情";
-}
-
 function hasVisibleText(value?: string | null) {
   return Boolean(value && value.trim());
 }
@@ -131,90 +223,99 @@ function isTurnActiveStatus(status?: ChatConversationRuntimeState["status"]) {
   return status === "running" || status === "cancelling";
 }
 
-function parseJsonValue(value?: string | null) {
-  if (!hasVisibleText(value)) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeInlineText(value: string) {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function extractCommandCandidates(value: unknown, depth = 0): string[] {
-  if (depth > 4 || value === null || value === undefined) {
-    return [];
-  }
-
-  if (typeof value === "string") {
-    const normalized = normalizeInlineText(value);
-    return normalized ? [normalized] : [];
-  }
-
-  if (Array.isArray(value)) {
-    return value.flatMap((entry) => extractCommandCandidates(entry, depth + 1));
-  }
-
-  if (typeof value !== "object") {
-    return [];
-  }
-
-  const record = value as Record<string, unknown>;
-  const directMatches = ["command", "cmd", "script"].flatMap((key) =>
-    extractCommandCandidates(record[key], depth + 1),
-  );
-  if (directMatches.length > 0) {
-    return directMatches;
-  }
-
-  const parameters = record.parameters;
-  if (parameters && typeof parameters === "object") {
-    const parameterRecord = parameters as Record<string, unknown>;
-    const parameterMatches = ["command", "cmd", "script"].flatMap((key) =>
-      extractCommandCandidates(parameterRecord[key], depth + 1),
-    );
-    if (parameterMatches.length > 0) {
-      return parameterMatches;
-    }
-  }
-
-  return [];
-}
-
-function extractExecuteLabel(toolCall: ChatToolCall) {
-  const inlineText = toolCall.content.find(
-    (content) =>
-      content.type === "text" &&
-      hasVisibleText(content.text) &&
-      !content.text.includes("\n") &&
-      !content.text.trim().startsWith("{") &&
-      !content.text.trim().startsWith("["),
-  );
-  if (inlineText?.type === "text") {
-    return normalizeInlineText(inlineText.text);
-  }
-
-  const parsedInput = parseJsonValue(toolCall.rawInputJson);
-  const commandCandidate = extractCommandCandidates(parsedInput)[0];
-  if (commandCandidate) {
-    return commandCandidate;
-  }
-
-  return hasVisibleText(toolCall.title) ? toolCall.title : toolSummary(toolCall);
-}
-
-function shouldRenderToolTextAsMarkdown(toolCall: ChatToolCall, text: string) {
-  if (toolCall.kind === "execute") {
+function shouldRenderToolTextAsMarkdown(
+  toolCall: ChatToolCall,
+  text: string,
+  displayKind: ChatToolCall["kind"] = toolCall.kind,
+) {
+  if (displayKind === "execute") {
     return false;
   }
 
   return /(^|\n)(#{1,6}\s|[-*]\s|\d+\.\s|>\s|```|`[^`\n]+`|\|.+\|)/m.test(text);
+}
+
+function formatMessageTime(value: number) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(value);
+}
+
+function visualCopyText(visual: NonNullable<ChatMessage["visuals"]>[number], index: number) {
+  const title = visual.title?.trim() || visual.description?.trim() || `可视化 ${index + 1}`;
+  if (visual.type === "diagram") {
+    return [`可视化：${title}`, visual.code].join("\n");
+  }
+
+  return [`可视化：${title}`, JSON.stringify(visual.spec, null, 2)].join("\n");
+}
+
+function splitDiffLines(value: string) {
+  return value.split("\n");
+}
+
+function renderPrefixedDiffLines(text: string, prefix: "+" | "-", className: string) {
+  return splitDiffLines(text).map((line, index) => (
+    <span key={`${className}-${index}`} className={`activity-diff-line ${className}`}>
+      <span className="activity-diff-prefix">{prefix}</span>
+      <span>{line || " "}</span>
+    </span>
+  ));
+}
+
+function patchLineClassName(line: string) {
+  if (line.startsWith("***") || line.startsWith("@@")) {
+    return "meta";
+  }
+  if (line.startsWith("+")) {
+    return "added";
+  }
+  if (line.startsWith("-")) {
+    return "removed";
+  }
+  return "context";
+}
+
+function renderPatchLines(text: string) {
+  return splitDiffLines(text).map((line, index) => (
+    <span key={`patch-${index}`} className={`activity-diff-line ${patchLineClassName(line)}`}>
+      {line || " "}
+    </span>
+  ));
+}
+
+function buildMessageCopyText(message: ChatMessage) {
+  const parsedMessage =
+    message.role === "assistant"
+      ? parseChatMessageContent(message.content, message.visuals)
+      : {
+          text: message.content.trim(),
+          visuals: message.visuals ?? [],
+          hasPendingVisualBlock: false,
+          invalidVisualCount: 0,
+        };
+  const blocks: string[] = [];
+
+  if (message.attachments?.length) {
+    blocks.push(
+      [
+        "附件：",
+        ...message.attachments.map((attachment) => `- ${attachment.name} (${formatBytes(attachment.size)})`),
+      ].join("\n"),
+    );
+  }
+
+  if (parsedMessage.text.trim()) {
+    blocks.push(parsedMessage.text.trim());
+  }
+
+  parsedMessage.visuals.forEach((visual, index) => {
+    blocks.push(visualCopyText(visual, index));
+  });
+
+  return blocks.join("\n\n").trim();
 }
 
 export function ChatWorkspace({
@@ -233,6 +334,7 @@ export function ChatWorkspace({
   selectableModels,
   selectedKnowledgeBaseIds,
   onDraftMessageChange,
+  onExportConversation,
   onClearKnowledgeBases,
   onManageKnowledgeBases,
   onModelChange,
@@ -247,11 +349,15 @@ export function ChatWorkspace({
   voiceInputState,
   voiceInputSupported,
   scrollToBottomRequest,
+  exportingConversationFormat,
+  onToast,
 }: ChatWorkspaceProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const knowledgePickerRef = useRef<HTMLDivElement | null>(null);
   const modelPickerRef = useRef<HTMLDivElement | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollPinnedToBottomRef = useRef(true);
   const autoScrollStateRef = useRef<{
     activeConversationId: string | null;
     messageCount: number;
@@ -263,6 +369,8 @@ export function ChatWorkspace({
   });
   const [knowledgePickerOpen, setKnowledgePickerOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -272,7 +380,7 @@ export function ChatWorkspace({
   }, [draftMessage]);
 
   useEffect(() => {
-    if (!knowledgePickerOpen && !modelPickerOpen) return undefined;
+    if (!knowledgePickerOpen && !modelPickerOpen && !exportMenuOpen) return undefined;
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -284,12 +392,17 @@ export function ChatWorkspace({
       if (modelPickerRef.current && !modelPickerRef.current.contains(target)) {
         setModelPickerOpen(false);
       }
+
+      if (exportMenuRef.current && !exportMenuRef.current.contains(target)) {
+        setExportMenuOpen(false);
+      }
     };
 
     const handleWindowKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         setKnowledgePickerOpen(false);
         setModelPickerOpen(false);
+        setExportMenuOpen(false);
       }
     };
 
@@ -299,7 +412,7 @@ export function ChatWorkspace({
       window.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleWindowKeyDown);
     };
-  }, [knowledgePickerOpen, modelPickerOpen]);
+  }, [exportMenuOpen, knowledgePickerOpen, modelPickerOpen]);
 
   const isHome = activeConversation === null;
   const canSend = !busy && (draftMessage.trim().length > 0 || attachments.length > 0);
@@ -319,6 +432,8 @@ export function ChatWorkspace({
     status: runtimeState?.status,
     stopReason: runtimeState?.stopReason,
     error: runtimeState?.error,
+    activityItems: runtimeState?.activityItems,
+    timelineItems: runtimeState?.timelineItems,
     thoughtTextLength: runtimeState?.thoughtText.length ?? 0,
     planEntries: runtimeState?.planEntries,
     toolCalls: runtimeState?.toolCalls.map((toolCall) => ({
@@ -364,6 +479,14 @@ export function ChatWorkspace({
           ? "正在同步知识库列表"
           : "先去知识库页添加文档、目录或网页，再在这里选择";
 
+  function updateMessageListPinnedState(messageList: HTMLDivElement) {
+    autoScrollPinnedToBottomRef.current = isScrollNearBottom({
+      clientHeight: messageList.clientHeight,
+      scrollHeight: messageList.scrollHeight,
+      scrollTop: messageList.scrollTop,
+    });
+  }
+
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
     if (!messageList || !activeConversationId) {
@@ -377,11 +500,13 @@ export function ChatWorkspace({
 
     const previousScrollState = autoScrollStateRef.current;
     const conversationChanged = previousScrollState.activeConversationId !== activeConversationId;
-    const hasNewMessage =
-      previousScrollState.activeConversationId === activeConversationId &&
-      messageCount > previousScrollState.messageCount;
     const requestedManualScroll = previousScrollState.scrollRequest !== scrollToBottomRequest;
-    const behavior: ScrollBehavior = !conversationChanged && (hasNewMessage || requestedManualScroll) ? "smooth" : "auto";
+    const shouldScrollToBottom = shouldAutoScrollMessageList({
+      conversationChanged,
+      requestedManualScroll,
+      wasPinnedToBottom: autoScrollPinnedToBottomRef.current,
+    });
+    const behavior: ScrollBehavior = "auto";
 
     autoScrollStateRef.current = {
       activeConversationId,
@@ -389,7 +514,13 @@ export function ChatWorkspace({
       scrollRequest: scrollToBottomRequest,
     };
 
+    if (!shouldScrollToBottom) {
+      updateMessageListPinnedState(messageList);
+      return undefined;
+    }
+
     const scrollToBottom = () => {
+      autoScrollPinnedToBottomRef.current = true;
       messageList.scrollTo({
         top: messageList.scrollHeight,
         behavior,
@@ -408,12 +539,22 @@ export function ChatWorkspace({
     scrollToBottomRequest,
   ]);
 
+  function handleMessageListScroll(event: UIEvent<HTMLDivElement>) {
+    updateMessageListPinnedState(event.currentTarget);
+  }
+
+  function handleMessageListWheel(event: WheelEvent<HTMLDivElement>) {
+    if (shouldReleaseAutoScrollOnWheel(event.deltaY)) {
+      autoScrollPinnedToBottomRef.current = false;
+    }
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (busy) {
       return;
     }
 
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (shouldSubmitComposerKeyDown(event)) {
       event.preventDefault();
       onSendMessage();
     }
@@ -477,6 +618,71 @@ export function ChatWorkspace({
       textarea.focus();
       textarea.setSelectionRange(nextDraft.length, nextDraft.length);
     });
+  }
+
+  async function copyMessage(message: ChatMessage) {
+    const text = buildMessageCopyText(message);
+    if (!text) {
+      onToast("没有可复制内容");
+      return;
+    }
+
+    try {
+      await copyTextToClipboard(text);
+      setCopiedMessageId(message.id);
+      onToast("已复制");
+      window.setTimeout(() => {
+        setCopiedMessageId((current) => (current === message.id ? null : current));
+      }, 1200);
+    } catch {
+      onToast("复制失败");
+    }
+  }
+
+  function renderExportMenu() {
+    const exporting = Boolean(exportingConversationFormat);
+
+    return (
+      <div ref={exportMenuRef} className="chat-export-menu">
+        <button
+          aria-expanded={exportMenuOpen}
+          aria-haspopup="menu"
+          aria-label={exporting ? "正在导出会话" : "导出会话"}
+          className={`chat-export-trigger ${exportMenuOpen ? "open" : ""}`}
+          disabled={exporting}
+          onClick={() => setExportMenuOpen((current) => !current)}
+          title={exporting ? "正在导出" : "导出会话"}
+          type="button"
+        >
+          {exporting ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />}
+        </button>
+
+        {exportMenuOpen ? (
+          <div className="chat-export-panel" role="menu">
+            {CONVERSATION_EXPORT_OPTIONS.map((option) => {
+              const optionExporting = exportingConversationFormat === option.format;
+              return (
+                <button
+                  key={option.format}
+                  className="chat-export-option"
+                  disabled={exporting}
+                  onClick={() => {
+                    setExportMenuOpen(false);
+                    onExportConversation(option.format);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <FileText size={15} />
+                  <span>{option.label}</span>
+                  <small>{optionExporting ? "导出中" : option.detail}</small>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   function renderKnowledgePicker() {
@@ -723,21 +929,31 @@ export function ChatWorkspace({
     );
   }
 
-  function renderThinkingCard(
-    thoughtText: string,
-    options?: { isStreaming?: boolean; fallbackText?: string; keyPrefix?: string },
-  ) {
-    const hasThinkingContent = Boolean(thoughtText) || options?.isStreaming;
-
-    if (!hasThinkingContent) {
+  function renderThinkingIndicator(key: string, isStreaming?: boolean) {
+    if (!isStreaming) {
       return null;
     }
 
     return (
-      <Reasoning key={`${options?.keyPrefix ?? "runtime"}-thinking`} isStreaming={options?.isStreaming}>
-        <ReasoningTrigger />
-        <ReasoningContent>{thoughtText || options?.fallbackText || "Generating reasoning..."}</ReasoningContent>
-      </Reasoning>
+      <div key={key} className="runtime-thinking-indicator" aria-live="polite">
+        正在思考
+      </div>
+    );
+  }
+
+  function renderStatusBlock(text: string, key: string) {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    return (
+      <div
+        key={key}
+        className="runtime-status-line"
+        dangerouslySetInnerHTML={{ __html: markdownToHtml(trimmed) }}
+        onClick={handleMessageClick}
+      />
     );
   }
 
@@ -747,6 +963,8 @@ export function ChatWorkspace({
     runtimeInProgressForCard: boolean,
     keyPrefix: string,
   ) {
+    const display = getRuntimeToolDisplay(toolCall);
+    const generatedDiffs = buildRuntimeToolDiffs(toolCall);
     const visibleContent = toolCall.content.filter((content) => {
       if (content.type === "text") {
         return hasVisibleText(content.text);
@@ -763,12 +981,41 @@ export function ChatWorkspace({
 
       return hasVisibleText(terminal.output) || terminal.exitCode !== null || terminal.signal !== null;
     });
-    const hasRawInput = hasVisibleText(toolCall.rawInputJson);
-    const hasRawOutput = hasVisibleText(toolCall.rawOutputJson);
+    const hasFriendlySummary = display.isKnownTool && hasVisibleText(display.detail);
+    const showRawPayload = shouldShowRawToolPayload(display, {
+      hasReadableContent: visibleContent.length > 0,
+      hasGeneratedDiffs: generatedDiffs.length > 0,
+    });
+    const hasRawInput = showRawPayload && hasVisibleText(toolCall.rawInputJson);
+    const hasRawOutput = showRawPayload && hasVisibleText(toolCall.rawOutputJson);
 
-    if (visibleContent.length === 0 && !hasRawInput && !hasRawOutput) {
+    if (
+      !shouldRenderRuntimeToolCard(toolCall, {
+        hasVisibleContent: visibleContent.length > 0 || generatedDiffs.length > 0 || hasFriendlySummary,
+        hasRawInput,
+        hasRawOutput,
+        isStreaming: runtimeInProgressForCard,
+      })
+    ) {
       return null;
     }
+
+    const renderDiffPanel = (diff: RuntimeToolDiff, index: number, keyPrefixValue: string) => {
+      const isPatch = diff.oldText === undefined && diff.newText.trim().startsWith("*** Begin Patch");
+
+      return (
+        <div key={`${toolCall.toolCallId}-${keyPrefixValue}-${index}`} className="activity-panel activity-diff-panel">
+          <span className="activity-panel-label">{diff.path}</span>
+          <pre className="activity-diff-pre">
+            {isPatch ? renderPatchLines(diff.newText) : null}
+            {!isPatch && diff.oldText !== undefined && diff.oldText !== null
+              ? renderPrefixedDiffLines(diff.oldText, "-", "removed")
+              : null}
+            {!isPatch ? renderPrefixedDiffLines(diff.newText, "+", "added") : null}
+          </pre>
+        </div>
+      );
+    };
 
     return (
       <details key={`${keyPrefix}-${toolCall.toolCallId}`} className="activity-card tool-message-card">
@@ -776,10 +1023,10 @@ export function ChatWorkspace({
           <div className="activity-summary-main">
             <div className="activity-summary-title">
               <span className="activity-tool-icon">
-                {toolCall.kind === "execute" ? <TerminalSquare size={14} /> : <Wrench size={14} />}
+                {display.kind === "execute" ? <TerminalSquare size={14} /> : <Wrench size={14} />}
               </span>
-              <strong>{toolCall.title}</strong>
-              <em>{toolCall.kind === "execute" ? extractExecuteLabel(toolCall) : toolSummary(toolCall)}</em>
+              <strong>{display.title}</strong>
+              <em>{display.detail}</em>
             </div>
           </div>
           <div className="activity-summary-side">
@@ -795,9 +1042,27 @@ export function ChatWorkspace({
           </div>
         </summary>
         <div className="activity-detail">
+          {generatedDiffs.map((diff, index) => renderDiffPanel(diff, index, "generated-diff"))}
+
           {visibleContent.map((content, index) => {
             if (content.type === "text") {
-              if (shouldRenderToolTextAsMarkdown(toolCall, content.text)) {
+              if (display.kind === "execute") {
+                return (
+                  <div key={`${toolCall.toolCallId}-command-${index}`} className="activity-panel activity-command-panel">
+                    <div className="activity-command-shell">
+                      {display.command ? (
+                        <div className="activity-command-line">
+                          <span>$</span>
+                          <code>{display.command}</code>
+                        </div>
+                      ) : null}
+                      <pre className="activity-command-output">{content.text}</pre>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (shouldRenderToolTextAsMarkdown(toolCall, content.text, display.kind)) {
                 return (
                   <div key={`${toolCall.toolCallId}-text-${index}`} className="activity-panel activity-panel-summary">
                     <span className="activity-panel-label">输出</span>
@@ -819,12 +1084,7 @@ export function ChatWorkspace({
             }
 
             if (content.type === "diff") {
-              return (
-                <div key={`${toolCall.toolCallId}-diff-${index}`} className="activity-panel">
-                  <span className="activity-panel-label">{content.path}</span>
-                  <pre>{content.newText}</pre>
-                </div>
-              );
+              return renderDiffPanel(content, index, "content-diff");
             }
 
             const terminal = terminalOutputs[content.terminalId];
@@ -910,7 +1170,7 @@ export function ChatWorkspace({
   function renderTraceBlocks(
     trace: Pick<
       ChatMessageRuntimeTrace,
-      "thoughtText" | "toolCalls" | "terminalOutputs" | "error"
+      "activityItems" | "timelineItems" | "thoughtText" | "toolCalls" | "terminalOutputs" | "error"
     > | null | undefined,
     options: { keyPrefix: string; isStreaming?: boolean; fallbackText?: string },
   ) {
@@ -919,6 +1179,8 @@ export function ChatWorkspace({
     }
 
     const blocks: JSX.Element[] = [];
+    const timelineItems = trace.timelineItems ?? [];
+    const toolCallsById = new Map(trace.toolCalls.map((toolCall) => [toolCall.toolCallId, toolCall]));
     const linkedTerminalIds = new Set(
       trace.toolCalls.flatMap((toolCall) =>
         toolCall.content
@@ -926,14 +1188,86 @@ export function ChatWorkspace({
           .map((content) => content.terminalId),
       ),
     );
+    const hasVisibleActivity =
+      timelineItems.length > 0 ||
+      trace.toolCalls.length > 0 ||
+      Object.keys(trace.terminalOutputs).length > 0;
+    const showThinkingPlaceholder =
+      Boolean(options.isStreaming) && !trace.thoughtText.trim() && !hasVisibleActivity;
 
-    const thinkingCard = renderThinkingCard(trace.thoughtText.trim(), {
-      isStreaming: options.isStreaming,
-      fallbackText: options.fallbackText,
-      keyPrefix: options.keyPrefix,
-    });
-    if (thinkingCard) {
-      blocks.push(thinkingCard);
+    if (timelineItems.length > 0) {
+      const renderItems = buildRuntimeTimelineRenderItems(timelineItems, trace.toolCalls);
+      renderItems.forEach((item: ChatRuntimeTimelineItem, index) => {
+        if (item.type === "activity") {
+          return;
+        }
+
+        if (item.type === "thought") {
+          const isPreviewing = isStreamingTimelineThoughtItem(renderItems, index, options.isStreaming);
+          const thinkingIndicator = renderThinkingIndicator(
+            `${options.keyPrefix}-${item.id}-thinking`,
+            isPreviewing,
+          );
+          if (thinkingIndicator) {
+            blocks.push(thinkingIndicator);
+          }
+          return;
+        }
+
+        if (item.type === "status") {
+          const statusBlock = renderStatusBlock(
+            sanitizeTimelineStatusText(item.text),
+            `${options.keyPrefix}-${item.id}`,
+          );
+          if (statusBlock) {
+            blocks.push(statusBlock);
+          }
+          return;
+        }
+
+        const toolCall = toolCallsById.get(item.toolCallId);
+        if (!toolCall) {
+          return;
+        }
+
+        const toolCard = renderToolCard(
+          toolCall,
+          trace.terminalOutputs,
+          Boolean(options.isStreaming),
+          `${options.keyPrefix}-${item.id}`,
+        );
+        if (toolCard) {
+          blocks.push(toolCard);
+        }
+      });
+
+      const unlinkedTerminalCards = renderUnlinkedTerminals(
+        trace.terminalOutputs,
+        linkedTerminalIds,
+        options.keyPrefix,
+      );
+      if (unlinkedTerminalCards) {
+        blocks.push(...unlinkedTerminalCards);
+      }
+
+      if (trace.error) {
+        blocks.push(
+          <div key={`${options.keyPrefix}-error`} className="message-text error">
+            <strong>智能体执行失败</strong>
+            <p>{trace.error}</p>
+          </div>,
+        );
+      }
+
+      return blocks;
+    }
+
+    const thinkingIndicator = renderThinkingIndicator(
+      `${options.keyPrefix}-thinking`,
+      trace.thoughtText.trim() ? options.isStreaming : showThinkingPlaceholder,
+    );
+    if (thinkingIndicator) {
+      blocks.push(thinkingIndicator);
     }
 
     trace.toolCalls
@@ -980,16 +1314,23 @@ export function ChatWorkspace({
             hasPendingVisualBlock: false,
             invalidVisualCount: 0,
           };
+    const messageCopyText = buildMessageCopyText(message);
+    const copied = copiedMessageId === message.id;
 
     return (
       <div key={message.id} className={`message-row ${message.role === "user" ? "user" : ""}`}>
         <div className={`message-bubble ${message.role === "user" ? "user" : ""}`}>
           {message.role === "assistant" && message.runtimeTrace ? (
-            <div className="message-runtime-stack">
+            <RuntimeTraceGroup
+              endedAt={message.updatedAt}
+              hasError={Boolean(message.runtimeTrace.error)}
+              isStreaming={false}
+              startedAt={message.createdAt}
+            >
               {renderTraceBlocks(message.runtimeTrace, {
                 keyPrefix: `message-${message.id}`,
               })}
-            </div>
+            </RuntimeTraceGroup>
           ) : null}
           {message.attachments?.length ? renderAttachmentList(message.attachments) : null}
           {parsedMessage.text ? (
@@ -1022,20 +1363,49 @@ export function ChatWorkspace({
               已跳过 {parsedMessage.invalidVisualCount} 个无效可视化块
             </div>
           ) : null}
+          {messageCopyText ? (
+            <div
+              className={`message-actions ${copied ? "copied" : ""}`}
+              aria-label={`${formatMessageTime(message.createdAt)} 消息操作`}
+            >
+              <span className="message-time">{formatMessageTime(message.createdAt)}</span>
+              <button
+                aria-label={copied ? "已复制消息" : "复制消息"}
+                className={`message-action-button ${copied ? "copied" : ""}`}
+                onClick={() => void copyMessage(message)}
+                title={copied ? "已复制" : "复制"}
+                type="button"
+              >
+                {copied ? <Check size={15} /> : <Copy size={15} />}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     );
   }
 
-  function renderRuntimeActivity(blocks: JSX.Element[]) {
-    if (blocks.length === 0) {
+  function renderRuntimeActivity(blocks: JSX.Element[], options?: {
+    endedAt?: number;
+    hasError?: boolean;
+    isStreaming?: boolean;
+    startedAt?: number;
+  }) {
+    if (blocks.length === 0 && !options?.isStreaming) {
       return null;
     }
 
     return (
       <div className="message-row">
         <div className="message-bubble">
-          <div className="message-runtime-stack">{blocks}</div>
+          <RuntimeTraceGroup
+            endedAt={options?.endedAt}
+            hasError={options?.hasError}
+            isStreaming={options?.isStreaming}
+            startedAt={options?.startedAt}
+          >
+            {blocks}
+          </RuntimeTraceGroup>
         </div>
       </div>
     );
@@ -1138,6 +1508,8 @@ export function ChatWorkspace({
       runtimeState && (runtimeInProgress || !lastAssistantHasPersistedTrace)
         ? renderTraceBlocks(
             {
+              activityItems: runtimeState.activityItems,
+              timelineItems: runtimeState.timelineItems,
               thoughtText: runtimeState.thoughtText,
               toolCalls: runtimeState.toolCalls,
               terminalOutputs: runtimeState.terminalOutputs,
@@ -1151,7 +1523,7 @@ export function ChatWorkspace({
           )
         : [];
 
-    const hasRuntimeActivity = runtimeBlocks.length > 0;
+    const hasRuntimeActivity = runtimeBlocks.length > 0 || runtimeInProgress;
     const inlineAssistantMessage =
       hasRuntimeActivity && lastMessage?.role === "assistant" ? lastMessage : null;
     const leadingMessages = inlineAssistantMessage
@@ -1164,7 +1536,19 @@ export function ChatWorkspace({
 
     return (
       <div className="chat-thread-layout">
-        <div ref={messageListRef} className="message-list" data-native-wheel-scroll="true">
+        <div className="chat-thread-toolbar">
+          <div className="chat-thread-title" title={activeConversation.title}>
+            {activeConversation.title}
+          </div>
+          {renderExportMenu()}
+        </div>
+        <div
+          ref={messageListRef}
+          className="message-list"
+          data-native-wheel-scroll="true"
+          onScroll={handleMessageListScroll}
+          onWheel={handleMessageListWheel}
+        >
           {leadingMessages.map(renderMessage)}
 
           {showLoadingBubble ? (
@@ -1176,7 +1560,12 @@ export function ChatWorkspace({
             </div>
           ) : null}
 
-          {renderRuntimeActivity(runtimeBlocks)}
+          {renderRuntimeActivity(runtimeBlocks, {
+            endedAt: inlineAssistantMessage?.updatedAt,
+            hasError: runtimeState?.status === "failed",
+            isStreaming: runtimeInProgress,
+            startedAt: inlineAssistantMessage?.createdAt,
+          })}
           {inlineAssistantMessage ? renderMessage(inlineAssistantMessage) : null}
         </div>
 
@@ -1206,4 +1595,3 @@ export function ChatWorkspace({
     </section>
   );
 }
-

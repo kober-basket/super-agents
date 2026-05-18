@@ -3,8 +3,6 @@ export type AppSection =
   | "skills"
   | "tools"
   | "knowledge"
-  | "reports"
-  | "emergency"
   | "settings";
 export type AppearanceThemeId =
   | "porcelain"
@@ -32,7 +30,7 @@ export type McpConnectionStatus = "connected" | "disabled" | "failed" | "needs_a
 export type McpInspectorTransport = "stdio" | "streamable-http" | "sse";
 export type McpToolTaskSupport = "optional" | "required" | "forbidden";
 export type ModelProviderKind = "openai-compatible";
-export type SkillKind = "command" | "codex";
+export type SkillKind = "command";
 
 export interface ProviderModelConfig {
   id: string;
@@ -212,7 +210,7 @@ export interface WorkspaceTool {
   name: string;
   title?: string;
   description?: string;
-  source: "runtime" | "mcp";
+  source: "builtin" | "mcp";
   origin: string;
   serverId?: string;
   serverName?: string;
@@ -278,62 +276,6 @@ export interface KnowledgeSearchPayload {
   results: KnowledgeSearchResultItem[];
   searchedBases: Array<{ id: string; name: string }>;
   warnings: string[];
-}
-
-export interface ProjectReportInput {
-  knowledgeBaseId: string;
-  projectName: string;
-  projectType?: string;
-  projectLocation?: string;
-  longitude?: string;
-  latitude?: string;
-  projectOverview?: string;
-  policyFocus?: string;
-  outputDirectory?: string;
-  outputFileName?: string;
-  workspaceRoot?: string;
-  preferredMapServerId?: string;
-  preferredMapToolName?: string;
-}
-
-export interface ProjectReportResult {
-  outputPath: string;
-  fileName: string;
-  generatedAt: number;
-  locationSummary?: string;
-  mapToolUsed?: string;
-  references: KnowledgeSearchResultItem[];
-  content: string;
-}
-
-export interface EmergencyPlanInput {
-  projectName: string;
-  projectType?: string;
-  projectLocation?: string;
-  companyName?: string;
-  industryCategory?: string;
-  riskSources?: string;
-  emergencyResources?: string;
-  projectOverview?: string;
-  specialRequirements?: string;
-  templateFiles: FileDropEntry[];
-  outputDirectory?: string;
-  outputFileName?: string;
-  workspaceRoot?: string;
-}
-
-export interface EmergencyPlanResult {
-  outputPath: string;
-  fileName: string;
-  generatedAt: number;
-  templateCount: number;
-  recognizedTemplates: Array<{
-    name: string;
-    path: string;
-    kind: string;
-    excerpt: string;
-  }>;
-  content: string;
 }
 
 export interface KnowledgeInjectionMeta {
@@ -426,6 +368,10 @@ export interface RemoteControlConfig {
   wecom: WecomRemoteControlConfig;
 }
 
+export interface SecurityConfig {
+  fullFileSystemAccess: boolean;
+}
+
 export interface AppConfig {
   workspaceRoot: string;
   bridgeUrl: string;
@@ -438,9 +384,9 @@ export interface AppConfig {
   modelProviders: ModelProviderConfig[];
   mcpServers: McpServerConfig[];
   skills: SkillConfig[];
-  hiddenCodexSkillIds: string[];
   knowledgeBase: KnowledgeBaseConnectionConfig;
   remoteControl: RemoteControlConfig;
+  security: SecurityConfig;
 }
 
 export interface WechatLoginStartResult {
@@ -608,7 +554,75 @@ export interface ChatTerminalOutput {
   signal?: string | null;
 }
 
+export type ChatRuntimeActivityKind = "exploration" | "command" | "tool";
+export type ChatRuntimeActivityStatus = "running" | "completed" | "failed";
+
+export interface ChatRuntimeActivityItem {
+  id: string;
+  kind: ChatRuntimeActivityKind;
+  text: string;
+  status: ChatRuntimeActivityStatus;
+  fileCount?: number;
+  searchCount?: number;
+  commandCount?: number;
+  toolCount?: number;
+}
+
+export type ChatRuntimeTimelineItem =
+  | {
+      id: string;
+      type: "activity";
+      activity: ChatRuntimeActivityItem;
+    }
+  | {
+      id: string;
+      type: "thought";
+      text: string;
+    }
+  | {
+      id: string;
+      type: "status";
+      text: string;
+    }
+  | {
+      id: string;
+      type: "tool";
+      toolCallId: string;
+    };
+
+export type ChatTurnEventLogType =
+  | "turn_started"
+  | "message_delta"
+  | "message_replace"
+  | "thought_delta"
+  | "status_delta"
+  | "tool_call_started"
+  | "tool_call_finished"
+  | "permission_requested"
+  | "permission_denied"
+  | "turn_finished"
+  | "turn_failed"
+  | "turn_cancelled";
+
+export interface ChatTurnEventLogEntry {
+  id: string;
+  timestamp: number;
+  type: ChatTurnEventLogType;
+  sessionId?: string;
+  agentId?: string;
+  toolCallId?: string;
+  toolName?: string;
+  text?: string;
+  stopReason?: string;
+  error?: string;
+  inputJson?: string;
+  outputJson?: string;
+}
+
 export interface ChatMessageRuntimeTrace {
+  events: ChatTurnEventLogEntry[];
+  activityItems: ChatRuntimeActivityItem[];
+  timelineItems: ChatRuntimeTimelineItem[];
   planEntries: ChatPlanEntry[];
   toolCalls: ChatToolCall[];
   terminalOutputs: Record<string, ChatTerminalOutput>;
@@ -619,6 +633,9 @@ export interface ChatMessageRuntimeTrace {
 
 export interface ChatConversationRuntimeState {
   status: ChatTurnStatus;
+  events: ChatTurnEventLogEntry[];
+  activityItems: ChatRuntimeActivityItem[];
+  timelineItems: ChatRuntimeTimelineItem[];
   planEntries: ChatPlanEntry[];
   toolCalls: ChatToolCall[];
   terminalOutputs: Record<string, ChatTerminalOutput>;
@@ -642,6 +659,19 @@ export interface ChatConversationSummary {
 
 export interface ChatConversation extends ChatConversationSummary {
   messages: ChatMessage[];
+}
+
+export type ChatConversationExportFormat = "markdown" | "pdf" | "word";
+
+export interface ChatConversationExportInput {
+  conversationId: string;
+  format: ChatConversationExportFormat;
+}
+
+export interface ChatConversationExportResult {
+  path: string;
+  fileName: string;
+  format: ChatConversationExportFormat;
 }
 
 export interface ChatConversationListPayload {
@@ -695,6 +725,18 @@ export type ChatEvent =
       conversationId: string;
       turnId: string;
       textDelta: string;
+    }
+  | {
+      type: "status_delta";
+      conversationId: string;
+      turnId: string;
+      textDelta: string;
+    }
+  | {
+      type: "activity_summary";
+      conversationId: string;
+      turnId: string;
+      items: ChatRuntimeActivityItem[];
     }
   | {
       type: "plan_updated";

@@ -4,6 +4,7 @@ import type {
   AudioTranscriptionResult,
   BootstrapPayload,
   ChatConversation,
+  ChatConversationExportResult,
   ChatConversationListPayload,
   ChatEvent,
   ChatMessage,
@@ -11,8 +12,6 @@ import type {
   ChatSendResult,
   ChatTurnStartResult,
   DesktopWindowState,
-  EmergencyPlanInput,
-  EmergencyPlanResult,
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeAddDirectoryInput,
@@ -30,8 +29,6 @@ import type {
   McpToolDebugResult,
   ModelProviderFetchInput,
   ModelProviderFetchResult,
-  ProjectReportInput,
-  ProjectReportResult,
   RemoteControlStatus,
   RuntimeSkill,
   SkillImportResult,
@@ -62,7 +59,6 @@ const EMPTY_CONFIG: AppConfig = {
   modelProviders: [],
   mcpServers: [],
   skills: [],
-  hiddenCodexSkillIds: [],
   knowledgeBase: {
     enabled: false,
     embeddingProviderId: "",
@@ -71,6 +67,9 @@ const EMPTY_CONFIG: AppConfig = {
     documentCount: 5,
     chunkSize: 1200,
     chunkOverlap: 160,
+  },
+  security: {
+    fullFileSystemAccess: false,
   },
   remoteControl: {
     dingtalk: {
@@ -313,6 +312,13 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
       }
       return api.listConversations();
     },
+    exportConversation: async (_payload): Promise<ChatConversationExportResult> => unsupported("会话导出"),
+    writeClipboardText: async (text: string) => {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("浏览器预览模式下剪贴板不可用");
+      }
+      await navigator.clipboard.writeText(text);
+    },
     listKnowledgeBases: async (): Promise<KnowledgeCatalogPayload> => ({
       fetchedAt: now(),
       knowledgeBases: [],
@@ -332,10 +338,8 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
       searchedBases: [],
       warnings: ["浏览器预览模式下未启用知识库搜索。"],
     }),
-    generateProjectReport: async (_payload: ProjectReportInput): Promise<ProjectReportResult> => unsupported("项目报告生成"),
     selectSkillFolder: async () => unsupported("技能目录选择"),
     importLocalSkill: async (_sourcePath: string): Promise<SkillImportResult> => unsupported("本地技能导入"),
-    generateEmergencyPlan: async (_payload: EmergencyPlanInput): Promise<EmergencyPlanResult> => unsupported("应急预案生成"),
     uninstallSkill: async (_skillId: string) => unsupported("技能卸载"),
     updateConfig: async (patch: Partial<AppConfig>) => {
       config = {
