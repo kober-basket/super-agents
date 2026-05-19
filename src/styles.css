@@ -2396,7 +2396,7 @@ textarea {
   position: absolute;
   top: -8px;
   right: 0;
-  bottom: -28px;
+  bottom: -36px;
   left: 0;
   z-index: 0;
   background: rgba(255, 255, 255, 0);
@@ -2431,7 +2431,7 @@ textarea {
 .message-actions {
   position: absolute;
   right: 0;
-  bottom: -12px;
+  top: calc(100% + 4px);
   z-index: 3;
   display: inline-flex;
   align-items: center;
@@ -2660,7 +2660,7 @@ textarea {
   font-size: 13px;
   font-weight: 700;
   line-height: 1.5;
-  background: linear-gradient(90deg, #64748b 0%, #2563eb 35%, #8b5cf6 65%, #64748b 100%);
+  background: linear-gradient(90deg, #667085 0%, #344054 42%, #98a2b3 58%, #667085 100%);
   background-size: 220% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -3330,12 +3330,15 @@ textarea {
 }
 
 .activity-summary-title strong {
+  flex: 0 0 auto;
+  max-width: min(180px, 42%);
   font-size: 13px;
   font-weight: 500;
   color: #0f172a;
 }
 
 .activity-summary-title em {
+  flex: 1 1 auto;
   font-style: normal;
   color: #64748b;
   font-size: 12px;

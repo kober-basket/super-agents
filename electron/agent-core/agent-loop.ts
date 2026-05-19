@@ -2,7 +2,7 @@ import { AgentRegistry, SkillRegistry, ToolRegistry } from "./registries";
 import { DEFAULT_AGENTIC_MAX_TURNS } from "./default-agents";
 import { PermissionManager } from "./permission-manager";
 import { PromptComposer } from "./prompt-composer";
-import { InMemoryAgentSessionManager } from "./session-manager";
+import { InMemoryAgentSessionManager, type AgentSessionManager } from "./session-manager";
 import { ToolPermissionDeniedError } from "./types";
 import type {
   AgentEvent,
@@ -19,6 +19,30 @@ const MAX_TOOL_RESULT_CHARS = 30_000;
 const MAX_TOOL_ERROR_CHARS = 2_000;
 const NO_ACTION_CONTINUATION_INSTRUCTION =
   "Your previous response contained only hidden reasoning and no visible answer or tool call. Continue now: if the task needs evidence, call the available tools; otherwise provide the user-facing answer. Do not respond with hidden reasoning only.";
+
+type SendTurnInput = {
+  sessionId: string;
+  agentId: string;
+  content: string;
+  overrideSystemPrompt?: string;
+  workspacePrompt?: string;
+  workspaceRoot?: string;
+  fullFileSystemAccess?: boolean;
+};
+
+interface PreparedToolExecution {
+  tool: ToolDefinition;
+  toolCall: ToolCall;
+  signature: string;
+  slotIndex: number;
+  concurrencySafe: boolean;
+}
+
+interface PendingDuplicateToolResult {
+  toolCall: ToolCall;
+  signature: string;
+  slotIndex: number;
+}
 
 function createMaxTurnsReachedMessage(maxTurns: number) {
   return `已达到本轮最大执行轮次（${maxTurns}）。上面的工具结果已经保留；你可以继续发送消息让我接着执行或基于现有结果整理结论。`;
@@ -358,6 +382,41 @@ function validateToolInput(tool: ToolDefinition, input: unknown) {
   return "";
 }
 
+function isToolCallConcurrencySafe(tool: ToolDefinition, input: unknown) {
+  const { isConcurrencySafe } = tool;
+  if (typeof isConcurrencySafe === "function") {
+    try {
+      return isConcurrencySafe(input) === true;
+    } catch {
+      return false;
+    }
+  }
+  return isConcurrencySafe === true;
+}
+
+function partitionPreparedToolExecutions(preparedToolCalls: PreparedToolExecution[]) {
+  const batches: PreparedToolExecution[][] = [];
+  for (const prepared of preparedToolCalls) {
+    const lastBatch = batches.at(-1);
+    const lastBatchIsParallel = lastBatch?.every((item) => item.concurrencySafe) === true;
+    if (prepared.concurrencySafe && lastBatch && lastBatchIsParallel) {
+      lastBatch.push(prepared);
+      continue;
+    }
+    batches.push([prepared]);
+  }
+  return batches;
+}
+
+function createToolMessage(toolCall: ToolCall, result: ToolResult): AgentMessage {
+  return {
+    role: "tool",
+    name: toolCall.name,
+    toolCallId: toolCall.id,
+    content: result.content,
+  };
+}
+
 export interface AgentCoreOptions {
   agents: AgentRegistry;
   skills: SkillRegistry;
@@ -365,14 +424,14 @@ export interface AgentCoreOptions {
   modelGateway: ModelGateway;
   promptComposer?: PromptComposer;
   permissionManager?: PermissionManager;
-  sessions?: InMemoryAgentSessionManager;
+  sessions?: AgentSessionManager;
   approvalHandler?: (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>;
 }
 
 export class AgentCore {
   private readonly promptComposer: PromptComposer;
   private readonly permissionManager: PermissionManager;
-  private readonly sessions: InMemoryAgentSessionManager;
+  private readonly sessions: AgentSessionManager;
 
   constructor(private readonly options: AgentCoreOptions) {
     this.promptComposer = options.promptComposer ?? new PromptComposer();
@@ -380,15 +439,97 @@ export class AgentCore {
     this.sessions = options.sessions ?? new InMemoryAgentSessionManager();
   }
 
-  async *sendTurn(input: {
-    sessionId: string;
+  private async executePreparedToolCall(
+    prepared: PreparedToolExecution,
+    input: SendTurnInput,
+    agentId: string,
+  ): Promise<ToolResult> {
+    try {
+      return normalizeToolResult(
+        await prepared.tool.execute(prepared.toolCall.input, {
+          sessionId: input.sessionId,
+          agentId,
+          workspaceRoot: input.workspaceRoot ?? process.cwd(),
+          fullFileSystemAccess: input.fullFileSystemAccess === true,
+          toolCall: prepared.toolCall,
+          requestApproval: async (request) => {
+            return this.options.approvalHandler
+              ? await this.options.approvalHandler(request)
+              : { type: "deny", reason: "No approval handler is configured." };
+          },
+        }),
+      );
+    } catch (error) {
+      if (error instanceof ToolPermissionDeniedError) {
+        return {
+          content: `Permission denied: ${error.message}`,
+          metadata: {
+            isError: true,
+            permissionDenied: true,
+          },
+        };
+      }
+      return {
+        content: sanitizeToolError(error),
+        metadata: {
+          isError: true,
+        },
+      };
+    }
+  }
+
+  private async *executePreparedToolCalls(input: {
+    turnInput: SendTurnInput;
     agentId: string;
-    content: string;
-    overrideSystemPrompt?: string;
-    workspacePrompt?: string;
-    workspaceRoot?: string;
-    fullFileSystemAccess?: boolean;
+    preparedToolCalls: PreparedToolExecution[];
+    completedToolResults: Map<string, ToolResult>;
+    toolMessageSlots: Array<AgentMessage | undefined>;
   }): AsyncIterable<AgentEvent> {
+    const batches = partitionPreparedToolExecutions(input.preparedToolCalls);
+
+    for (const batch of batches) {
+      for (const prepared of batch) {
+        yield {
+          type: "tool_call_started",
+          sessionId: input.turnInput.sessionId,
+          agentId: input.agentId,
+          toolCall: prepared.toolCall,
+        };
+      }
+
+      const pending = batch.map((prepared) => ({
+        prepared,
+        promise: this.executePreparedToolCall(prepared, input.turnInput, input.agentId).then((result) => ({
+          prepared,
+          result,
+        })),
+      }));
+
+      while (pending.length > 0) {
+        const completed = await Promise.race(pending.map((item) => item.promise));
+        const index = pending.findIndex((item) => item.prepared === completed.prepared);
+        if (index >= 0) {
+          pending.splice(index, 1);
+        }
+
+        input.completedToolResults.set(completed.prepared.signature, completed.result);
+        input.toolMessageSlots[completed.prepared.slotIndex] = createToolMessage(
+          completed.prepared.toolCall,
+          completed.result,
+        );
+
+        yield {
+          type: "tool_call_finished",
+          sessionId: input.turnInput.sessionId,
+          agentId: input.agentId,
+          toolCall: completed.prepared.toolCall,
+          result: completed.result,
+        };
+      }
+    }
+  }
+
+  async *sendTurn(input: SendTurnInput): AsyncIterable<AgentEvent> {
     const agent = this.options.agents.get(input.agentId);
     if (!agent) {
       throw new Error(`Agent "${input.agentId}" is not registered.`);
@@ -396,6 +537,7 @@ export class AgentCore {
 
     const session = this.sessions.getOrCreate(input.sessionId, input.agentId);
     session.messages.push({ role: "user", content: input.content });
+    this.sessions.save(session);
 
     const availableTools = this.options.tools.getMany(agent.tools);
     const baseMaxTurns = agent.maxTurns ?? DEFAULT_AGENTIC_MAX_TURNS;
@@ -424,7 +566,9 @@ export class AgentCore {
       let toolCallsThisStep = 0;
       let calledTool = false;
       const assistantToolCalls: ToolCall[] = [];
-      const pendingToolMessages: AgentMessage[] = [];
+      const toolMessageSlots: Array<AgentMessage | undefined> = [];
+      const preparedToolCalls: PreparedToolExecution[] = [];
+      const pendingDuplicateToolResults: PendingDuplicateToolResult[] = [];
 
       for await (const event of this.options.modelGateway.stream({
         model: agent.model,
@@ -483,15 +627,25 @@ export class AgentCore {
             return toolCallIdCollisionSequence;
           });
           tool = this.options.tools.get(toolCall.name);
+          const toolMessageSlotIndex = assistantToolCalls.length;
           assistantToolCalls.push(toolCall);
+          toolMessageSlots.push(undefined);
           const toolCallSignature = createToolCallSignature(toolCall);
           const previousResult = completedToolResults.get(toolCallSignature);
           if (previousResult) {
-            pendingToolMessages.push({
+            toolMessageSlots[toolMessageSlotIndex] = {
               role: "tool",
               name: toolCall.name,
               toolCallId: toolCall.id,
               content: createDuplicateToolResultMessage(toolCall, previousResult),
+            };
+            continue;
+          }
+          if (preparedToolCalls.some((prepared) => prepared.signature === toolCallSignature)) {
+            pendingDuplicateToolResults.push({
+              toolCall,
+              signature: toolCallSignature,
+              slotIndex: toolMessageSlotIndex,
             });
             continue;
           }
@@ -510,15 +664,10 @@ export class AgentCore {
                     isError: true,
                     invalidInput: true,
                   },
-                };
+            };
             toolCallsThisStep += 1;
             completedToolResults.set(toolCallSignature, result);
-            pendingToolMessages.push({
-              role: "tool",
-              name: toolCall.name,
-              toolCallId: toolCall.id,
-              content: result.content,
-            });
+            toolMessageSlots[toolMessageSlotIndex] = createToolMessage(toolCall, result);
             continue;
           }
 
@@ -539,12 +688,7 @@ export class AgentCore {
               },
             };
             completedToolResults.set(toolCallSignature, result);
-            pendingToolMessages.push({
-              role: "tool",
-              name: toolCall.name,
-              toolCallId: toolCall.id,
-              content: result.content,
-            });
+            toolMessageSlots[toolMessageSlotIndex] = createToolMessage(toolCall, result);
             yield {
               type: "permission_denied",
               sessionId: input.sessionId,
@@ -582,12 +726,7 @@ export class AgentCore {
                 },
               };
               completedToolResults.set(toolCallSignature, result);
-              pendingToolMessages.push({
-                role: "tool",
-                name: toolCall.name,
-                toolCallId: toolCall.id,
-                content: result.content,
-              });
+              toolMessageSlots[toolMessageSlotIndex] = createToolMessage(toolCall, result);
               yield {
                 type: "permission_denied",
                 sessionId: input.sessionId,
@@ -599,68 +738,51 @@ export class AgentCore {
             }
           }
 
-          yield {
-            type: "tool_call_started",
-            sessionId: input.sessionId,
-            agentId: agent.id,
-            toolCall,
-          };
-
-          let result: ToolResult;
-          try {
-            result = normalizeToolResult(
-              await tool!.execute(toolCall.input, {
-                sessionId: input.sessionId,
-                agentId: agent.id,
-                workspaceRoot: input.workspaceRoot ?? process.cwd(),
-                fullFileSystemAccess: input.fullFileSystemAccess === true,
-                toolCall,
-                requestApproval: async (request) => {
-                  return this.options.approvalHandler
-                    ? await this.options.approvalHandler(request)
-                    : { type: "deny", reason: "No approval handler is configured." };
-                },
-              }),
-            );
-          } catch (error) {
-            if (error instanceof ToolPermissionDeniedError) {
-              result = {
-                content: `Permission denied: ${error.message}`,
-                metadata: {
-                  isError: true,
-                  permissionDenied: true,
-                },
-              };
-            } else {
-              result = {
-                content: sanitizeToolError(error),
-                metadata: {
-                  isError: true,
-                },
-              };
-            }
-          }
+          const approvalRequired = decision.type === "ask";
           toolCallsThisStep += 1;
-          completedToolResults.set(toolCallSignature, result);
-          pendingToolMessages.push({
-            role: "tool",
-            name: toolCall.name,
-            toolCallId: toolCall.id,
-            content: result.content,
-          });
-
-          yield {
-            type: "tool_call_finished",
-            sessionId: input.sessionId,
-            agentId: agent.id,
+          preparedToolCalls.push({
+            tool: tool!,
             toolCall,
-            result,
-          };
+            signature: toolCallSignature,
+            slotIndex: toolMessageSlotIndex,
+            concurrencySafe: !approvalRequired && isToolCallConcurrencySafe(tool!, toolCall.input),
+          });
           continue;
         }
 
         stopReason = event.stopReason;
       }
+
+      for await (const toolEvent of this.executePreparedToolCalls({
+        turnInput: input,
+        agentId: agent.id,
+        preparedToolCalls,
+        completedToolResults,
+        toolMessageSlots,
+      })) {
+        yield toolEvent;
+      }
+
+      for (const duplicate of pendingDuplicateToolResults) {
+        const previousResult = completedToolResults.get(duplicate.signature);
+        const result: ToolResult = previousResult
+          ? {
+              content: createDuplicateToolResultMessage(duplicate.toolCall, previousResult),
+              metadata: {
+                duplicateToolCall: true,
+              },
+            }
+          : {
+              content: `[TOOL_ERROR] Duplicate tool call "${duplicate.toolCall.name}" could not reuse a completed result.`,
+              metadata: {
+                isError: true,
+                duplicateToolCall: true,
+              },
+            };
+        toolMessageSlots[duplicate.slotIndex] = createToolMessage(duplicate.toolCall, result);
+      }
+
+      const pendingToolMessages = toolMessageSlots.filter((message): message is AgentMessage => Boolean(message));
 
       if (!calledTool && assistantText.trim()) {
         emittedFinalText = true;
@@ -672,9 +794,11 @@ export class AgentCore {
           content: assistantText,
           toolCalls: assistantToolCalls,
         });
+        this.sessions.save(session);
       }
       session.messages.push(...pendingToolMessages);
       if (pendingToolMessages.length > 0) {
+        this.sessions.save(session);
         sawToolResultThisTurn = true;
       }
 
@@ -686,6 +810,7 @@ export class AgentCore {
           content: maxTurnsText,
           toolCalls: [],
         });
+        this.sessions.save(session);
         yield {
           type: "message_delta",
           sessionId: input.sessionId,
@@ -717,6 +842,7 @@ export class AgentCore {
             role: "user",
             content: NO_ACTION_CONTINUATION_INSTRUCTION,
           });
+          this.sessions.save(session);
           continue;
         }
         yield {

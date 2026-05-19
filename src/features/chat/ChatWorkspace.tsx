@@ -42,8 +42,10 @@ import {
   runtimeTraceGroupSummaryLabel,
   sanitizeTimelineStatusText,
   shouldOpenRuntimeTraceGroup,
+  shouldShowRuntimeThinkingIndicator,
 } from "../../lib/runtime-timeline";
 import {
+  isScrollAtBottom,
   isScrollNearBottom,
   shouldReleaseAutoScrollOnWheel,
   shouldAutoScrollMessageList,
@@ -357,6 +359,7 @@ export function ChatWorkspace({
   const knowledgePickerRef = useRef<HTMLDivElement | null>(null);
   const modelPickerRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollManuallyDetachedRef = useRef(false);
   const autoScrollPinnedToBottomRef = useRef(true);
   const autoScrollStateRef = useRef<{
     activeConversationId: string | null;
@@ -480,11 +483,20 @@ export function ChatWorkspace({
           : "先去知识库页添加文档、目录或网页，再在这里选择";
 
   function updateMessageListPinnedState(messageList: HTMLDivElement) {
-    autoScrollPinnedToBottomRef.current = isScrollNearBottom({
+    const metrics = {
       clientHeight: messageList.clientHeight,
       scrollHeight: messageList.scrollHeight,
       scrollTop: messageList.scrollTop,
-    });
+    };
+
+    if (autoScrollManuallyDetachedRef.current) {
+      const isAtBottom = isScrollAtBottom(metrics);
+      autoScrollManuallyDetachedRef.current = !isAtBottom;
+      autoScrollPinnedToBottomRef.current = isAtBottom;
+      return;
+    }
+
+    autoScrollPinnedToBottomRef.current = isScrollNearBottom(metrics);
   }
 
   useLayoutEffect(() => {
@@ -520,6 +532,7 @@ export function ChatWorkspace({
     }
 
     const scrollToBottom = () => {
+      autoScrollManuallyDetachedRef.current = false;
       autoScrollPinnedToBottomRef.current = true;
       messageList.scrollTo({
         top: messageList.scrollHeight,
@@ -545,6 +558,7 @@ export function ChatWorkspace({
 
   function handleMessageListWheel(event: WheelEvent<HTMLDivElement>) {
     if (shouldReleaseAutoScrollOnWheel(event.deltaY)) {
+      autoScrollManuallyDetachedRef.current = true;
       autoScrollPinnedToBottomRef.current = false;
     }
   }
@@ -929,8 +943,15 @@ export function ChatWorkspace({
     );
   }
 
-  function renderThinkingIndicator(key: string, isStreaming?: boolean) {
-    if (!isStreaming) {
+  function renderThinkingIndicator(
+    key: string,
+    options: {
+      hasAssistantText?: boolean;
+      isStreaming?: boolean;
+      isThinking?: boolean;
+    },
+  ) {
+    if (!shouldShowRuntimeThinkingIndicator(options)) {
       return null;
     }
 
@@ -1172,7 +1193,12 @@ export function ChatWorkspace({
       ChatMessageRuntimeTrace,
       "activityItems" | "timelineItems" | "thoughtText" | "toolCalls" | "terminalOutputs" | "error"
     > | null | undefined,
-    options: { keyPrefix: string; isStreaming?: boolean; fallbackText?: string },
+    options: {
+      hasAssistantText?: boolean;
+      keyPrefix: string;
+      isStreaming?: boolean;
+      fallbackText?: string;
+    },
   ) {
     if (!trace) {
       return [];
@@ -1206,7 +1232,11 @@ export function ChatWorkspace({
           const isPreviewing = isStreamingTimelineThoughtItem(renderItems, index, options.isStreaming);
           const thinkingIndicator = renderThinkingIndicator(
             `${options.keyPrefix}-${item.id}-thinking`,
-            isPreviewing,
+            {
+              hasAssistantText: options.hasAssistantText,
+              isStreaming: options.isStreaming,
+              isThinking: isPreviewing,
+            },
           );
           if (thinkingIndicator) {
             blocks.push(thinkingIndicator);
@@ -1264,7 +1294,11 @@ export function ChatWorkspace({
 
     const thinkingIndicator = renderThinkingIndicator(
       `${options.keyPrefix}-thinking`,
-      trace.thoughtText.trim() ? options.isStreaming : showThinkingPlaceholder,
+      {
+        hasAssistantText: options.hasAssistantText,
+        isStreaming: options.isStreaming,
+        isThinking: Boolean(trace.thoughtText.trim()) || showThinkingPlaceholder,
+      },
     );
     if (thinkingIndicator) {
       blocks.push(thinkingIndicator);
@@ -1504,6 +1538,9 @@ export function ChatWorkspace({
     const lastAssistantHasPersistedTrace = Boolean(
       lastMessage?.role === "assistant" && lastMessage.runtimeTrace,
     );
+    const hasStreamingAssistantText = Boolean(
+      runtimeInProgress && lastMessage?.role === "assistant" && hasVisibleText(lastMessage.content),
+    );
     const runtimeBlocks =
       runtimeState && (runtimeInProgress || !lastAssistantHasPersistedTrace)
         ? renderTraceBlocks(
@@ -1516,6 +1553,7 @@ export function ChatWorkspace({
               error: runtimeState.status === "failed" ? runtimeState.error : undefined,
             },
             {
+              hasAssistantText: hasStreamingAssistantText,
               keyPrefix: "runtime",
               isStreaming: runtimeInProgress,
               fallbackText: cancelInFlight ? "Stopping current reply..." : "Generating reasoning...",

@@ -10,6 +10,7 @@ import {
   runtimeTraceGroupSummaryLabel,
   shouldAutoScrollReasoningContent,
   shouldOpenRuntimeTraceGroup,
+  shouldShowRuntimeThinkingIndicator,
   sanitizeTimelineStatusText,
 } from "../../src/lib/runtime-timeline";
 import type { ChatRuntimeTimelineItem, ChatToolCall } from "../../src/types";
@@ -102,6 +103,33 @@ test("reasoning content auto-scrolls only while it is open and streaming", () =>
   assert.equal(shouldAutoScrollReasoningContent({ isOpen: true, isStreaming: false }), false);
 });
 
+test("runtime thinking indicator hides once assistant text is streaming", () => {
+  assert.equal(
+    shouldShowRuntimeThinkingIndicator({
+      isStreaming: true,
+      isThinking: true,
+      hasAssistantText: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldShowRuntimeThinkingIndicator({
+      isStreaming: true,
+      isThinking: true,
+      hasAssistantText: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldShowRuntimeThinkingIndicator({
+      isStreaming: false,
+      isThinking: true,
+      hasAssistantText: false,
+    }),
+    false,
+  );
+});
+
 test("timeline reasoning aligns its label and content with message text", () => {
   const localCssPath = path.resolve(process.cwd(), "src/styles.css");
   const cssPath = existsSync(localCssPath)
@@ -113,6 +141,17 @@ test("timeline reasoning aligns its label and content with message text", () => 
   assert.match(css, /\.timeline-reasoning-block\s+\.reasoning-dot\s*{[^}]*left:\s*auto/s);
   assert.match(css, /\.timeline-reasoning-block\s+\.reasoning-trigger\s*{[^}]*padding:\s*4px 0/s);
   assert.match(css, /\.timeline-reasoning-block\s+\.reasoning-content\s*{[^}]*padding:\s*2px 0 10px 26px/s);
+});
+
+test("runtime tool summary keeps tool names readable before truncating details", () => {
+  const localCssPath = path.resolve(process.cwd(), "src/styles.css");
+  const cssPath = existsSync(localCssPath)
+    ? localCssPath
+    : path.resolve(process.cwd(), "..", "src/styles.css");
+  const css = readFileSync(cssPath, "utf8");
+
+  assert.match(css, /\.activity-summary-title\s+strong\s*{[^}]*flex:\s*0 0 auto/s);
+  assert.match(css, /\.activity-summary-title\s+em\s*{[^}]*flex:\s*1 1 auto/s);
 });
 
 test("streaming reasoning preview is capped to three scrollable lines", () => {

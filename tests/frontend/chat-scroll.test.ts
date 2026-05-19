@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isScrollAtBottom,
   isScrollNearBottom,
   shouldReleaseAutoScrollOnWheel,
   shouldAutoScrollMessageList,
@@ -14,6 +15,17 @@ test("message list is pinned when it is close to the bottom", () => {
   );
   assert.equal(
     isScrollNearBottom({ clientHeight: 500, scrollHeight: 1_000, scrollTop: 470 }),
+    false,
+  );
+});
+
+test("message list resumes auto-scroll only at the bottom after manual detachment", () => {
+  assert.equal(
+    isScrollAtBottom({ clientHeight: 500, scrollHeight: 1_000, scrollTop: 496 }),
+    true,
+  );
+  assert.equal(
+    isScrollAtBottom({ clientHeight: 500, scrollHeight: 1_000, scrollTop: 486 }),
     false,
   );
 });

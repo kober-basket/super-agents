@@ -19,6 +19,7 @@ import {
   normalizeChatVisualPayload,
   parseChatMessageContent,
 } from "../src/lib/chat-visuals";
+import type { AgentMessage, AgentSession } from "./agent-core/types";
 
 interface ConversationRow {
   id: string;
@@ -40,6 +41,14 @@ interface MessageRow {
   attachments_json: string | null;
   visuals_json: string | null;
   runtime_trace_json: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+interface AgentSessionRow {
+  id: string;
+  agent_id: string;
+  messages_json: string;
   created_at: number;
   updated_at: number;
 }
@@ -114,6 +123,7 @@ function parseVisuals(value: string | null): ChatVisual[] {
 
 function createEmptyRuntimeTrace(): ChatMessageRuntimeTrace {
   return {
+    events: [],
     activityItems: [],
     timelineItems: [],
     planEntries: [],
@@ -135,6 +145,7 @@ function parseRuntimeTrace(value: string | null): ChatMessageRuntimeTrace | unde
     }
 
     return {
+      events: Array.isArray(parsed.events) ? parsed.events : [],
       activityItems: Array.isArray(parsed.activityItems) ? parsed.activityItems : [],
       timelineItems: Array.isArray(parsed.timelineItems) ? parsed.timelineItems : [],
       planEntries: Array.isArray(parsed.planEntries) ? parsed.planEntries : [],
@@ -149,6 +160,28 @@ function parseRuntimeTrace(value: string | null): ChatMessageRuntimeTrace | unde
     };
   } catch {
     return undefined;
+  }
+}
+
+function parseAgentMessages(value: string): AgentMessage[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((message): message is AgentMessage => {
+      if (!message || typeof message !== "object" || Array.isArray(message)) {
+        return false;
+      }
+      const role = (message as { role?: unknown }).role;
+      const content = (message as { content?: unknown }).content;
+      return (
+        (role === "system" || role === "user" || role === "assistant" || role === "tool") &&
+        typeof content === "string"
+      );
+    });
+  } catch {
+    return [];
   }
 }
 
@@ -274,6 +307,14 @@ export class ConversationService {
 
       CREATE INDEX IF NOT EXISTS idx_messages_conversation_created_at
       ON messages(conversation_id, created_at ASC);
+
+      CREATE TABLE IF NOT EXISTS agent_sessions (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        messages_json TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
 
     this.ensureConversationColumn(database, "agent_core", "TEXT NOT NULL DEFAULT ''");
@@ -542,6 +583,40 @@ export class ConversationService {
         WHERE id = ?
       `)
       .run(nextAgentCore, nextAgentSessionId, Date.now(), conversationId);
+  }
+
+  getAgentSession(sessionId: string): AgentSession | undefined {
+    const row = this.getDatabase()
+      .prepare(`
+        SELECT id, agent_id, messages_json, created_at, updated_at
+        FROM agent_sessions
+        WHERE id = ?
+      `)
+      .get(sessionId) as unknown as AgentSessionRow | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      id: row.id,
+      agentId: row.agent_id,
+      messages: parseAgentMessages(row.messages_json),
+    };
+  }
+
+  saveAgentSession(session: AgentSession): void {
+    const now = Date.now();
+    this.getDatabase()
+      .prepare(`
+        INSERT INTO agent_sessions (id, agent_id, messages_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          agent_id = excluded.agent_id,
+          messages_json = excluded.messages_json,
+          updated_at = excluded.updated_at
+      `)
+      .run(session.id, session.agentId, JSON.stringify(session.messages), now, now);
   }
 
   async sendMessage(input: ChatSendInput): Promise<ChatSendResult> {

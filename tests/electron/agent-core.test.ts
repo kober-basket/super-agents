@@ -41,6 +41,15 @@ class ScriptedModelGateway implements ModelGateway {
   }
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function toolConcurrencySafety(tool: ToolDefinition | undefined, input: unknown) {
+  const value = tool?.isConcurrencySafe;
+  return typeof value === "function" ? value(input) : value === true;
+}
+
 function createCore(
   modelGateway: ModelGateway,
   sessions?: ConstructorParameters<typeof AgentCore>[0]["sessions"],
@@ -887,6 +896,99 @@ test("native agent core makes provider-reused tool call ids unique within one tu
 
   assert.deepEqual(assistantToolIds, startedIds);
   assert.deepEqual(toolMessageIds, startedIds);
+});
+
+test("native agent core runs concurrency-safe tool calls in parallel while preserving tool message order", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "tool-alpha",
+          name: "lookup",
+          input: { key: "alpha" },
+        },
+      },
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "tool-beta",
+          name: "lookup",
+          input: { key: "beta" },
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "Final after parallel tools." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const agents = new AgentRegistry();
+  const skills = new SkillRegistry();
+  const tools = new ToolRegistry();
+
+  agents.register({
+    id: "parallel-agent",
+    name: "Parallel Agent",
+    description: "Tests safe parallel tool execution",
+    role: "assistant",
+    promptMode: "replace-default",
+    prompt: "Use tools when needed.",
+    model: "test-model",
+    tools: ["lookup"],
+    permissionPolicy: {
+      allowedTools: ["lookup"],
+      allowRisk: ["read"],
+      maxToolCallsPerTurn: 4,
+    },
+  });
+  tools.register({
+    name: "lookup",
+    description: "Look up a value from a test dictionary",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: { type: "string" },
+      },
+      required: ["key"],
+    },
+    risk: "read",
+    isConcurrencySafe: () => true,
+    async execute(input) {
+      const key = typeof input === "object" && input && "key" in input ? String(input.key) : "";
+      await delay(key === "alpha" ? 30 : 5);
+      return { content: `value:${key}` };
+    },
+  });
+
+  const core = new AgentCore({ agents, skills, tools, modelGateway: gateway });
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "parallel-safe-tools-session",
+    agentId: "parallel-agent",
+    content: "look up both values",
+  })) {
+    events.push(event);
+  }
+
+  const toolEvents = events
+    .flatMap((event) => {
+      if (event.type !== "tool_call_started" && event.type !== "tool_call_finished") {
+        return [];
+      }
+      const input = event.toolCall.input;
+      const key = typeof input === "object" && input && "key" in input ? String(input.key) : "";
+      return [`${event.type === "tool_call_started" ? "start" : "finish"}:${key}`];
+    });
+  assert.deepEqual(toolEvents.slice(0, 2), ["start:alpha", "start:beta"]);
+  assert.deepEqual(toolEvents.slice(2, 4), ["finish:beta", "finish:alpha"]);
+
+  const toolMessages = core
+    .getSession("parallel-safe-tools-session")
+    ?.messages.filter((message) => message.role === "tool")
+    .map((message) => message.content);
+  assert.deepEqual(toolMessages, ["value:alpha", "value:beta"]);
 });
 
 test("native agent core ends an empty no-tool response after tools without final synthesis", async () => {
@@ -2527,6 +2629,20 @@ test("default read tools tell the model to use absolute paths for explicit local
     assert.match(tool.description, /absolute path/i);
     assert.doesNotMatch(tool.description, /must stay inside/i);
   }
+});
+
+test("default read and web tools declare conservative concurrency safety", () => {
+  const tools = new Map(createBuiltinToolDefinitions().map((tool) => [tool.name, tool]));
+  const externalPath = path.join(os.tmpdir(), "outside-workspace.txt");
+
+  for (const toolName of ["read", "list", "grep", "glob"]) {
+    const tool = tools.get(toolName);
+    assert.equal(toolConcurrencySafety(tool, { path: "src" }), true);
+    assert.equal(toolConcurrencySafety(tool, { path: externalPath }), false);
+  }
+
+  assert.equal(toolConcurrencySafety(tools.get("web_search"), { query: "gold price" }), true);
+  assert.equal(toolConcurrencySafety(tools.get("web_fetch"), { url: "https://example.com" }), true);
 });
 
 test("local directory context maps desktop requests to the real home directory", () => {

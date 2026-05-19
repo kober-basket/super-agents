@@ -1,5 +1,7 @@
 import type { AppConfig } from "../../src/types";
 import { getActiveModelOption } from "../../src/lib/model-config";
+import { mapAgentMessageToOpenAIMessage } from "./openai/message-mapper";
+import { parseOpenAISseEvents } from "./openai/sse";
 import type { AgentMessage, ModelEvent, ModelGateway, ModelRequest, ModelToolSchema, ToolCall } from "./types";
 
 interface ChatCompletionChunk {
@@ -760,7 +762,7 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
 
     const body = {
       model: activeModel.modelId || input.model,
-      messages: [{ role: "system", content: input.system }, ...input.messages.map(mapMessage)],
+      messages: [{ role: "system", content: input.system }, ...input.messages.map(mapAgentMessageToOpenAIMessage)],
       stream: true,
       temperature: provider.temperature,
       max_tokens: provider.maxTokens,
@@ -807,7 +809,7 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
       }
 
       buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-      const parsed = parseSseEvents(buffer);
+      const parsed = parseOpenAISseEvents(buffer);
       buffer = parsed.rest;
 
       for (const eventData of parsed.events) {

@@ -9,8 +9,10 @@
 关键入口：
 
 - `electron/main.ts`：Electron 主进程入口。
-- `electron/chat-orchestrator.ts`：聊天回合编排，把前端输入、知识库、附件、workspace context 和 agent runtime 串起来。
+- `electron/chat-orchestrator.ts`：聊天回合生命周期编排，把前端输入、workspace context 和 agent runtime 串起来。
+- `electron/chat/`：聊天侧 prompt context、runtime trace 映射和 turn event log 等编排辅助模块。
 - `electron/agent-core/`：原生 agent 能力层，包括 agent 定义、prompt 组合、工具注册、权限、会话和模型网关。
+- `electron/agent-core/openai/`：OpenAI-compatible 网关的消息映射、SSE 解析等 provider 辅助模块。
 - `electron/tool-catalog.ts`：内置工具与 MCP 工具汇总成工作区工具目录。
 - `electron/builtin-skills/`：随应用打包的内置技能。
 - `src/features/chat/`：聊天工作区、预览和消息可视化。
@@ -54,11 +56,12 @@ npm run preview
 
 - Agent profile：`AgentDefinition` 描述 agent 的身份、角色、prompt、模型、工具、技能、权限模式和最大轮次。
 - Prompt composition：`PromptComposer` 负责组合 runtime prompt、active agent instructions、skills、memory、workspace 和 additional instructions。
-- Tool system：`ToolDefinition` 定义工具 schema、risk 和 `execute`；内置工具在 `electron/agent-core/builtin-tools.ts`，MCP 工具通过 adapter 进入工作区工具目录。
+- Tool system：`ToolDefinition` 定义工具 schema、risk 和 `execute`；内置工具由 `electron/agent-core/builtin-tools.ts` 聚合，独立工具族放在 `electron/agent-core/builtin-tools/`，MCP 工具通过 adapter 进入工作区工具目录。
 - Permission system：`PermissionManager` 根据 agent policy、工具风险、审批要求和 full filesystem access 做 allow/ask/deny。
 - Execution loop：`AgentCore.sendTurn()` 负责流式模型事件、工具调用、重复工具调用去重、工具结果截断、错误净化和最终回答合成。
+- Agent session：`AgentSessionManager` 抽象会话存储；默认可用内存实现，桌面聊天通过 `PersistentAgentSessionManager` 写入 `ConversationService` 的 SQLite `agent_sessions` 表。
 - Skills：`SkillDefinition` 是可注入 prompt 的程序化知识；内置 skill 放在 `electron/builtin-skills/`，用户技能通过界面导入或创建。
-- Runtime trace：聊天编排层把 thought、status、tool calls、timeline 和 visual blocks 映射到前端展示。
+- Runtime trace：`electron/chat/runtime-trace-recorder.ts` 把 thought、status、tool calls、timeline 和 visual blocks 映射到前端展示；`TurnEventLog` 记录可持久化的底层 turn event journal。
 
 新增能力时先判断它属于哪一层。不要把 agent runtime 规则硬塞进 React 组件，也不要把 UI 状态混进 `electron/agent-core/`。
 
@@ -81,6 +84,8 @@ npm run preview
 - Runtime prompt 只描述稳定约束；具体 persona 和任务规则放到 agent profile 或 skill。
 - 工具调用输入必须被 schema 校验；错误结果要可读、可截断、不能污染后续 prompt。
 - 工具结果过长时截断并写入 metadata，而不是让模型上下文失控。
+- turn 事实事件进入 `runtimeTrace.events`，UI timeline/activity 是派生展示，不能反过来作为 agent runtime 的事实来源。
+- 同一个 conversation 的 `agentSessionId` 应能恢复对应 agent messages；改 session 行为时要覆盖持久化恢复测试。
 - 同一 turn 内重复的同签名工具调用应复用已有结果或给出明确提示。
 - Coordinator/worker/specialist agent 应该通过清晰的任务边界协作，简单任务由当前 agent 直接完成。
 - MCP 是外部能力入口，内置工具是本地基础能力；两者在 UI 中统一展示，但实现边界不要混淆。

@@ -112,6 +112,14 @@ export function shouldAutoScrollReasoningContent(options: {
   return options.isOpen && options.isStreaming;
 }
 
+export function shouldShowRuntimeThinkingIndicator(options: {
+  hasAssistantText?: boolean;
+  isStreaming?: boolean;
+  isThinking?: boolean;
+}) {
+  return Boolean(options.isStreaming && options.isThinking && !options.hasAssistantText);
+}
+
 export function formatRuntimeTraceDuration(durationMs: number) {
   const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
   const minutes = Math.floor(totalSeconds / 60);

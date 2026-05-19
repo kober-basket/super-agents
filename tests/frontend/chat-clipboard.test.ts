@@ -72,7 +72,8 @@ test("message copy hover target stays reachable while moving from the bubble to 
 
   assert.match(css, /\.message-row:hover\s+\.message-actions/s);
   assert.match(css, /\.message-row\s*{[^}]*position:\s*relative/s);
-  assert.match(css, /\.message-row::before\s*{[^}]*bottom:\s*-2[0-9]px/s);
-  assert.match(css, /\.message-actions\s*{[^}]*bottom:\s*-1[0-4]px/s);
+  assert.match(css, /\.message-row::before\s*{[^}]*bottom:\s*-3[0-9]px/s);
+  assert.match(css, /\.message-actions\s*{[^}]*top:\s*calc\(100% \+ 4px\)/s);
+  assert.doesNotMatch(css, /\.message-actions\s*{[^}]*bottom:\s*-/s);
   assert.match(css, /\.message-actions::before\s*{[^}]*top:\s*-1[0-9]px[^}]*left:\s*-1[0-9]px/s);
 });

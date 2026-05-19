@@ -49,6 +49,7 @@ export interface ToolDefinition {
   description: string;
   inputSchema: Record<string, unknown>;
   risk: ToolRisk;
+  isConcurrencySafe?: boolean | ((input: unknown) => boolean);
   execute(input: unknown, context: ToolContext): Promise<ToolResult>;
 }
 

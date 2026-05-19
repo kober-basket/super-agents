@@ -5,13 +5,24 @@ export interface ScrollMetrics {
 }
 
 const DEFAULT_BOTTOM_THRESHOLD_PX = 16;
+const DEFAULT_BOTTOM_RESUME_THRESHOLD_PX = 4;
+
+function scrollDistanceFromBottom(metrics: ScrollMetrics) {
+  return metrics.scrollHeight - metrics.clientHeight - metrics.scrollTop;
+}
 
 export function isScrollNearBottom(
   metrics: ScrollMetrics,
   thresholdPx = DEFAULT_BOTTOM_THRESHOLD_PX,
 ) {
-  const distanceFromBottom = metrics.scrollHeight - metrics.clientHeight - metrics.scrollTop;
-  return distanceFromBottom <= thresholdPx;
+  return scrollDistanceFromBottom(metrics) <= thresholdPx;
+}
+
+export function isScrollAtBottom(
+  metrics: ScrollMetrics,
+  thresholdPx = DEFAULT_BOTTOM_RESUME_THRESHOLD_PX,
+) {
+  return scrollDistanceFromBottom(metrics) <= thresholdPx;
 }
 
 export function shouldAutoScrollMessageList(options: {

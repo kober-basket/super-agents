@@ -4,6 +4,8 @@ import path from "node:path";
 
 import { ToolPermissionDeniedError } from "./types";
 import type { ToolContext, ToolDefinition } from "./types";
+import { createInteractionToolDefinitions } from "./builtin-tools/interaction-tools";
+import { createTodoToolDefinitions } from "./builtin-tools/todo-tools";
 
 const MAX_READ_BYTES = 220_000;
 const MAX_WRITE_BYTES = 500_000;
@@ -31,14 +33,6 @@ const NODE_SEARCH_SKIPPED_DIRECTORIES = new Set([
   "release",
 ]);
 
-type TodoStatus = "pending" | "in_progress" | "completed";
-
-interface TodoItem {
-  id: string;
-  content: string;
-  status: TodoStatus;
-}
-
 interface TextEdit {
   oldString: string;
   newString: string;
@@ -51,9 +45,6 @@ interface PatchOperation {
   moveTo?: string;
   lines: string[];
 }
-
-const TODO_STATUSES = new Set<TodoStatus>(["pending", "in_progress", "completed"]);
-const sessionTodos = new Map<string, TodoItem[]>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -83,35 +74,11 @@ function arrayInput(input: unknown, key: string): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-function sanitizeIdentifier(value: string, fallback: string) {
-  const normalized = value.trim().replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "");
-  return normalized || fallback;
-}
-
-function normalizeTodoItems(input: unknown): TodoItem[] {
-  const rawItems = arrayInput(input, "items");
-  if (rawItems.length === 0) {
-    throw new Error("items must contain at least one todo.");
-  }
-
-  return rawItems.map((item, index) => {
-    if (!isRecord(item)) {
-      throw new Error(`items[${index}] must be an object.`);
-    }
-    const content = typeof item.content === "string" ? item.content.trim() : "";
-    if (!content) {
-      throw new Error(`items[${index}].content is required.`);
-    }
-    const status = typeof item.status === "string" ? item.status : "pending";
-    if (!TODO_STATUSES.has(status as TodoStatus)) {
-      throw new Error(`items[${index}].status must be pending, in_progress, or completed.`);
-    }
-    return {
-      id: sanitizeIdentifier(typeof item.id === "string" ? item.id : "", `todo-${index + 1}`),
-      content,
-      status: status as TodoStatus,
-    };
-  });
+function isRelativeWorkspacePathInput(input: unknown, key = "path") {
+  if (!isRecord(input)) return true;
+  const value = input[key];
+  if (typeof value !== "string" || !value.trim()) return true;
+  return !path.isAbsolute(value);
 }
 
 function normalizeTextEdits(input: unknown): TextEdit[] {
@@ -657,6 +624,7 @@ export function createBuiltinToolDefinitions(): ToolDefinition[] {
       aliases: ["workspace_read_file"],
       description: "Read a UTF-8 text file. Use a project-relative path for project files or an absolute path when the user explicitly names a local file or folder.",
       risk: "read",
+      isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {
         type: "object",
         properties: {
@@ -690,6 +658,7 @@ export function createBuiltinToolDefinitions(): ToolDefinition[] {
       aliases: ["workspace_list_directory"],
       description: "List files and folders. Use a project-relative path for project directories or an absolute path when the user explicitly names a local folder.",
       risk: "read",
+      isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {
         type: "object",
         properties: {
@@ -722,6 +691,7 @@ export function createBuiltinToolDefinitions(): ToolDefinition[] {
       aliases: ["workspace_search_text"],
       description: "Search text. Uses ripgrep when available and falls back to built-in search. Use a project-relative path for project searches or an absolute path when the user explicitly names a local folder.",
       risk: "read",
+      isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {
         type: "object",
         properties: {
@@ -783,6 +753,7 @@ export function createBuiltinToolDefinitions(): ToolDefinition[] {
       name: "glob",
       description: "Find files by glob pattern. Use a project-relative path for project searches or an absolute path when the user explicitly names a local folder.",
       risk: "read",
+      isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {
         type: "object",
         properties: {
@@ -1065,180 +1036,14 @@ export function createBuiltinToolDefinitions(): ToolDefinition[] {
         };
       },
     },
-    {
-      name: "question",
-      description: "Ask the user one or more structured questions and wait for their answers before continuing.",
-      risk: "read",
-      inputSchema: {
-        type: "object",
-        properties: {
-          questions: {
-            type: "array",
-            minItems: 1,
-            maxItems: 4,
-            items: {
-              type: "object",
-              properties: {
-                id: { type: "string", description: "Stable answer id." },
-                header: { type: "string", description: "Short label for the question." },
-                question: { type: "string", description: "Question text shown to the user." },
-                options: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      label: { type: "string" },
-                      description: { type: "string" },
-                    },
-                    required: ["label"],
-                    additionalProperties: false,
-                  },
-                },
-                multiple: { type: "boolean", description: "Whether multiple options may be selected." },
-              },
-              required: ["question", "options"],
-              additionalProperties: false,
-            },
-          },
-        },
-        required: ["questions"],
-        additionalProperties: false,
-      },
-      execute: async (input, context) => {
-        const rawQuestions = arrayInput(input, "questions");
-        if (rawQuestions.length === 0 || rawQuestions.length > 4) {
-          throw new Error("questions must contain 1 to 4 questions.");
-        }
-        const questions = rawQuestions.map((question, index) => {
-          if (!isRecord(question)) {
-            throw new Error(`questions[${index}] must be an object.`);
-          }
-          const text = typeof question.question === "string" ? question.question.trim() : "";
-          if (!text) {
-            throw new Error(`questions[${index}].question is required.`);
-          }
-          const options = Array.isArray(question.options)
-            ? question.options.map((option, optionIndex) => {
-                if (!isRecord(option)) {
-                  throw new Error(`questions[${index}].options[${optionIndex}] must be an object.`);
-                }
-                const label = typeof option.label === "string" ? option.label.trim() : "";
-                if (!label) {
-                  throw new Error(`questions[${index}].options[${optionIndex}].label is required.`);
-                }
-                return {
-                  label,
-                  description: typeof option.description === "string" ? option.description.trim() : "",
-                };
-              })
-            : [];
-          if (options.length < 2 || options.length > 4) {
-            throw new Error(`questions[${index}].options must contain 2 to 4 options.`);
-          }
-          return {
-            id: sanitizeIdentifier(typeof question.id === "string" ? question.id : "", `question-${index + 1}`),
-            header: typeof question.header === "string" ? question.header.trim() : "",
-            question: text,
-            options,
-            multiple: question.multiple === true,
-          };
-        });
-
-        if (!context.requestApproval) {
-          throw new Error("Question tool requires an approval handler.");
-        }
-        const approval = await context.requestApproval({
-          sessionId: context.sessionId,
-          agentId: context.agentId,
-          toolCall: context.toolCall ?? { id: `question-${Date.now()}`, name: "question", input },
-          kind: "question",
-          reason: "The agent needs user input before continuing.",
-          metadata: { questions },
-        });
-        if (approval.type === "deny") {
-          throw new ToolPermissionDeniedError(approval.reason);
-        }
-
-        const rawAnswers = Array.isArray(approval.metadata?.answers) ? approval.metadata.answers : [];
-        const answers = questions.map((question, index) => {
-          const rawAnswer = rawAnswers[index];
-          if (isRecord(rawAnswer)) {
-            return {
-              id: typeof rawAnswer.id === "string" ? rawAnswer.id : question.id,
-              question: typeof rawAnswer.question === "string" ? rawAnswer.question : question.question,
-              answer: typeof rawAnswer.answer === "string" ? rawAnswer.answer : "",
-            };
-          }
-          return {
-            id: question.id,
-            question: question.question,
-            answer: typeof rawAnswer === "string" ? rawAnswer : "",
-          };
-        });
-
-        return {
-          content: `User answered: ${answers.map((answer) => `"${answer.question}"="${answer.answer || "Unanswered"}"`).join(", ")}`,
-          metadata: { answers },
-        };
-      },
-    },
-    {
-      name: "todo_read",
-      description: "Read the current session todo list.",
-      risk: "read",
-      inputSchema: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      },
-      execute: async (_input, context) => {
-        const items = sessionTodos.get(context.sessionId) ?? [];
-        return {
-          content: items.length > 0
-            ? items.map((item) => `${item.status}\t${item.id}\t${item.content}`).join("\n")
-            : "(todo list is empty)",
-          metadata: { items },
-        };
-      },
-    },
-    {
-      name: "todo_write",
-      description: "Replace the current session todo list with structured task items.",
-      risk: "read",
-      inputSchema: {
-        type: "object",
-        properties: {
-          items: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                id: { type: "string" },
-                content: { type: "string" },
-                status: { type: "string", enum: ["pending", "in_progress", "completed"] },
-              },
-              required: ["content", "status"],
-              additionalProperties: false,
-            },
-          },
-        },
-        required: ["items"],
-        additionalProperties: false,
-      },
-      execute: async (input, context) => {
-        const items = normalizeTodoItems(input);
-        sessionTodos.set(context.sessionId, items);
-        return {
-          content: `Todo list updated:\n${items.map((item) => `${item.status}\t${item.id}\t${item.content}`).join("\n")}`,
-          metadata: { items },
-        };
-      },
-    },
+    ...createInteractionToolDefinitions(),
+    ...createTodoToolDefinitions(),
     {
       name: "web_search",
       description:
         "Search the web with a query and return result titles, URLs, and snippets. Use this for current or recent information. Use web_fetch only after you already have a specific URL.",
       risk: "network",
+      isConcurrencySafe: true,
       inputSchema: {
         type: "object",
         properties: {
@@ -1322,6 +1127,7 @@ export function createBuiltinToolDefinitions(): ToolDefinition[] {
       description:
         "Fetch a specific HTTP or HTTPS URL and return text, simplified markdown text, or HTML content. This is not a search tool; use web_search when you have a query instead of a URL.",
       risk: "network",
+      isConcurrencySafe: true,
       inputSchema: {
         type: "object",
         properties: {

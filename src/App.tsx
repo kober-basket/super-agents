@@ -200,6 +200,7 @@ function createConversationRuntimeState(
 ): ChatConversationRuntimeState {
   return {
     status,
+    events: [],
     activityItems: [],
     timelineItems: [],
     planEntries: [],

@@ -1,29 +1,20 @@
 import { randomUUID } from "node:crypto";
-import os from "node:os";
-import path from "node:path";
 
 import type {
-  AppConfig,
   ChatConversation,
   ChatEvent,
   ChatMessageRuntimeTrace,
   ChatMessage,
   ChatSendInput,
-  ChatToolCall,
   ChatTurnStartResult,
   ChatVisual,
 } from "../src/types";
 import { parseChatMessageContent } from "../src/lib/chat-visuals";
-import { buildRuntimeActivityItems } from "../src/lib/runtime-activity";
-import {
-  appendTimelineTextItem,
-  syncTimelineActivityItems,
-  upsertTimelineToolItem,
-} from "../src/lib/runtime-timeline";
 import {
   AgentCore,
   DEFAULT_AGENT_ID,
   OpenAICompatibleModelGateway,
+  PersistentAgentSessionManager,
   SkillRegistry,
   ToolRegistry,
   createBuiltinToolDefinitions,
@@ -32,9 +23,22 @@ import {
   type ToolApprovalDecision,
   type ToolApprovalRequest,
 } from "./agent-core";
+import { TurnEventLog } from "./chat/turn-event-log";
+import { prepareChatPrompt, type PreparedPrompt } from "./chat/prompt-context";
+import {
+  appendRuntimeTextTimelineItem,
+  appendRuntimeToolTimelineItem,
+  createEmptyRuntimeTrace as createChatRuntimeTrace,
+  markRuntimeToolCallFinished,
+  refreshRuntimeTraceActivity,
+  upsertRuntimePermissionToolCall,
+  upsertRuntimeToolCallStarted,
+} from "./chat/runtime-trace-recorder";
 import { ConversationService } from "./conversation-service";
 import { StreamingMessagePersister } from "./streaming-message-persister";
 import { WorkspaceService } from "./workspace-service";
+
+export { buildLocalDirectoryContext } from "./chat/prompt-context";
 
 const STREAMING_MESSAGE_PERSIST_INTERVAL_MS = 200;
 
@@ -50,17 +54,11 @@ interface ActiveTurn {
   assistantLastEmittedContent: string;
   assistantLastEmittedVisualsSignature: string;
   runtimeTrace: ChatMessageRuntimeTrace;
+  eventLog: TurnEventLog;
   messagePersister: StreamingMessagePersister;
   completion: Deferred<ChatTurnCompletionResult>;
   unregisterSessionHandlers: () => void;
   closed: boolean;
-}
-
-interface PreparedPrompt {
-  content: string;
-  workspacePrompt: string;
-  workspaceRoot: string;
-  fullFileSystemAccess: boolean;
 }
 
 interface Deferred<T> {
@@ -90,17 +88,6 @@ function createDeferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-function uniquePaths(values: string[]) {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => value.trim())
-        .filter(Boolean)
-        .map((value) => path.resolve(value)),
-    ),
-  );
-}
-
 function stringifyJson(value: unknown) {
   if (value === undefined) {
     return undefined;
@@ -113,173 +100,9 @@ function stringifyJson(value: unknown) {
   }
 }
 
-function createEmptyRuntimeTrace(): ChatMessageRuntimeTrace {
-  return {
-    activityItems: [],
-    timelineItems: [],
-    planEntries: [],
-    toolCalls: [],
-    terminalOutputs: {},
-    thoughtText: "",
-  };
-}
-
-function buildKnowledgeContext(search: {
-  query: string;
-  results: Array<{
-    pageContent: string;
-    metadata: Record<string, unknown>;
-    knowledgeBaseName: string;
-  }>;
-}) {
-  if (search.results.length === 0) {
-    return "";
-  }
-
-  const sections = search.results.map((result, index) => {
-    const title =
-      typeof result.metadata.title === "string" && result.metadata.title.trim()
-        ? result.metadata.title.trim()
-        : typeof result.metadata.source === "string" && result.metadata.source.trim()
-          ? result.metadata.source.trim()
-          : `Snippet ${index + 1}`;
-    const excerpt = result.pageContent.trim().slice(0, 1_400);
-
-    return `${index + 1}. [${result.knowledgeBaseName}] ${title}\n${excerpt}`;
-  });
-
-  return `Reference knowledge base excerpts for this request:\n${sections.join("\n\n")}`;
-}
-
-function collectAdditionalDirectories(cwd: string, input: ChatSendInput) {
-  const attachmentDirectories = (input.attachments ?? [])
-    .map((attachment) => attachment.path?.trim())
-    .filter(Boolean)
-    .map((attachmentPath) => path.dirname(attachmentPath));
-
-  return uniquePaths(attachmentDirectories).filter((directoryPath) => directoryPath !== cwd);
-}
-
-export function buildLocalDirectoryContext(homeDirectory = os.homedir()) {
-  const home = path.resolve(homeDirectory);
-  const directories = [
-    ["Home / 家目录", home],
-    ["Desktop / 桌面", path.join(home, "Desktop")],
-    ["Downloads / 下载", path.join(home, "Downloads")],
-    ["Documents / 文档", path.join(home, "Documents")],
-  ];
-
-  return [
-    `User home directory: ${home}`,
-    "Common local directories:",
-    ...directories.map(([label, directoryPath]) => `- ${label}: ${directoryPath}`),
-    "Path selection rule: when the user asks for a named local directory such as Desktop/桌面, Downloads/下载, Documents/文档, or provides an absolute path, call file tools with that absolute target. Use the workspace root only for project/workspace requests or when no target is specified.",
-  ].join("\n");
-}
-
-function buildAttachmentContext(input: ChatSendInput) {
-  const sections = (input.attachments ?? []).map((attachment, index) => {
-    const header = `${index + 1}. ${attachment.name} (${attachment.mimeType || "unknown"})`;
-    if (attachment.content?.trim()) {
-      return `${header}\n${attachment.content.trim()}`;
-    }
-    return `${header}\nAttached file path: ${attachment.path}`;
-  });
-
-  if (sections.length === 0) {
-    return "";
-  }
-
-  return `Attached files:\n${sections.join("\n\n")}`;
-}
-
-function normalizeKnowledgeBaseIds(value: string[] | undefined) {
-  if (!Array.isArray(value) || value.length === 0) {
-    return [];
-  }
-
-  return Array.from(new Set(value.map((item) => item.trim()).filter(Boolean)));
-}
-
-function shouldSuggestInlineVisual(input: ChatSendInput) {
-  const content = input.content.trim();
-  const attachmentSignal = (input.attachments ?? []).some((attachment) => {
-    const name = attachment.name.toLowerCase();
-    const mimeType = attachment.mimeType.toLowerCase();
-    return (
-      /\.(csv|tsv|json|xlsx?|md)$/i.test(name) ||
-      mimeType.includes("csv") ||
-      mimeType.includes("json") ||
-      mimeType.includes("spreadsheet")
-    );
-  });
-
-  if (attachmentSignal) {
-    return true;
-  }
-
-  return /(?:chart|diagram|timeline|flowchart|flow diagram|graph|plot|visual(?:ize|ise|ization)?|mermaid|architecture|sequence|trend|可视化|图表|流程图|架构图|时序图|关系图|画图|折线图|柱状图|趋势图)/i.test(
-    content,
-  );
-}
-
-function shouldSuggestInlineVisualStable(input: ChatSendInput) {
-  const content = input.content.trim();
-  const attachmentSignal = (input.attachments ?? []).some((attachment) => {
-    const name = attachment.name.toLowerCase();
-    const mimeType = attachment.mimeType.toLowerCase();
-    return (
-      /\.(csv|tsv|json|xlsx?|md)$/i.test(name) ||
-      mimeType.includes("csv") ||
-      mimeType.includes("json") ||
-      mimeType.includes("spreadsheet")
-    );
-  });
-
-  if (attachmentSignal) {
-    return true;
-  }
-
-  return /(?:chart|diagram|timeline|flowchart|flow diagram|graph|plot|visual(?:ize|ise|ization)?|mermaid|architecture|sequence|trend|\u53ef\u89c6\u5316|\u56fe\u8868|\u6d41\u7a0b\u56fe|\u67b6\u6784\u56fe|\u65f6\u5e8f\u56fe|\u5173\u7cfb\u56fe|\u753b\u56fe|\u6298\u7ebf\u56fe|\u67f1\u72b6\u56fe|\u8d8b\u52bf\u56fe)/i.test(
-    content,
-  );
-}
-
-function buildInlineVisualInstruction(input: ChatSendInput) {
-  if (!shouldSuggestInlineVisualStable(input)) {
-    return "";
-  }
-
-  return [
-    "If a visual would materially improve this answer, append one or more fenced code blocks after the prose using the language `super-agents-visual`.",
-    "Only emit valid JSON inside that block. Do not emit HTML, CSS, JavaScript, or SVG.",
-    "Supported payloads:",
-    '1. Mermaid diagram: {"type":"diagram","style":"mermaid","title":"Optional title","description":"Optional note","code":"graph TD; A-->B;"}',
-    '2. Vega-Lite chart: {"type":"chart","library":"vega-lite","title":"Optional title","description":"Optional note","spec":{...}}',
-    "For Vega-Lite charts, you may include inline interactive controls through standard `params` and `bind` fields inside `spec` when sliders, selects, or toggles help exploration.",
-    "You may output either one object or an array of objects in the fenced block.",
-    "Keep all data inline in the JSON. Do not reference remote URLs or external assets.",
-    "If no visual is needed, reply normally without a visual block.",
-  ].join("\n");
-}
-
-function buildTurnPromptContent(input: ChatSendInput) {
-  const content = input.content.trim();
-  const visualInstruction = buildInlineVisualInstruction(input);
-  if (!visualInstruction) {
-    return content;
-  }
-
-  return [content, "Additional reply-format instructions:", visualInstruction]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
 function serializeVisuals(visuals: ChatVisual[]) {
   return JSON.stringify(visuals);
 }
-
-const INTERRUPTED_ASSISTANT_REPLY = "已停止回复。你可以继续发送下一条消息。";
 
 const INTERRUPTED_ASSISTANT_REPLY_TEXT = "已停止回复。你可以继续发送下一条消息。";
 
@@ -311,6 +134,7 @@ export class ChatOrchestrator {
       skills,
       tools,
       modelGateway: new OpenAICompatibleModelGateway(async () => await this.workspaceService.getConfigSnapshot()),
+      sessions: new PersistentAgentSessionManager(this.conversationService),
       approvalHandler: this.approvalHandler,
     });
   }
@@ -360,12 +184,19 @@ export class ChatOrchestrator {
         assistantVisualsSignature: serializeVisuals(started.assistantMessage.visuals ?? []),
         assistantLastEmittedContent: started.assistantMessage.content,
         assistantLastEmittedVisualsSignature: serializeVisuals(started.assistantMessage.visuals ?? []),
-        runtimeTrace: started.assistantMessage.runtimeTrace ?? createEmptyRuntimeTrace(),
+        runtimeTrace: started.assistantMessage.runtimeTrace ?? createChatRuntimeTrace(),
+        eventLog: new TurnEventLog(started.assistantMessage.runtimeTrace?.events ?? []),
         messagePersister: null as unknown as StreamingMessagePersister,
         completion,
         unregisterSessionHandlers: () => undefined,
         closed: false,
       } satisfies ActiveTurn;
+
+      activeTurn.eventLog.appendLifecycle("turn_started", {
+        sessionId,
+        agentId: this.defaultAgentId,
+      });
+      activeTurn.runtimeTrace.events = activeTurn.eventLog.snapshot();
 
       activeTurn.messagePersister = new StreamingMessagePersister({
         intervalMs: STREAMING_MESSAGE_PERSIST_INTERVAL_MS,
@@ -424,6 +255,13 @@ export class ChatOrchestrator {
       : INTERRUPTED_ASSISTANT_REPLY_TEXT;
     await this.persistAndEmitAssistantState(activeTurn);
     activeTurn.runtimeTrace.stopReason = "cancelled";
+    activeTurn.eventLog.appendLifecycle("turn_cancelled", {
+      sessionId: activeTurn.sessionId,
+      agentId: this.defaultAgentId,
+      stopReason: "cancelled",
+    });
+    activeTurn.runtimeTrace.events = activeTurn.eventLog.snapshot();
+    await this.persistRuntimeTrace(activeTurn);
     activeTurn.completion.resolve({
       conversation: await this.conversationService.getConversation(activeTurn.conversationId),
       assistantMessage: {
@@ -451,59 +289,11 @@ export class ChatOrchestrator {
     input: ChatSendInput,
     selectedKnowledgeBaseIds: string[],
   ): Promise<PreparedPrompt> {
-    const config = await this.workspaceService.getConfigSnapshot();
-    const cwd = path.resolve(config.workspaceRoot.trim() || process.cwd());
-    const additionalDirectories = collectAdditionalDirectories(cwd, input);
-    const [skillContext, knowledgeContext] = await Promise.all([
-      this.workspaceService.getEnabledSkillPromptContext(config),
-      this.resolveKnowledgeContext(config, input.content, selectedKnowledgeBaseIds),
-    ]);
-    const attachmentContext = buildAttachmentContext(input);
-    const workspacePrompt = [
-      `Workspace root: ${cwd}`,
-      buildLocalDirectoryContext(),
-      additionalDirectories.length > 0
-        ? `Additional attachment directories:\n${additionalDirectories.join("\n")}`
-        : "",
-      skillContext,
-      knowledgeContext,
-      attachmentContext,
-    ].filter(Boolean).join("\n\n");
-
-    return {
-      content: buildTurnPromptContent(input),
-      workspacePrompt,
-      workspaceRoot: cwd,
-      fullFileSystemAccess: config.security.fullFileSystemAccess === true,
-    };
-  }
-
-  private async resolveKnowledgeContext(
-    config: AppConfig,
-    content: string,
-    selectedKnowledgeBaseIds: string[],
-  ) {
-    const effectiveKnowledgeBaseIds = normalizeKnowledgeBaseIds(selectedKnowledgeBaseIds);
-    if (effectiveKnowledgeBaseIds.length === 0) {
-      return "";
-    }
-
-    const query = content.trim();
-    if (!query) {
-      return "";
-    }
-
-    try {
-      const search = await this.workspaceService.searchKnowledgeBases({
-        query,
-        knowledgeBaseIds: effectiveKnowledgeBaseIds,
-        documentCount: config.knowledgeBase.documentCount,
-      });
-
-      return buildKnowledgeContext(search);
-    } catch {
-      return "";
-    }
+    return await prepareChatPrompt({
+      chatInput: input,
+      selectedKnowledgeBaseIds,
+      workspaceService: this.workspaceService,
+    });
   }
 
   private async runPrompt(activeTurn: ActiveTurn, prepared: PreparedPrompt) {
@@ -521,6 +311,8 @@ export class ChatOrchestrator {
           return;
         }
 
+        activeTurn.eventLog.appendAgentEvent(event);
+        activeTurn.runtimeTrace.events = activeTurn.eventLog.snapshot();
         await this.handleAgentEvent(activeTurn, event);
         if (event.type === "turn_finished") {
           stopReason = event.stopReason;
@@ -571,6 +363,12 @@ export class ChatOrchestrator {
       activeTurn.runtimeTrace.stopReason = undefined;
       activeTurn.runtimeTrace.error =
         error instanceof Error ? error.message : "Agent turn failed";
+      activeTurn.eventLog.appendLifecycle("turn_failed", {
+        sessionId: activeTurn.sessionId,
+        agentId: this.defaultAgentId,
+        error: activeTurn.runtimeTrace.error,
+      });
+      activeTurn.runtimeTrace.events = activeTurn.eventLog.snapshot();
       try {
         await this.persistRuntimeTrace(activeTurn);
       } catch {
@@ -648,12 +446,8 @@ export class ChatOrchestrator {
   }
 
   private async persistRuntimeTrace(activeTurn: ActiveTurn) {
-    activeTurn.runtimeTrace.activityItems = buildRuntimeActivityItems(activeTurn.runtimeTrace.toolCalls);
-    activeTurn.runtimeTrace.timelineItems = syncTimelineActivityItems(
-      activeTurn.runtimeTrace.timelineItems,
-      activeTurn.runtimeTrace.activityItems,
-      (activity) => `activity-${activity.id}-${randomUUID()}`,
-    );
+    activeTurn.runtimeTrace.events = activeTurn.eventLog.snapshot();
+    refreshRuntimeTraceActivity(activeTurn.runtimeTrace);
     await this.conversationService.updateAssistantMessage(
       activeTurn.conversationId,
       activeTurn.assistantMessageId,
@@ -672,20 +466,11 @@ export class ChatOrchestrator {
   }
 
   private appendTextTimelineItem(activeTurn: ActiveTurn, type: "thought" | "status", text: string) {
-    activeTurn.runtimeTrace.timelineItems = appendTimelineTextItem(
-      activeTurn.runtimeTrace.timelineItems,
-      type,
-      text,
-      `${type}-${randomUUID()}`,
-    );
+    appendRuntimeTextTimelineItem(activeTurn.runtimeTrace, type, text);
   }
 
   private appendToolTimelineItem(activeTurn: ActiveTurn, toolCallId: string) {
-    activeTurn.runtimeTrace.timelineItems = upsertTimelineToolItem(
-      activeTurn.runtimeTrace.timelineItems,
-      toolCallId,
-      `tool-${toolCallId}-${randomUUID()}`,
-    );
+    appendRuntimeToolTimelineItem(activeTurn.runtimeTrace, toolCallId);
   }
 
   private async sealAssistantCandidateAsProcess(activeTurn: ActiveTurn) {
@@ -706,13 +491,7 @@ export class ChatOrchestrator {
   }
 
   private emitActivitySummary(activeTurn: ActiveTurn) {
-    const items = buildRuntimeActivityItems(activeTurn.runtimeTrace.toolCalls);
-    activeTurn.runtimeTrace.activityItems = items;
-    activeTurn.runtimeTrace.timelineItems = syncTimelineActivityItems(
-      activeTurn.runtimeTrace.timelineItems,
-      items,
-      (activity) => `activity-${activity.id}-${randomUUID()}`,
-    );
+    const items = refreshRuntimeTraceActivity(activeTurn.runtimeTrace);
     if (items.length === 0) {
       return;
     }
@@ -789,20 +568,11 @@ export class ChatOrchestrator {
 
     if (event.type === "tool_call_started") {
       await this.sealAssistantCandidateAsProcess(activeTurn);
-      const toolCall: ChatToolCall = {
-        toolCallId: event.toolCall.id,
-        title: event.toolCall.name,
-        status: "in_progress",
-        kind: "other",
-        content: [],
-        rawInputJson: stringifyJson(event.toolCall.input),
-      };
-      activeTurn.runtimeTrace.toolCalls = [
-        ...activeTurn.runtimeTrace.toolCalls.filter(
-          (entry) => entry.toolCallId !== event.toolCall.id,
-        ),
-        toolCall,
-      ];
+      const toolCall = upsertRuntimeToolCallStarted(
+        activeTurn.runtimeTrace,
+        event.toolCall,
+        stringifyJson(event.toolCall.input),
+      );
 
       this.emitActivitySummary(activeTurn);
       this.appendToolTimelineItem(activeTurn, event.toolCall.id);
@@ -816,19 +586,11 @@ export class ChatOrchestrator {
     }
 
     if (event.type === "tool_call_finished") {
-      const patch: Partial<Omit<ChatToolCall, "toolCallId">> = {
-        status: "completed",
-        content: [{ type: "text", text: event.result.content }],
-        rawOutputJson: stringifyJson(event.result),
-      };
-      activeTurn.runtimeTrace.toolCalls = activeTurn.runtimeTrace.toolCalls.map((toolCall) =>
-        toolCall.toolCallId === event.toolCall.id
-          ? {
-              ...toolCall,
-              ...patch,
-              content: patch.content ?? toolCall.content,
-            }
-          : toolCall,
+      const patch = markRuntimeToolCallFinished(
+        activeTurn.runtimeTrace,
+        event.toolCall,
+        event.result,
+        stringifyJson(event.result),
       );
 
       this.emitEvent({
@@ -844,54 +606,32 @@ export class ChatOrchestrator {
 
     if (event.type === "permission_denied" || event.type === "permission_requested") {
       await this.sealAssistantCandidateAsProcess(activeTurn);
-      const patch: Partial<Omit<ChatToolCall, "toolCallId">> = {
-        title: event.toolCall.name,
+      const recorded = upsertRuntimePermissionToolCall(activeTurn.runtimeTrace, {
+        toolCall: event.toolCall,
         status: event.type === "permission_denied" ? "failed" : "pending",
-        kind: "other",
-        content: [{ type: "text", text: event.reason }],
+        reason: event.reason,
         rawInputJson: stringifyJson(event.toolCall.input),
-      };
-      const existing = activeTurn.runtimeTrace.toolCalls.some(
-        (toolCall) => toolCall.toolCallId === event.toolCall.id,
-      );
+      });
 
-      if (existing) {
-        activeTurn.runtimeTrace.toolCalls = activeTurn.runtimeTrace.toolCalls.map((toolCall) =>
-          toolCall.toolCallId === event.toolCall.id
-            ? {
-                ...toolCall,
-                ...patch,
-                content: patch.content ?? toolCall.content,
-              }
-            : toolCall,
-        );
+      if (recorded.existing) {
         this.emitEvent({
           type: "tool_call_updated",
           conversationId: activeTurn.conversationId,
           turnId: activeTurn.turnId,
           toolCallId: event.toolCall.id,
-          patch,
+          patch: recorded.patch,
         });
         this.emitActivitySummary(activeTurn);
         return;
       }
 
-      const toolCall: ChatToolCall = {
-        toolCallId: event.toolCall.id,
-        title: event.toolCall.name,
-        status: patch.status,
-        kind: "other",
-        content: patch.content ?? [],
-        rawInputJson: patch.rawInputJson,
-      };
-      activeTurn.runtimeTrace.toolCalls = [...activeTurn.runtimeTrace.toolCalls, toolCall];
       this.emitActivitySummary(activeTurn);
       this.appendToolTimelineItem(activeTurn, event.toolCall.id);
       this.emitEvent({
         type: "tool_call_started",
         conversationId: activeTurn.conversationId,
         turnId: activeTurn.turnId,
-        toolCall,
+        toolCall: recorded.toolCall,
       });
     }
   }
