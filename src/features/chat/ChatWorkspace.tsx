@@ -213,7 +213,7 @@ function statusClassName(status?: ChatToolCall["status"]) {
 
 function statusLabel(status?: ChatToolCall["status"]) {
   if (status === "completed") {
-    return "已完成";
+    return "完成";
   }
   if (status === "failed") {
     return "失败";
@@ -1162,7 +1162,7 @@ export function ChatWorkspace({
               {(toolCall.status === "pending" || toolCall.status === "in_progress") ? (
                 <LoaderCircle size={12} className="spin" />
               ) : null}
-              {statusLabel(toolCall.status)}
+              <span className="activity-status-text">{statusLabel(toolCall.status)}</span>
             </span>
             <ChevronDown size={14} />
           </div>
@@ -1275,7 +1275,9 @@ export function ChatWorkspace({
                 ) : (
                   <CheckCircle2 size={12} />
                 )}
-                {terminal.exitCode === null && terminal.signal === null ? "执行中" : "已结束"}
+                <span className="activity-status-text">
+                  {terminal.exitCode === null && terminal.signal === null ? "执行中" : "结束"}
+                </span>
               </span>
             </div>
           </div>

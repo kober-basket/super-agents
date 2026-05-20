@@ -1741,7 +1741,7 @@ textarea {
 }
 
 .chat-composer-frame {
-  width: min(100%, 760px);
+  width: min(100%, 820px);
   margin: 0 auto;
   position: relative;
 }
@@ -1750,14 +1750,12 @@ textarea {
   width: 100%;
   margin: 0;
   display: grid;
-  gap: 8px;
-  padding: 10px 14px;
-  border-radius: 24px;
-  border: 1px solid var(--line);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 245, 239, 0.94)),
-    var(--panel);
-  box-shadow: 0 22px 54px rgba(17, 24, 39, 0.06);
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 14px 34px rgba(17, 24, 39, 0.055);
 }
 
 .chat-composer-input-area {
@@ -1767,15 +1765,15 @@ textarea {
 
 .composer-rich-input {
   width: 100%;
-  min-height: 44px;
-  max-height: 96px;
+  min-height: 38px;
+  max-height: 120px;
   overflow: auto;
-  padding: 2px 4px;
+  padding: 1px 2px;
   border: 0;
   background: transparent;
   box-shadow: none;
   color: var(--text);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.5;
   outline: none;
   white-space: pre-wrap;
@@ -1900,7 +1898,7 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .chat-attachment-list {
@@ -2073,11 +2071,11 @@ textarea {
 }
 
 .chat-composer-icon {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
-  border-radius: 999px;
+  border-radius: 10px;
   color: var(--muted-strong);
 }
 
@@ -2129,11 +2127,11 @@ textarea {
 .chat-model-trigger {
   width: auto;
   max-width: 100%;
-  min-height: 32px;
+  min-height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
+  gap: 6px;
   padding: 0;
   border: 0;
   border-radius: 999px;
@@ -2282,11 +2280,11 @@ textarea {
 
 .chat-voice-button,
 .chat-send-button {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   display: grid;
   place-items: center;
-  border-radius: 12px;
+  border-radius: 10px;
   transition:
     transform 140ms ease,
     background 140ms ease,
@@ -2361,8 +2359,8 @@ textarea {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  padding: 0 0 24px;
+  gap: 8px;
+  padding: 0 0 18px;
 }
 
 .chat-thread-toolbar {
@@ -2371,7 +2369,7 @@ textarea {
   justify-content: space-between;
   gap: 14px;
   min-width: 0;
-  padding: 18px 34px 0;
+  padding: 16px 42px 0;
 }
 
 .chat-thread-title {
@@ -2466,8 +2464,8 @@ textarea {
   align-content: start;
   min-height: 0;
   overflow: auto;
-  gap: 18px;
-  padding: 14px 34px 20px;
+  gap: 14px;
+  padding: 10px 42px 18px;
 }
 
 .message-row {
@@ -2480,9 +2478,9 @@ textarea {
 .message-row::before {
   content: "";
   position: absolute;
-  top: -8px;
+  top: -6px;
   right: 0;
-  bottom: -34px;
+  bottom: -22px;
   left: 0;
   z-index: 0;
   background: rgba(255, 255, 255, 0);
@@ -2510,7 +2508,7 @@ textarea {
   z-index: 1;
   min-width: 0;
   display: grid;
-  gap: 6px;
+  gap: 8px;
   max-width: 100%;
 }
 
@@ -2607,8 +2605,8 @@ textarea {
   gap: 8px;
   min-height: 36px;
   padding: 10px 12px;
-  border-radius: 16px;
-  background: #fbf8f2;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
   border: 1px solid var(--line);
   color: var(--muted-strong);
   font-size: 13px;
@@ -2616,7 +2614,7 @@ textarea {
 
 .message-runtime-stack {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
   max-width: none;
 }
@@ -2626,7 +2624,7 @@ textarea {
 }
 
 .runtime-trace-group {
-  width: min(100%, 760px);
+  width: min(100%, 820px);
   color: var(--muted-strong);
 }
 
@@ -2634,9 +2632,9 @@ textarea {
   list-style: none;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-height: 28px;
-  padding: 4px 0;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0;
   color: var(--muted-strong);
   cursor: pointer;
   user-select: none;
@@ -2647,8 +2645,20 @@ textarea {
 }
 
 .runtime-trace-summary-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 650;
+}
+
+.runtime-trace-summary-copy::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.42);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.08);
 }
 
 .runtime-trace-group.streaming .runtime-trace-summary-copy {
@@ -2665,7 +2675,19 @@ textarea {
 }
 
 .runtime-trace-group > .message-runtime-stack {
-  padding: 2px 0 8px;
+  position: relative;
+  margin-top: 5px;
+  padding: 0 0 6px 18px;
+}
+
+.runtime-trace-group > .message-runtime-stack::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 8px;
+  left: 3px;
+  width: 1px;
+  background: rgba(15, 23, 42, 0.1);
 }
 
 .runtime-activity-line {
@@ -2773,22 +2795,23 @@ textarea {
 }
 
 .message-text {
+  width: min(100%, 760px);
   color: var(--text);
-  font-size: 13px;
-  line-height: 1.58;
+  font-size: 14px;
+  line-height: 1.68;
 }
 
 .message-text h1 {
-  margin: 0 0 8px;
-  font-size: 20px;
+  margin: 0 0 7px;
+  font-size: 18px;
   line-height: 1.35;
   font-weight: 760;
   letter-spacing: 0;
 }
 
 .message-text h2 {
-  margin: 0 0 7px;
-  font-size: 17px;
+  margin: 0 0 6px;
+  font-size: 16px;
   line-height: 1.38;
   font-weight: 740;
   letter-spacing: 0;
@@ -2796,7 +2819,7 @@ textarea {
 
 .message-text h3 {
   margin: 0 0 6px;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.42;
   font-weight: 720;
   letter-spacing: 0;
@@ -2804,7 +2827,7 @@ textarea {
 
 .message-text h4 {
   margin: 0 0 6px;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.45;
   font-weight: 700;
   letter-spacing: 0;
@@ -2848,12 +2871,12 @@ textarea {
 }
 
 .message-text.user {
-  background: #f8f3ea;
-  border: 1px solid rgba(227, 216, 201, 0.72);
-  border-radius: 18px;
-  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.045);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  padding: 8px 12px;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.55;
 }
 
 .message-inline-skill-chip {
@@ -3264,7 +3287,7 @@ textarea {
 }
 
 .message-text p {
-  margin: 0 0 6px;
+  margin: 0 0 7px;
 }
 
 .message-text p:last-child,
@@ -3277,10 +3300,10 @@ textarea {
 .activity-markdown pre,
 .preview-code {
   overflow: auto;
-  border-radius: 18px;
-  background: #fbf7f1;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.045);
   border: 1px solid var(--line);
-  padding: 14px 16px;
+  padding: 12px 14px;
   font-size: 12px;
   line-height: 1.7;
   font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
@@ -3297,8 +3320,8 @@ textarea {
 .message-text code,
 .preview-markdown code,
 .activity-markdown code {
-  background: #f5efe7;
-  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 5px;
   padding: 1px 4px;
   font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
 }
@@ -8689,7 +8712,7 @@ textarea:focus,
 .activity-summary {
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 6px 8px;
 }
 
 .activity-summary-main {
@@ -8705,14 +8728,15 @@ textarea:focus,
 }
 
 .tool-message-card {
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.04);
-  border-color: transparent;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.032);
+  border-color: rgba(15, 23, 42, 0.055);
   box-shadow: none;
 }
 
 .tool-message-card[open] {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(15, 23, 42, 0.08);
 }
 
 .activity-tool-icon {
@@ -8730,12 +8754,19 @@ textarea:focus,
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.35;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.activity-summary-title em {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .activity-status-pill {
-  gap: 5px;
+  gap: 3px;
   min-height: 0;
-  padding: 3px 7px;
+  padding: 2px 6px;
   background: rgba(15, 23, 42, 0.05);
   border: 0;
   color: #667085;
@@ -8746,6 +8777,10 @@ textarea:focus,
 
 .activity-status-pill svg {
   flex: 0 0 auto;
+}
+
+.activity-status-text {
+  line-height: 1;
 }
 
 .activity-status-pill.default {
@@ -8788,9 +8823,9 @@ textarea:focus,
 }
 
 .activity-detail {
-  gap: 6px;
-  padding: 2px 12px 10px;
-  border-top: 0;
+  gap: 8px;
+  padding: 0 10px 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.055);
   background: transparent;
 }
 
@@ -8817,7 +8852,7 @@ textarea:focus,
   padding: 8px 10px;
   border-radius: 10px;
   border: 0;
-  background: rgba(15, 23, 42, 0.07);
+  background: rgba(15, 23, 42, 0.05);
   overflow: auto;
 }
 
@@ -8826,7 +8861,7 @@ textarea:focus,
   padding: 8px 10px;
   border-radius: 10px;
   border: 0;
-  background: rgba(15, 23, 42, 0.07);
+  background: rgba(15, 23, 42, 0.05);
   color: var(--muted-strong);
   font-size: 12px;
   line-height: 1.55;
@@ -8836,7 +8871,7 @@ textarea:focus,
   padding: 8px 10px;
   border-radius: 10px;
   border: 0;
-  background: rgba(15, 23, 42, 0.07);
+  background: rgba(15, 23, 42, 0.05);
   color: var(--muted-strong);
   font-size: 12px;
   line-height: 1.6;
@@ -8851,9 +8886,9 @@ textarea:focus,
   position: relative;
   max-height: 260px;
   overflow: auto;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: #ececec;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.055);
   color: #1f2328;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.03);
@@ -9019,6 +9054,23 @@ textarea:focus,
 .message-text tr:last-child td,
 .preview-markdown tr:last-child td {
   border-bottom: 0;
+}
+
+.message-text table {
+  width: fit-content;
+  min-width: min(100%, 520px);
+  max-width: 100%;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.message-text th,
+.message-text td {
+  padding: 7px 10px;
+}
+
+.message-text th {
+  background: rgba(15, 23, 42, 0.045);
 }
 
 .composer-inline-skill-token {
@@ -10159,6 +10211,20 @@ textarea:focus,
   background:
     radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.12), transparent 34%),
     linear-gradient(180deg, rgba(33, 41, 52, 0.98), rgba(24, 31, 40, 0.96));
+}
+
+:root[data-theme="graphite"] .runtime-trace-group > .message-runtime-stack::before,
+:root[data-theme="dusk"] .runtime-trace-group > .message-runtime-stack::before,
+:root[data-theme="midnight"] .runtime-trace-group > .message-runtime-stack::before,
+:root[data-theme="ember"] .runtime-trace-group > .message-runtime-stack::before {
+  background: var(--dark-border-1);
+}
+
+:root[data-theme="graphite"] .message-text table,
+:root[data-theme="dusk"] .message-text table,
+:root[data-theme="midnight"] .message-text table,
+:root[data-theme="ember"] .message-text table {
+  background: rgba(255, 255, 255, 0.04);
 }
 
 :root[data-theme="graphite"] .chat-attachment-card-tag,

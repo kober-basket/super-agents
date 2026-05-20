@@ -15,9 +15,9 @@ function readStyles() {
 test("chat composer uses a compact default height on home and thread pages", () => {
   const css = readStyles();
 
-  assert.match(css, /\.chat-composer-card\s*{[^}]*gap:\s*8px/s);
-  assert.match(css, /\.chat-composer-card\s*{[^}]*padding:\s*10px 14px/s);
-  assert.match(css, /\.composer-rich-input\s*{[^}]*min-height:\s*44px/s);
-  assert.match(css, /\.composer-rich-input\s*{[^}]*max-height:\s*96px/s);
-  assert.match(css, /\.chat-voice-button,\s*\.chat-send-button\s*{[^}]*width:\s*36px[^}]*height:\s*36px/s);
+  assert.match(css, /\.chat-composer-card\s*{[^}]*gap:\s*6px/s);
+  assert.match(css, /\.chat-composer-card\s*{[^}]*padding:\s*8px 12px/s);
+  assert.match(css, /\.composer-rich-input\s*{[^}]*min-height:\s*38px/s);
+  assert.match(css, /\.composer-rich-input\s*{[^}]*max-height:\s*120px/s);
+  assert.match(css, /\.chat-voice-button,\s*\.chat-send-button\s*{[^}]*width:\s*34px[^}]*height:\s*34px/s);
 });
