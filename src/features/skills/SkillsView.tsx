@@ -2,9 +2,9 @@ import clsx from "clsx";
 import { Boxes, FolderOpen, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { markdownToHtml } from "../../lib/format";
 import { workspaceClient } from "../../services/workspace-client";
 import type { SkillConfig } from "../../types";
+import { RichMarkdown } from "../shared/RichMarkdown";
 
 export type InstalledSkillView = SkillConfig & { location: string };
 
@@ -47,7 +47,7 @@ export function SkillsView({
   onUpdateInstalledSkill,
 }: SkillsViewProps) {
   const [activeSkill, setActiveSkill] = useState<SkillModalState | null>(null);
-  const [modalHtml, setModalHtml] = useState("");
+  const [modalMarkdown, setModalMarkdown] = useState("");
   const [modalLoading, setModalLoading] = useState(false);
   const activeSkillFolder = activeSkill ? resolveSkillFolderPath(activeSkill) : "";
   const builtinSkills = filteredInstalledSkills.filter((skill) => skill.system);
@@ -64,9 +64,9 @@ export function SkillsView({
       setModalLoading(true);
       try {
         const markdown = await resolveSkillMarkdown(currentSkill);
-        if (!cancelled) setModalHtml(markdownToHtml(markdown));
+        if (!cancelled) setModalMarkdown(markdown);
       } catch {
-        if (!cancelled) setModalHtml(markdownToHtml(fallbackMarkdown(currentSkill)));
+        if (!cancelled) setModalMarkdown(fallbackMarkdown(currentSkill));
       } finally {
         if (!cancelled) setModalLoading(false);
       }
@@ -216,7 +216,7 @@ export function SkillsView({
                   <span>正在读取技能内容...</span>
                 </div>
               ) : (
-                <div className="skill-detail-markdown preview-markdown" dangerouslySetInnerHTML={{ __html: modalHtml }} />
+                <RichMarkdown className="skill-detail-markdown preview-markdown" content={modalMarkdown} />
               )}
             </div>
 

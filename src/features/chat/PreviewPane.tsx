@@ -2,8 +2,9 @@ import { Suspense, lazy } from "react";
 import clsx from "clsx";
 import { ArrowUpRight, PanelRightClose, X } from "lucide-react";
 
-import { highlightCode, inferLanguage, markdownToHtml } from "../../lib/format";
+import { highlightCode, inferLanguage } from "../../lib/format";
 import type { FilePreviewPayload } from "../../types";
+import { RichMarkdown } from "../shared/RichMarkdown";
 import { describePreviewItem, getFileExtension, isOfficeDocument } from "../shared/utils";
 
 const PdfPreview = lazy(async () => {
@@ -145,9 +146,10 @@ export function PreviewPane({
 
     if (preview.kind === "markdown") {
       return (
-        <article
+        <RichMarkdown
+          as="article"
           className="preview-surface preview-rich-surface preview-markdown"
-          dangerouslySetInnerHTML={{ __html: markdownToHtml(preview.content) }}
+          content={preview.content}
           onClick={(event) => {
             const target = event.target;
             if (!(target instanceof HTMLElement)) return;

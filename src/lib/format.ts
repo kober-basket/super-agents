@@ -1,16 +1,72 @@
 import hljs from "highlight.js";
-import { marked } from "marked";
+import MarkdownIt from "markdown-it";
+import footnote from "markdown-it-footnote";
+import taskLists from "markdown-it-task-lists";
 
-marked.setOptions({
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function normalizeFenceLanguage(info: string) {
+  return info.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+}
+
+function renderHighlightedFence(content: string, language: string) {
+  const normalizedLanguage = language.toLowerCase();
+  const valid = normalizedLanguage && hljs.getLanguage(normalizedLanguage) ? normalizedLanguage : "";
+  const highlighted = valid
+    ? hljs.highlight(content, { language: valid, ignoreIllegals: true }).value
+    : escapeHtml(content);
+  const languageClass = valid ? ` language-${escapeHtml(valid)}` : "";
+
+  return `<pre><code class="hljs${languageClass}">${highlighted}</code></pre>`;
+}
+
+const markdown = new MarkdownIt({
   breaks: true,
-  gfm: true,
-});
+  html: true,
+  linkify: true,
+  typographer: true,
+  highlight: (content, language) => renderHighlightedFence(content, language),
+})
+  .use(footnote)
+  .use(taskLists, { enabled: false, label: true, labelAfter: true });
 
-const renderer = new marked.Renderer();
-renderer.link = ({ href, title, text }) => {
-  const safeHref = href || "";
-  const titleAttr = title ? ` title="${title}"` : "";
-  return `<a href="${safeHref}"${titleAttr} data-preview-link="true">${text}</a>`;
+const defaultFenceRenderer = markdown.renderer.rules.fence;
+
+markdown.renderer.rules.fence = (tokens, index, options, env, self) => {
+  const token = tokens[index];
+  const language = normalizeFenceLanguage(token.info);
+
+  if (language === "mermaid") {
+    const code = token.content.trim();
+    const escapedCode = escapeHtml(code);
+    return `<div class="markdown-mermaid" data-mermaid-code="${escapedCode}"></div>\n`;
+  }
+
+  if (defaultFenceRenderer) {
+    return defaultFenceRenderer(tokens, index, options, env, self);
+  }
+
+  return self.renderToken(tokens, index, options);
+};
+
+const defaultLinkOpenRenderer = markdown.renderer.rules.link_open;
+
+markdown.renderer.rules.link_open = (tokens, index, options, env, self) => {
+  const token = tokens[index];
+  const href = token.attrGet("href")?.trim() ?? "";
+  if (href && !href.startsWith("#")) {
+    token.attrSet("data-preview-link", "true");
+  }
+
+  return defaultLinkOpenRenderer
+    ? defaultLinkOpenRenderer(tokens, index, options, env, self)
+    : self.renderToken(tokens, index, options);
 };
 
 export function formatRelativeTime(value: number) {
@@ -69,7 +125,7 @@ export function inferLanguage(path?: string | null, mimeType?: string) {
 }
 
 export function markdownToHtml(content: string) {
-  return marked.parse(content, { renderer }) as string;
+  return markdown.render(content);
 }
 
 export function highlightCode(content: string, language: string) {

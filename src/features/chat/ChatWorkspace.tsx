@@ -28,7 +28,7 @@ import {
 } from "react";
 
 import { parseChatMessageContent } from "../../lib/chat-visuals";
-import { formatBytes, markdownToHtml } from "../../lib/format";
+import { formatBytes } from "../../lib/format";
 import { shouldRenderRuntimeToolCard } from "../../lib/runtime-tool-visibility";
 import {
   buildRuntimeToolDiffs,
@@ -51,6 +51,7 @@ import {
   shouldAutoScrollMessageList,
 } from "../../lib/chat-scroll";
 import { copyTextToClipboard } from "./clipboard";
+import { RichMarkdown } from "../shared/RichMarkdown";
 import type {
   ChatConversation,
   ChatConversationExportFormat,
@@ -969,10 +970,10 @@ export function ChatWorkspace({
     }
 
     return (
-      <div
+      <RichMarkdown
         key={key}
         className="runtime-status-line"
-        dangerouslySetInnerHTML={{ __html: markdownToHtml(trimmed) }}
+        content={trimmed}
         onClick={handleMessageClick}
       />
     );
@@ -1087,9 +1088,9 @@ export function ChatWorkspace({
                 return (
                   <div key={`${toolCall.toolCallId}-text-${index}`} className="activity-panel activity-panel-summary">
                     <span className="activity-panel-label">输出</span>
-                    <div
+                    <RichMarkdown
                       className="activity-markdown"
-                      dangerouslySetInnerHTML={{ __html: markdownToHtml(content.text) }}
+                      content={content.text}
                       onClick={handleMessageClick}
                     />
                   </div>
@@ -1369,9 +1370,9 @@ export function ChatWorkspace({
           {message.attachments?.length ? renderAttachmentList(message.attachments) : null}
           {parsedMessage.text ? (
             message.role === "assistant" ? (
-              <div
+              <RichMarkdown
                 className="message-text"
-                dangerouslySetInnerHTML={{ __html: markdownToHtml(parsedMessage.text) }}
+                content={parsedMessage.text}
                 onClick={handleMessageClick}
               />
             ) : (

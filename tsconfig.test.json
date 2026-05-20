@@ -15,6 +15,7 @@
     "electron/streaming-message-persister.ts",
     "electron/workspace-service.ts",
     "src/desktop-agent.d.ts",
+    "src/markdown-it-task-lists.d.ts",
     "src/features/navigation/AppTitleBar.tsx",
     "src/features/navigation/PrimarySidebar.tsx",
     "src/lib/format.ts",

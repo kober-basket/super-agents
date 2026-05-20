@@ -3143,6 +3143,14 @@ textarea {
   font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
 }
 
+.message-text pre code,
+.preview-markdown pre code,
+.activity-markdown pre code {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+}
+
 .message-text code,
 .preview-markdown code,
 .activity-markdown code {
@@ -3165,6 +3173,95 @@ textarea {
 .activity-markdown a:hover {
   color: #163fa6;
   border-bottom-color: rgba(22, 63, 166, 0.4);
+}
+
+.message-text .markdown-mermaid,
+.preview-markdown .markdown-mermaid,
+.activity-markdown .markdown-mermaid {
+  width: 100%;
+  min-height: 180px;
+  overflow: auto;
+  margin: 12px 0;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.activity-markdown .markdown-mermaid {
+  min-height: 140px;
+  padding: 12px;
+  border-radius: 12px;
+}
+
+.message-text .markdown-mermaid svg,
+.preview-markdown .markdown-mermaid svg,
+.activity-markdown .markdown-mermaid svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.message-text .markdown-mermaid-rendering,
+.preview-markdown .markdown-mermaid-rendering,
+.activity-markdown .markdown-mermaid-rendering {
+  display: grid;
+  place-items: center;
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.message-text .markdown-mermaid-rendering::before,
+.preview-markdown .markdown-mermaid-rendering::before,
+.activity-markdown .markdown-mermaid-rendering::before {
+  content: "正在渲染 Mermaid...";
+}
+
+.message-text .markdown-mermaid-error,
+.preview-markdown .markdown-mermaid-error,
+.activity-markdown .markdown-mermaid-error {
+  min-height: 0;
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #9a3412;
+}
+
+.message-text .markdown-mermaid-error strong,
+.preview-markdown .markdown-mermaid-error strong,
+.activity-markdown .markdown-mermaid-error strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.message-text .markdown-mermaid-error pre,
+.preview-markdown .markdown-mermaid-error pre,
+.activity-markdown .markdown-mermaid-error pre {
+  margin: 0;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.message-text .task-list-item,
+.preview-markdown .task-list-item,
+.activity-markdown .task-list-item {
+  list-style: none;
+}
+
+.message-text .task-list-item input,
+.preview-markdown .task-list-item input,
+.activity-markdown .task-list-item input {
+  margin: 0 8px 0 -18px;
+  accent-color: var(--accent);
+}
+
+.message-text .footnotes,
+.preview-markdown .footnotes,
+.activity-markdown .footnotes {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--muted-strong);
+  font-size: 12px;
 }
 
 .file-stack {
@@ -8352,6 +8449,14 @@ textarea:focus,
 .preview-markdown code,
 .activity-markdown code {
   background: rgba(var(--accent-rgb), 0.08);
+}
+
+.message-text pre code,
+.preview-markdown pre code,
+.activity-markdown pre code {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
 }
 
 .send-button {
