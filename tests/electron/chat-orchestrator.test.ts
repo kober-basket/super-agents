@@ -271,6 +271,66 @@ test("chat orchestrator preserves thought, tool, and status order in runtime tim
   }
 });
 
+test("chat orchestrator marks errored tool results as failed runtime tool calls", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
+  const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
+  await conversationService.initialize();
+
+  try {
+    const workspaceService = {
+      async getConfigSnapshot() {
+        return createConfig(tempDir);
+      },
+      async getEnabledSkillPromptContext() {
+        return "";
+      },
+      async searchKnowledgeBases() {
+        return { query: "", total: 0, results: [], searchedBases: [], warnings: [] };
+      },
+    } as unknown as WorkspaceService;
+
+    const events: ChatEvent[] = [];
+    const orchestrator = new ChatOrchestrator(conversationService, workspaceService, (event) => {
+      events.push(event);
+    });
+
+    (orchestrator as unknown as {
+      nativeCore: {
+        sendTurn(): AsyncIterable<AgentEvent>;
+      };
+    }).nativeCore = {
+      async *sendTurn() {
+        const bashCall = { id: "tool-bash", name: "bash", input: { command: "exit 1" } };
+        yield { type: "tool_call_started", sessionId: "s", agentId: "a", toolCall: bashCall };
+        yield {
+          type: "tool_call_finished",
+          sessionId: "s",
+          agentId: "a",
+          toolCall: bashCall,
+          result: { content: "command failed", metadata: { exitCode: 1 } },
+        };
+        yield { type: "turn_finished", sessionId: "s", agentId: "a", stopReason: "end_turn" };
+      },
+    };
+
+    const execution = await orchestrator.startTurnWithCompletion({ content: "run failing command" });
+    await execution.completion;
+
+    const updated = events.find(
+      (event): event is Extract<ChatEvent, { type: "tool_call_updated" }> =>
+        event.type === "tool_call_updated" && event.toolCallId === "tool-bash",
+    );
+    assert.equal(updated?.patch.status, "failed");
+
+    const loaded = await conversationService.getConversation(execution.result.conversation.id);
+    const assistantMessage = loaded.messages.find((message) => message.role === "assistant");
+    assert.equal(assistantMessage?.runtimeTrace?.toolCalls[0]?.status, "failed");
+  } finally {
+    await conversationService.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("chat orchestrator seals streamed pre-tool assistant text into process timeline", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
   const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));

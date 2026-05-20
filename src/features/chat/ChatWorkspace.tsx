@@ -29,6 +29,11 @@ import {
 } from "react";
 
 import { parseChatMessageContent } from "../../lib/chat-visuals";
+import {
+  getComposerSkillTrigger,
+  insertComposerSkillMention,
+  splitComposerSkillMentions,
+} from "../../lib/composer-skills";
 import { formatBytes } from "../../lib/format";
 import { shouldRenderRuntimeToolCard } from "../../lib/runtime-tool-visibility";
 import {
@@ -52,6 +57,7 @@ import {
   shouldAutoScrollMessageList,
 } from "../../lib/chat-scroll";
 import { copyTextToClipboard } from "./clipboard";
+import { ComposerRichInput, type ComposerRichInputHandle } from "./ComposerRichInput";
 import { RichMarkdown } from "../shared/RichMarkdown";
 import type {
   ChatConversation,
@@ -262,21 +268,6 @@ function splitDiffLines(value: string) {
   return value.split("\n");
 }
 
-function getComposerSkillTrigger(value: string) {
-  const match = value.match(/^(\s*)\$([^\s]*)$/);
-  if (!match) {
-    return null;
-  }
-
-  const prefix = match[1] ?? "";
-  const query = match[2] ?? "";
-  return {
-    query,
-    start: prefix.length,
-    end: value.length,
-  };
-}
-
 function renderPrefixedDiffLines(text: string, prefix: "+" | "-", className: string) {
   return splitDiffLines(text).map((line, index) => (
     <span key={`${className}-${index}`} className={`activity-diff-line ${className}`}>
@@ -374,7 +365,7 @@ export function ChatWorkspace({
   exportingConversationFormat,
   onToast,
 }: ChatWorkspaceProps) {
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerInputRef = useRef<ComposerRichInputHandle | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const knowledgePickerRef = useRef<HTMLDivElement | null>(null);
   const modelPickerRef = useRef<HTMLDivElement | null>(null);
@@ -417,13 +408,6 @@ export function ChatWorkspace({
       .slice(0, 6);
   }, [busy, composerSkillTrigger, skills]);
   const skillSuggestionsOpen = skillSuggestions.length > 0;
-
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    textarea.style.height = "0px";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`;
-  }, [draftMessage]);
 
   useEffect(() => {
     setActiveSkillSuggestionIndex(0);
@@ -610,7 +594,7 @@ export function ChatWorkspace({
     }
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (busy) {
       return;
     }
@@ -673,13 +657,8 @@ export function ChatWorkspace({
 
     onDraftMessageChange(nextDraft);
     window.requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) {
-        return;
-      }
-
-      textarea.focus();
-      textarea.setSelectionRange(nextDraft.length, nextDraft.length);
+      composerInputRef.current?.focus();
+      composerInputRef.current?.moveCursorToEnd();
     });
   }
 
@@ -691,13 +670,8 @@ export function ChatWorkspace({
 
     onDraftMessageChange(nextDraft);
     window.requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) {
-        return;
-      }
-
-      textarea.focus();
-      textarea.setSelectionRange(nextDraft.length, nextDraft.length);
+      composerInputRef.current?.focus();
+      composerInputRef.current?.moveCursorToEnd();
     });
   }
 
@@ -706,17 +680,11 @@ export function ChatWorkspace({
       return;
     }
 
-    const before = draftMessage.slice(0, composerSkillTrigger.start);
-    const nextDraft = `${before}$${skill.name} `;
+    const nextDraft = insertComposerSkillMention(draftMessage, composerSkillTrigger, skill);
     onDraftMessageChange(nextDraft);
     window.requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) {
-        return;
-      }
-
-      textarea.focus();
-      textarea.setSelectionRange(nextDraft.length, nextDraft.length);
+      composerInputRef.current?.focus();
+      composerInputRef.current?.moveCursorToEnd();
     });
   }
 
@@ -743,6 +711,30 @@ export function ChatWorkspace({
             <span className="chat-skill-suggestion-desc">{skill.description || "工作区技能"}</span>
           </button>
         ))}
+      </div>
+    );
+  }
+
+  function renderUserMessageContent(content: string) {
+    const segments = splitComposerSkillMentions(content);
+    const hasMention = segments.some((segment) => segment.type === "mention");
+
+    if (!hasMention) {
+      return <div className="message-text user">{content}</div>;
+    }
+
+    return (
+      <div className="message-text user message-text-with-skill-mentions">
+        {segments.map((segment, index) =>
+          segment.type === "mention" ? (
+            <span key={`${segment.raw}-${index}`} className="message-inline-skill-chip">
+              <BookOpen size={13} />
+              <strong>${segment.name}</strong>
+            </span>
+          ) : (
+            <span key={`text-${index}`}>{segment.text}</span>
+          ),
+        )}
       </div>
     );
   }
@@ -1488,7 +1480,7 @@ export function ChatWorkspace({
                 onClick={handleMessageClick}
               />
             ) : (
-              <div className="message-text user">{parsedMessage.text}</div>
+              renderUserMessageContent(parsedMessage.text)
             )
           ) : null}
           {parsedMessage.visuals.length > 0 ? (
@@ -1577,67 +1569,70 @@ export function ChatWorkspace({
             : "当前环境暂不支持语音输入";
 
     return (
-      <div className="chat-composer-card">
-        {renderAttachmentList(attachments, true)}
-        {renderActiveKnowledgeChips()}
+      <div className="chat-composer-frame">
         {renderSkillSuggestions()}
-        <textarea
-          ref={textareaRef}
-          disabled={busy}
-          onChange={(event) => onDraftMessageChange(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={composerPlaceholder}
-          rows={1}
-          value={draftMessage}
-        />
-        <div className="chat-composer-actions">
-          <div className="chat-composer-left">
-            <button className="chat-composer-icon" onClick={onPickFiles} title="添加附件" type="button">
-              <Paperclip size={16} />
-            </button>
-            {renderKnowledgePicker()}
+        <div className="chat-composer-card">
+          {renderAttachmentList(attachments, true)}
+          {renderActiveKnowledgeChips()}
+          <div className="chat-composer-input-area">
+            <ComposerRichInput
+              ref={composerInputRef}
+              disabled={busy}
+              onChange={onDraftMessageChange}
+              onKeyDown={handleKeyDown}
+              placeholder={composerPlaceholder}
+              value={draftMessage}
+            />
           </div>
+          <div className="chat-composer-actions">
+            <div className="chat-composer-left">
+              <button className="chat-composer-icon" onClick={onPickFiles} title="添加附件" type="button">
+                <Paperclip size={16} />
+              </button>
+              {renderKnowledgePicker()}
+            </div>
 
-          <div className="chat-composer-right">
-            {renderModelPicker()}
+            <div className="chat-composer-right">
+              {renderModelPicker()}
 
-            <button
-              aria-label={voiceButtonTitle}
-              aria-pressed={voiceInputActive}
-              className={`chat-voice-button ${voiceInputActive ? "active" : ""} ${!voiceInputSupported ? "unsupported" : ""}`}
-              onClick={onVoiceInput}
-              title={voiceButtonTitle}
-              type="button"
-            >
-              {voiceInputState === "transcribing" ? (
-                <LoaderCircle size={16} className="spin" />
+              <button
+                aria-label={voiceButtonTitle}
+                aria-pressed={voiceInputActive}
+                className={`chat-voice-button ${voiceInputActive ? "active" : ""} ${!voiceInputSupported ? "unsupported" : ""}`}
+                onClick={onVoiceInput}
+                title={voiceButtonTitle}
+                type="button"
+              >
+                {voiceInputState === "transcribing" ? (
+                  <LoaderCircle size={16} className="spin" />
+                ) : (
+                  <Mic size={16} />
+                )}
+              </button>
+
+              {canCancel ? (
+                <button
+                  aria-label={cancelInFlight ? "正在停止当前回复" : "停止当前回复"}
+                  className="chat-send-button stop"
+                  disabled={cancelInFlight}
+                  onClick={onCancelMessage}
+                  title={cancelInFlight ? "正在停止..." : "停止回复"}
+                  type="button"
+                >
+                  {cancelInFlight ? <LoaderCircle size={16} className="spin" /> : <Square size={15} />}
+                </button>
               ) : (
-                <Mic size={16} />
+                <button
+                  className="chat-send-button"
+                  disabled={!canSend}
+                  onClick={onSendMessage}
+                  title="发送消息"
+                  type="button"
+                >
+                  <ArrowUp size={16} />
+                </button>
               )}
-            </button>
-
-            {canCancel ? (
-              <button
-                aria-label={cancelInFlight ? "正在停止当前回复" : "停止当前回复"}
-                className="chat-send-button stop"
-                disabled={cancelInFlight}
-                onClick={onCancelMessage}
-                title={cancelInFlight ? "正在停止..." : "停止回复"}
-                type="button"
-              >
-                {cancelInFlight ? <LoaderCircle size={16} className="spin" /> : <Square size={15} />}
-              </button>
-            ) : (
-              <button
-                className="chat-send-button"
-                disabled={!canSend}
-                onClick={onSendMessage}
-                title="发送消息"
-                type="button"
-              >
-                <ArrowUp size={16} />
-              </button>
-            )}
+            </div>
           </div>
         </div>
       </div>

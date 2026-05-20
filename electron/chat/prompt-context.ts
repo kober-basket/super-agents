@@ -3,7 +3,7 @@ import path from "node:path";
 
 import type { AppConfig, ChatSendInput } from "../../src/types";
 import type { WorkspaceService } from "../workspace-service";
-import { buildLoadedSkillContent, findEnabledSkill, parseSkillInvocation } from "./skill-invocation";
+import { buildLoadedSkillContent, findEnabledSkill, parseSkillInvocations } from "./skill-invocation";
 
 export interface PreparedPrompt {
   content: string;
@@ -189,15 +189,21 @@ export async function prepareChatPrompt(input: {
   const config = await input.workspaceService.getConfigSnapshot();
   const cwd = path.resolve(config.workspaceRoot.trim() || process.cwd());
   const additionalDirectories = collectAdditionalDirectories(cwd, input.chatInput);
-  const skillInvocation = parseSkillInvocation(input.chatInput.content);
-  const invokedSkill = skillInvocation ? findEnabledSkill(config, skillInvocation.name) : null;
-  if (skillInvocation && !invokedSkill) {
-    throw new Error(`Skill "${skillInvocation.name}" is not enabled or does not exist.`);
+  const skillInvocations = parseSkillInvocations(input.chatInput.content);
+  const invokedSkills = skillInvocations
+    ? skillInvocations.invocations.map((invocation) => ({
+        invocation,
+        skill: findEnabledSkill(config, invocation.name),
+      }))
+    : [];
+  const missingSkill = invokedSkills.find((entry) => !entry.skill);
+  if (missingSkill) {
+    throw new Error(`Skill "${missingSkill.invocation.name}" is not enabled or does not exist.`);
   }
-  const effectiveChatInput = invokedSkill
+  const effectiveChatInput = skillInvocations
     ? {
         ...input.chatInput,
-        content: skillInvocation?.args ?? "",
+        content: skillInvocations.args,
       }
     : input.chatInput;
   const [skillContext, knowledgeContext] = await Promise.all([
@@ -210,9 +216,14 @@ export async function prepareChatPrompt(input: {
     ),
   ]);
   const attachmentContext = buildAttachmentContext(effectiveChatInput);
-  const invokedSkillContext = invokedSkill
-    ? buildLoadedSkillContent(invokedSkill, skillInvocation?.args ?? "", { explicit: true })
-    : "";
+  const invokedSkillContext = invokedSkills
+    .map((entry) =>
+      entry.skill
+        ? buildLoadedSkillContent(entry.skill, skillInvocations?.args ?? "", { explicit: true })
+        : "",
+    )
+    .filter(Boolean)
+    .join("\n\n");
   const workspacePrompt = [
     `Workspace root: ${cwd}`,
     buildLocalDirectoryContext(),

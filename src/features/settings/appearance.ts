@@ -92,10 +92,10 @@ export const APPEARANCE_THEME_OPTIONS: AppearanceThemeOption[] = [
   },
   {
     id: "harbor",
-    label: "港湾灰蓝",
-    description: "介于浅色与深色之间的冷静灰蓝，层次更沉稳。",
-    accentLabel: "钢蓝点缀",
-    swatches: ["#d7e0ea", "#bcc9d6", "#4f6984"],
+    label: "柔雾灰蓝",
+    description: "低饱和雾面灰蓝，保留冷静感，但区域过渡更轻。",
+    accentLabel: "雾蓝点缀",
+    swatches: ["#edf3f7", "#e6eef4", "#687f96"],
   },
   {
     id: "olive",

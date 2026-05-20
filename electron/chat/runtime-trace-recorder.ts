@@ -52,6 +52,19 @@ export function appendRuntimeToolTimelineItem(trace: ChatMessageRuntimeTrace, to
   );
 }
 
+function toolResultIndicatesFailure(result: ToolResult) {
+  const metadata = result.metadata ?? {};
+  const exitCode = metadata.exitCode;
+  const signal = metadata.signal;
+
+  return (
+    metadata.isError === true ||
+    metadata.timedOut === true ||
+    (typeof exitCode === "number" && exitCode !== 0) ||
+    (typeof signal === "string" && signal.trim().length > 0)
+  );
+}
+
 export function upsertRuntimeToolCallStarted(
   trace: ChatMessageRuntimeTrace,
   toolCall: ToolCall,
@@ -79,7 +92,7 @@ export function markRuntimeToolCallFinished(
   rawOutputJson?: string,
 ) {
   const patch: Partial<Omit<ChatToolCall, "toolCallId">> = {
-    status: "completed",
+    status: toolResultIndicatesFailure(result) ? "failed" : "completed",
     content: [{ type: "text", text: result.content }],
     rawOutputJson,
   };

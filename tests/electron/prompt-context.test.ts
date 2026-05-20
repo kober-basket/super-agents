@@ -109,6 +109,41 @@ test("markdown dollar skill mentions are treated as explicit skill invocations",
   assert.match(prepared.workspacePrompt, /Checklist mode:\nDraft a launch checklist/);
 });
 
+test("multiple markdown skill mentions load every requested skill and strip inline mentions", async () => {
+  const prepared = await prepareChatPrompt({
+    chatInput: {
+      content: "[$spec-writer](skill://spec-writer) Draft with [$reviewer](skill://reviewer) please",
+    },
+    selectedKnowledgeBaseIds: [],
+    workspaceService: createWorkspaceService(
+      createConfig([
+        {
+          id: "spec-writer",
+          name: "spec-writer",
+          description: "Write concise specs",
+          kind: "command",
+          command: "Spec mode:\n$ARGUMENTS",
+          enabled: true,
+        },
+        {
+          id: "reviewer",
+          name: "reviewer",
+          description: "Review drafts",
+          kind: "command",
+          command: "Review mode:\n$ARGUMENTS",
+          enabled: true,
+        },
+      ]),
+    ),
+  });
+
+  assert.equal(prepared.content, "Draft with please");
+  assert.match(prepared.workspacePrompt, /# Skill: spec-writer/);
+  assert.match(prepared.workspacePrompt, /# Skill: reviewer/);
+  assert.match(prepared.workspacePrompt, /Spec mode:\nDraft with please/);
+  assert.match(prepared.workspacePrompt, /Review mode:\nDraft with please/);
+});
+
 test("market research prompts do not get a hard-coded core evidence gate", async () => {
   const prepared = await prepareChatPrompt({
     chatInput: { content: "深度分析下黄金走势" },

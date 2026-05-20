@@ -52,6 +52,7 @@ import {
   syncTimelineActivityItems,
   upsertTimelineToolItem,
 } from "./lib/runtime-timeline";
+import { stripComposerSkillMentions } from "./lib/composer-skills";
 
 const PreviewPane = lazy(async () => {
   const module = await import("./features/chat/PreviewPane");
@@ -1963,7 +1964,10 @@ export default function App() {
       createdAt: now + 1,
       updatedAt: now + 1,
     };
-    const optimisticPreview = buildOptimisticConversationPreview(content, pendingAttachments);
+    const optimisticPreview = buildOptimisticConversationPreview(
+      stripComposerSkillMentions(content),
+      pendingAttachments,
+    );
     const optimisticConversation: ChatConversation = activeConversation
       ? {
           ...activeConversation,
@@ -1976,7 +1980,7 @@ export default function App() {
         }
       : {
           id: nextConversationId,
-          title: content || pendingAttachments[0]?.name || "新对话",
+          title: optimisticPreview || pendingAttachments[0]?.name || "新对话",
           createdAt: now,
           updatedAt: now + 1,
           lastMessageAt: now + 1,
