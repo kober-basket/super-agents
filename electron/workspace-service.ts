@@ -361,12 +361,23 @@ function hasConfiguredAudioTranscriptionModel(provider: ModelProviderConfig) {
 
 function getAudioTranscriptionProviderCandidates(config: AppConfig, requestedProviderId: string) {
   const activeModel = getActiveModelOption(config.modelProviders, config.activeModelId);
+  const speechProviderIds = config.modelProviders
+    .filter((provider) => hasConfiguredAudioTranscriptionModel(provider))
+    .map((provider) => provider.id);
+  const requestedProvider = requestedProviderId
+    ? config.modelProviders.find((provider) => provider.id === requestedProviderId)
+    : null;
+  const activeProvider = activeModel
+    ? config.modelProviders.find((provider) => provider.id === activeModel.providerId)
+    : null;
   const candidateIds = [
-    requestedProviderId,
-    activeModel?.providerId ?? "",
-    ...config.modelProviders
-      .filter((provider) => hasConfiguredAudioTranscriptionModel(provider))
-      .map((provider) => provider.id),
+    requestedProvider && hasConfiguredAudioTranscriptionModel(requestedProvider)
+      ? requestedProvider.id
+      : "",
+    activeProvider && hasConfiguredAudioTranscriptionModel(activeProvider) ? activeProvider.id : "",
+    ...speechProviderIds,
+    requestedProvider?.id ?? "",
+    activeProvider?.id ?? "",
     ...config.modelProviders.map((provider) => provider.id),
   ]
     .map((providerId) => providerId.trim())
@@ -419,6 +430,12 @@ function shouldRetryWithAnotherTranscriptionProvider(status: number, message: st
   return /audio\/transcriptions|transcription|endpoint|route|not found|cannot\s+(post|get)/i.test(
     message,
   );
+}
+
+function formatAudioTranscriptionFetchError(provider: ModelProviderConfig, modelId: string, error: unknown) {
+  const rawMessage =
+    error instanceof Error && error.message.trim() ? error.message.trim() : "fetch failed";
+  return `${provider.name} (${provider.baseUrl}) 的语音转写接口连接失败：${rawMessage}；模型：${modelId}`;
 }
 
 function extractStringList(value: unknown): string[] {
@@ -1161,11 +1178,17 @@ export class WorkspaceService {
         formData.set("model", modelId);
         formData.set("language", input.language?.trim() || "zh");
 
-        const response = await fetch(url, {
-          method: "POST",
-          headers,
-          body: formData,
-        });
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            headers,
+            body: formData,
+          });
+        } catch (error) {
+          retryableErrorMessage = formatAudioTranscriptionFetchError(provider, modelId, error);
+          break;
+        }
         const rawText = await response.text();
         const parsed = rawText ? safeParseJson(rawText) : null;
         const fallbackMessage = rawText.trim() || `语音转写失败 (${response.status})`;

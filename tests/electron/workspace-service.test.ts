@@ -31,7 +31,7 @@ test("audio transcription candidates prefer configured speech models before fall
   ]);
 });
 
-test("audio transcription falls back to a speech-capable provider when the active provider does not support it", async () => {
+test("audio transcription uses a speech-capable provider when the active provider does not support it", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
   const statePath = path.join(tempDir, "data", "workspace.json");
   const service = new WorkspaceService(statePath);
@@ -98,8 +98,12 @@ test("audio transcription falls back to a speech-capable provider when the activ
     assert.equal(result.text, "你好");
     assert.equal(result.providerId, "openai");
     assert.equal(result.modelId, "gpt-4o-mini-transcribe");
-    assert.equal(calls.some((call) => call.url === "https://api.deepseek.com/v1/audio/transcriptions"), true);
-    assert.equal(calls.at(-1)?.url, "https://api.openai.com/v1/audio/transcriptions");
+    assert.deepEqual(calls, [
+      {
+        url: "https://api.openai.com/v1/audio/transcriptions",
+        model: "gpt-4o-mini-transcribe",
+      },
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
     await service.shutdown();
@@ -172,6 +176,139 @@ test("audio transcription retries fallback models when a distributor has no chan
     assert.equal(result.text, "你好");
     assert.equal(result.modelId, "gpt-4o-transcribe");
     assert.deepEqual(models, ["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("audio transcription prefers speech providers over the active chat provider", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const service = new WorkspaceService(statePath);
+  const originalFetch = globalThis.fetch;
+  const urls: string[] = [];
+
+  globalThis.fetch = (async (url) => {
+    urls.push(String(url));
+    if (String(url).startsWith("https://api.anthropic.com")) {
+      throw new TypeError("fetch failed");
+    }
+
+    return new Response(JSON.stringify({ text: "你好" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await service.updateConfig({
+      activeModelId: createRuntimeModelId("anthropic", "claude-4.6-sonnet"),
+      modelProviders: [
+        {
+          id: "anthropic",
+          name: "Anthropic",
+          kind: "openai-compatible",
+          baseUrl: "https://api.anthropic.com/v1",
+          apiKey: "sk-anthropic",
+          temperature: 0.2,
+          maxTokens: 4096,
+          enabled: true,
+          models: [{ id: "claude-4.6-sonnet", label: "Claude Sonnet 4.6", enabled: true }],
+        },
+        {
+          id: "openai",
+          name: "OpenAI",
+          kind: "openai-compatible",
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "sk-openai",
+          temperature: 0.2,
+          maxTokens: 4096,
+          enabled: true,
+          models: [{ id: "gpt-4o-mini-transcribe", label: "GPT-4o Mini Transcribe", enabled: true }],
+        },
+      ],
+    });
+
+    const result = await service.transcribeAudio({
+      providerId: "anthropic",
+      fileName: "voice-input.webm",
+      mimeType: "audio/webm",
+      audioBase64: Buffer.from("fake audio").toString("base64"),
+      language: "zh",
+    });
+
+    assert.equal(result.providerId, "openai");
+    assert.deepEqual(urls, ["https://api.openai.com/v1/audio/transcriptions"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("audio transcription tries the next speech provider after a connection failure", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const service = new WorkspaceService(statePath);
+  const originalFetch = globalThis.fetch;
+  const urls: string[] = [];
+
+  globalThis.fetch = (async (url) => {
+    urls.push(String(url));
+    if (String(url).startsWith("http://127.0.0.1:8787")) {
+      throw new TypeError("fetch failed");
+    }
+
+    return new Response(JSON.stringify({ text: "你好" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await service.updateConfig({
+      activeModelId: createRuntimeModelId("local-speech", "gpt-4o-mini-transcribe"),
+      modelProviders: [
+        {
+          id: "local-speech",
+          name: "Local Speech",
+          kind: "openai-compatible",
+          baseUrl: "http://127.0.0.1:8787/v1",
+          apiKey: "sk-local",
+          temperature: 0.2,
+          maxTokens: 4096,
+          enabled: true,
+          models: [{ id: "gpt-4o-mini-transcribe", label: "GPT-4o Mini Transcribe", enabled: true }],
+        },
+        {
+          id: "remote-speech",
+          name: "Remote Speech",
+          kind: "openai-compatible",
+          baseUrl: "https://api.example.com/v1",
+          apiKey: "sk-remote",
+          temperature: 0.2,
+          maxTokens: 4096,
+          enabled: true,
+          models: [{ id: "whisper-1", label: "Whisper", enabled: true }],
+        },
+      ],
+    });
+
+    const result = await service.transcribeAudio({
+      providerId: "local-speech",
+      fileName: "voice-input.webm",
+      mimeType: "audio/webm",
+      audioBase64: Buffer.from("fake audio").toString("base64"),
+      language: "zh",
+    });
+
+    assert.equal(result.providerId, "remote-speech");
+    assert.deepEqual(urls, [
+      "http://127.0.0.1:8787/v1/audio/transcriptions",
+      "https://api.example.com/v1/audio/transcriptions",
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
     await service.shutdown();

@@ -58,7 +58,7 @@ npm run preview
 - Prompt composition：`PromptComposer` 负责组合 runtime prompt、active agent instructions、skills、memory、workspace 和 additional instructions。
 - Tool system：`ToolDefinition` 定义工具 schema、risk 和 `execute`；内置工具由 `electron/agent-core/builtin-tools.ts` 聚合，独立工具族放在 `electron/agent-core/builtin-tools/`，MCP 工具通过 adapter 进入工作区工具目录。
 - Permission system：`PermissionManager` 根据 agent policy、工具风险、审批要求和 full filesystem access 做 allow/ask/deny。
-- Execution loop：`AgentCore.sendTurn()` 负责流式模型事件、工具调用、重复工具调用去重、工具结果截断、错误净化和最终回答合成；工具使用后的最终正文必须通过结构化 final answer 边界输出，普通 post-tool 文本只作为过程状态处理。
+- Execution loop：`AgentCore.sendTurn()` 负责流式模型事件、工具调用、重复工具调用去重、工具结果截断、错误净化和最终回答合成；同一步内工具调用前的可见文本作为过程状态，工具结果之后且不再调用工具的可见文本作为最终回答候选。
 - Agent session：`AgentSessionManager` 抽象会话存储；默认可用内存实现，桌面聊天通过 `PersistentAgentSessionManager` 写入 `ConversationService` 的 SQLite `agent_sessions` 表。
 - Skills：`SkillDefinition` 是可注入 prompt 的程序化知识；内置 skill 放在 `electron/builtin-skills/`，用户技能通过界面导入或创建。
 - Runtime trace：`electron/chat/runtime-trace-recorder.ts` 把 thought、status、tool calls、timeline 和 visual blocks 映射到前端展示；`TurnEventLog` 记录可持久化的底层 turn event journal。
@@ -84,7 +84,7 @@ npm run preview
 - Runtime prompt 只描述稳定约束；具体 persona 和任务规则放到 agent profile 或 skill。
 - 工具调用输入必须被 schema 校验；错误结果要可读、可截断、不能污染后续 prompt。
 - 工具结果过长时截断并写入 metadata，而不是让模型上下文失控。
-- 工具调用后的模型可见文本不能直接当最终回答；过程说明进入 runtime trace，最终用户正文由明确的 final answer 边界生成。
+- 工具调用前或工具间的模型可见文本进入 runtime trace；工具调用后如果模型没有继续调用工具，则该文本进入最终用户正文，避免完整总结同时出现在过程和最终回答中。
 - turn 事实事件进入 `runtimeTrace.events`，UI timeline/activity 是派生展示，不能反过来作为 agent runtime 的事实来源。
 - 同一个 conversation 的 `agentSessionId` 应能恢复对应 agent messages；改 session 行为时要覆盖持久化恢复测试。
 - 同一 turn 内重复的同签名工具调用应复用已有结果或给出明确提示。

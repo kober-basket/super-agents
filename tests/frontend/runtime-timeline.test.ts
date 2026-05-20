@@ -171,6 +171,17 @@ test("runtime status markdown stays compact inside the process timeline", () => 
   assert.match(css, /\.runtime-status-line\s+table\s*{[^}]*font-size:\s*12px/s);
 });
 
+test("runtime status markdown uses the same inline typography as assistant messages", () => {
+  const localCssPath = path.resolve(process.cwd(), "src/styles.css");
+  const cssPath = existsSync(localCssPath)
+    ? localCssPath
+    : path.resolve(process.cwd(), "..", "src/styles.css");
+  const css = readFileSync(cssPath, "utf8");
+
+  assert.match(css, /\.runtime-status-line\s+strong\s*{[^}]*font-weight:\s*650/s);
+  assert.match(css, /\.runtime-status-line\s+code\s*{[^}]*font-family:\s*"JetBrains Mono"/s);
+});
+
 test("streaming reasoning preview is capped to three scrollable lines", () => {
   const localCssPath = path.resolve(process.cwd(), "src/styles.css");
   const cssPath = existsSync(localCssPath)
