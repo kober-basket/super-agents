@@ -230,6 +230,7 @@ test("web_search returns query results with URLs and snippets", async () => {
     assert.match(result.content, /Gold outlook 2026/);
     assert.match(result.content, /https:\/\/example\.com\/gold/);
     assert.match(result.content, /Market analysis and recent price drivers/);
+    assert.match(result.content, /Search snippets are unverified/i);
     assert.doesNotMatch(result.content, /Sponsored gold/);
     assert.deepEqual(result.metadata?.query, "gold outlook 2026");
   } finally {

@@ -19,6 +19,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -63,6 +64,7 @@ import type {
   FileDropEntry,
   KnowledgeBaseSummary,
   RuntimeModelOption,
+  SkillConfig,
 } from "../../types";
 import { ChatVisualBlock } from "./ChatVisualBlock";
 import { shouldSubmitComposerKeyDown } from "./composer-keyboard";
@@ -83,6 +85,7 @@ interface ChatWorkspaceProps {
   runtimeState?: ChatConversationRuntimeState | null;
   selectableModels: RuntimeModelOption[];
   selectedKnowledgeBaseIds: string[];
+  skills: SkillConfig[];
   onDraftMessageChange: (value: string) => void;
   onExportConversation: (format: ChatConversationExportFormat) => void;
   onClearKnowledgeBases: () => void;
@@ -259,6 +262,21 @@ function splitDiffLines(value: string) {
   return value.split("\n");
 }
 
+function getComposerSkillTrigger(value: string) {
+  const match = value.match(/^(\s*)\$([^\s]*)$/);
+  if (!match) {
+    return null;
+  }
+
+  const prefix = match[1] ?? "";
+  const query = match[2] ?? "";
+  return {
+    query,
+    start: prefix.length,
+    end: value.length,
+  };
+}
+
 function renderPrefixedDiffLines(text: string, prefix: "+" | "-", className: string) {
   return splitDiffLines(text).map((line, index) => (
     <span key={`${className}-${index}`} className={`activity-diff-line ${className}`}>
@@ -336,6 +354,7 @@ export function ChatWorkspace({
   runtimeState,
   selectableModels,
   selectedKnowledgeBaseIds,
+  skills,
   onDraftMessageChange,
   onExportConversation,
   onClearKnowledgeBases,
@@ -375,6 +394,29 @@ export function ChatWorkspace({
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [activeSkillSuggestionIndex, setActiveSkillSuggestionIndex] = useState(0);
+  const composerSkillTrigger = getComposerSkillTrigger(draftMessage);
+  const skillSuggestions = useMemo(() => {
+    if (!composerSkillTrigger || busy) {
+      return [];
+    }
+
+    const query = composerSkillTrigger.query.toLowerCase();
+    return skills
+      .filter((skill) => skill.enabled)
+      .filter((skill) => {
+        if (!query) {
+          return true;
+        }
+        return (
+          skill.name.toLowerCase().includes(query) ||
+          skill.id.toLowerCase().includes(query) ||
+          skill.description.toLowerCase().includes(query)
+        );
+      })
+      .slice(0, 6);
+  }, [busy, composerSkillTrigger, skills]);
+  const skillSuggestionsOpen = skillSuggestions.length > 0;
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -382,6 +424,10 @@ export function ChatWorkspace({
     textarea.style.height = "0px";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`;
   }, [draftMessage]);
+
+  useEffect(() => {
+    setActiveSkillSuggestionIndex(0);
+  }, [composerSkillTrigger?.query, skillSuggestions.length]);
 
   useEffect(() => {
     if (!knowledgePickerOpen && !modelPickerOpen && !exportMenuOpen) return undefined;
@@ -569,6 +615,26 @@ export function ChatWorkspace({
       return;
     }
 
+    if (skillSuggestionsOpen) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setActiveSkillSuggestionIndex((index) => (index + 1) % skillSuggestions.length);
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setActiveSkillSuggestionIndex((index) => (index - 1 + skillSuggestions.length) % skillSuggestions.length);
+        return;
+      }
+
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        applySkillSuggestion(skillSuggestions[activeSkillSuggestionIndex] ?? skillSuggestions[0]);
+        return;
+      }
+    }
+
     if (shouldSubmitComposerKeyDown(event)) {
       event.preventDefault();
       onSendMessage();
@@ -633,6 +699,52 @@ export function ChatWorkspace({
       textarea.focus();
       textarea.setSelectionRange(nextDraft.length, nextDraft.length);
     });
+  }
+
+  function applySkillSuggestion(skill: SkillConfig | undefined) {
+    if (!skill || !composerSkillTrigger) {
+      return;
+    }
+
+    const before = draftMessage.slice(0, composerSkillTrigger.start);
+    const nextDraft = `${before}$${skill.name} `;
+    onDraftMessageChange(nextDraft);
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) {
+        return;
+      }
+
+      textarea.focus();
+      textarea.setSelectionRange(nextDraft.length, nextDraft.length);
+    });
+  }
+
+  function renderSkillSuggestions() {
+    if (!skillSuggestionsOpen) {
+      return null;
+    }
+
+    return (
+      <div className="chat-skill-suggestions" role="listbox" aria-label="可调用技能">
+        {skillSuggestions.map((skill, index) => (
+          <button
+            key={skill.id}
+            className={`chat-skill-suggestion ${index === activeSkillSuggestionIndex ? "active" : ""}`}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              applySkillSuggestion(skill);
+            }}
+            role="option"
+            aria-selected={index === activeSkillSuggestionIndex}
+            type="button"
+          >
+            <span className="chat-skill-suggestion-name">${skill.name}</span>
+            <span className="chat-skill-suggestion-desc">{skill.description || "工作区技能"}</span>
+          </button>
+        ))}
+      </div>
+    );
   }
 
   async function copyMessage(message: ChatMessage) {
@@ -1468,6 +1580,7 @@ export function ChatWorkspace({
       <div className="chat-composer-card">
         {renderAttachmentList(attachments, true)}
         {renderActiveKnowledgeChips()}
+        {renderSkillSuggestions()}
         <textarea
           ref={textareaRef}
           disabled={busy}

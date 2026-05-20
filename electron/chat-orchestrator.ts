@@ -25,6 +25,7 @@ import {
 } from "./agent-core";
 import { TurnEventLog } from "./chat/turn-event-log";
 import { prepareChatPrompt, type PreparedPrompt } from "./chat/prompt-context";
+import { createSkillToolDefinition } from "./chat/skill-tool";
 import {
   appendRuntimeTextTimelineItem,
   appendRuntimeToolTimelineItem,
@@ -128,6 +129,7 @@ export class ChatOrchestrator {
     for (const tool of createBuiltinToolDefinitions()) {
       tools.register(tool);
     }
+    tools.register(createSkillToolDefinition(this.workspaceService));
 
     this.nativeCore = new AgentCore({
       agents,

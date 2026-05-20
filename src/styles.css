@@ -1765,6 +1765,52 @@ textarea {
   box-shadow: none;
 }
 
+.chat-skill-suggestions {
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(92, 132, 74, 0.18);
+  background: rgba(246, 249, 242, 0.96);
+}
+
+.chat-skill-suggestion {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--text);
+  text-align: left;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.chat-skill-suggestion:hover,
+.chat-skill-suggestion.active {
+  background: rgba(105, 142, 88, 0.12);
+}
+
+.chat-skill-suggestion-name,
+.chat-skill-suggestion-desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-skill-suggestion-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #477431;
+}
+
+.chat-skill-suggestion-desc {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .chat-knowledge-active-row {
   display: flex;
   flex-wrap: wrap;

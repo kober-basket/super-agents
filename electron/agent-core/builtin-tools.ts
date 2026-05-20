@@ -1097,18 +1097,23 @@ export function createBuiltinToolDefinitions(): ToolDefinition[] {
           const buffer = Buffer.from(await response.arrayBuffer());
           const raw = buffer.subarray(0, MAX_WEB_SEARCH_BYTES).toString("utf8");
           const results = parseDuckDuckGoSearchResults(raw, limit);
+          const resultText = results
+            .map((result, index) =>
+              [
+                `${index + 1}. ${result.title}`,
+                `URL: ${result.url}`,
+                result.snippet ? `Snippet: ${result.snippet}` : "",
+              ].filter(Boolean).join("\n"),
+            )
+            .join("\n\n");
           return {
             content:
               results.length > 0
-                ? results
-                    .map((result, index) =>
-                      [
-                        `${index + 1}. ${result.title}`,
-                        `URL: ${result.url}`,
-                        result.snippet ? `Snippet: ${result.snippet}` : "",
-                      ].filter(Boolean).join("\n"),
-                    )
-                    .join("\n\n")
+                ? [
+                    "Search snippets are unverified discovery leads, not confirmed facts. Fetch and verify reliable sources before using material claims.",
+                    "",
+                    resultText,
+                  ].join("\n")
                 : `No search results found for: ${query}`,
             metadata: {
               query,

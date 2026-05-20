@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { AppConfig, ChatSendInput } from "../../src/types";
 import type { WorkspaceService } from "../workspace-service";
+import { buildLoadedSkillContent, findEnabledSkill, parseSkillInvocation } from "./skill-invocation";
 
 export interface PreparedPrompt {
   content: string;
@@ -188,16 +189,30 @@ export async function prepareChatPrompt(input: {
   const config = await input.workspaceService.getConfigSnapshot();
   const cwd = path.resolve(config.workspaceRoot.trim() || process.cwd());
   const additionalDirectories = collectAdditionalDirectories(cwd, input.chatInput);
+  const skillInvocation = parseSkillInvocation(input.chatInput.content);
+  const invokedSkill = skillInvocation ? findEnabledSkill(config, skillInvocation.name) : null;
+  if (skillInvocation && !invokedSkill) {
+    throw new Error(`Skill "${skillInvocation.name}" is not enabled or does not exist.`);
+  }
+  const effectiveChatInput = invokedSkill
+    ? {
+        ...input.chatInput,
+        content: skillInvocation?.args ?? "",
+      }
+    : input.chatInput;
   const [skillContext, knowledgeContext] = await Promise.all([
     input.workspaceService.getEnabledSkillPromptContext(config),
     resolveKnowledgeContext(
       input.workspaceService,
       config,
-      input.chatInput.content,
+      effectiveChatInput.content,
       input.selectedKnowledgeBaseIds,
     ),
   ]);
-  const attachmentContext = buildAttachmentContext(input.chatInput);
+  const attachmentContext = buildAttachmentContext(effectiveChatInput);
+  const invokedSkillContext = invokedSkill
+    ? buildLoadedSkillContent(invokedSkill, skillInvocation?.args ?? "", { explicit: true })
+    : "";
   const workspacePrompt = [
     `Workspace root: ${cwd}`,
     buildLocalDirectoryContext(),
@@ -205,12 +220,13 @@ export async function prepareChatPrompt(input: {
       ? `Additional attachment directories:\n${additionalDirectories.join("\n")}`
       : "",
     skillContext,
+    invokedSkillContext,
     knowledgeContext,
     attachmentContext,
   ].filter(Boolean).join("\n\n");
 
   return {
-    content: buildTurnPromptContent(input.chatInput),
+    content: buildTurnPromptContent(effectiveChatInput),
     workspacePrompt,
     workspaceRoot: cwd,
     fullFileSystemAccess: config.security.fullFileSystemAccess === true,

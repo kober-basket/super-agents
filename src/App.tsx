@@ -2418,6 +2418,7 @@ export default function App() {
           voiceInputSupported={voiceInputSupported}
           selectableModels={selectableModels}
           selectedKnowledgeBaseIds={activeKnowledgeBaseIds}
+          skills={config.skills}
           scrollToBottomRequest={messageScrollRequest}
           exportingConversationFormat={exportingConversationFormat}
           onToast={(message) => setToast(message)}

@@ -14,6 +14,7 @@ export const DEFAULT_BUILTIN_TOOL_IDS = [
   "question",
   "todo_read",
   "todo_write",
+  "skill",
   "web_search",
   "web_fetch",
   "write",

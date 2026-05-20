@@ -25,6 +25,7 @@ import {
 } from "../src/lib/provider-presets";
 import { DEFAULT_REMOTE_CONTROL_CONFIG, normalizeRemoteControlConfig } from "../src/lib/remote-control-config";
 import { sanitizeMcpName } from "../src/features/shared/utils";
+import { buildSkillIndexPrompt } from "./chat/skill-invocation";
 import type {
   AppConfig,
   AudioTranscriptionInput,
@@ -739,42 +740,7 @@ async function collectRuntimeSkills(statePath: string, workspaceRoot?: string) {
 }
 
 async function buildEnabledSkillPromptContext(config: AppConfig) {
-  const enabledSkills = config.skills.filter((skill) => skill.enabled);
-  if (enabledSkills.length === 0) {
-    return "";
-  }
-
-  const sections = await Promise.all(
-    enabledSkills.map(async (skill) => {
-      const command = skill.command.replace(/\$ARGUMENTS/g, "<user request>");
-      return [
-        `## ${skill.name}`,
-        `Type: command`,
-        skill.description ? `Description: ${skill.description}` : "",
-        skill.sourcePath?.trim() ? `Skill directory: ${skill.sourcePath.trim()}` : "",
-        skill.sourcePath?.trim()
-          ? "Resolve relative files and scripts for this skill from its skill directory."
-          : "",
-        "Use this skill only when it is relevant to the user's request.",
-        "Template:",
-        command,
-      ]
-        .filter(Boolean)
-        .join("\n");
-    }),
-  );
-
-  const nonEmptySections = sections.filter(Boolean);
-  if (nonEmptySections.length === 0) {
-    return "";
-  }
-
-  return [
-    "Enabled workspace skills for this turn:",
-    "Apply these skills only when they clearly match the user's intent. Do not force them into unrelated requests.",
-    "",
-    nonEmptySections.join("\n\n"),
-  ].join("\n");
+  return buildSkillIndexPrompt(config);
 }
 
 async function assertDirectoryExists(targetPath: string) {

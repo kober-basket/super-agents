@@ -63,8 +63,9 @@ test("workspace service bootstraps copied built-in skill creator without legacy 
     assert.equal(bootstrap.config.skills.some((skill) => skill.id === "meeting-minutes"), false);
 
     const context = await service.getEnabledSkillPromptContext();
-    assert.match(context, /## skill-creator/);
-    assert.match(context, /Anatomy of a Skill/);
+    assert.match(context, /Available workspace skills for this turn:/);
+    assert.match(context, /- skill-creator:/);
+    assert.doesNotMatch(context, /Anatomy of a Skill/);
   } finally {
     await service.shutdown();
     await rm(tempDir, { recursive: true, force: true });
@@ -192,7 +193,7 @@ test("workspace service lists built-in agent tools instead of runtime tools", as
   }
 });
 
-test("workspace service builds prompt context from enabled skills only", async () => {
+test("workspace service builds a skill index from enabled skills only", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
   const workspaceRoot = path.join(tempDir, "workspace");
   const statePath = path.join(tempDir, "data", "workspace.json");
@@ -240,13 +241,13 @@ test("workspace service builds prompt context from enabled skills only", async (
 
     const context = await service.getEnabledSkillPromptContext();
 
-    assert.match(context, /Enabled workspace skills for this turn:/);
-    assert.match(context, /## spec-writer/);
+    assert.match(context, /Available workspace skills for this turn:/);
+    assert.match(context, /call the `skill` tool/i);
+    assert.match(context, /- spec-writer: Write concise specs/);
     assert.ok(context.includes(`Skill directory: ${localSkillRoot}`));
-    assert.match(context, /Resolve relative files and scripts for this skill from its skill directory\./);
-    assert.match(context, /Focus on acceptance criteria\./);
-    assert.match(context, /## brief-writer/);
-    assert.match(context, /<user request>/);
+    assert.doesNotMatch(context, /Focus on acceptance criteria\./);
+    assert.match(context, /- brief-writer: Turn notes into a brief/);
+    assert.doesNotMatch(context, /Summarize notes/);
     assert.doesNotMatch(context, /disabled-skill/);
   } finally {
     await service.shutdown();
