@@ -777,7 +777,7 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
               },
             }))
           : undefined,
-      tool_choice: input.tools.length > 0 ? "auto" : undefined,
+      tool_choice: input.tools.length > 0 ? (input.toolChoice ?? "auto") : undefined,
     };
 
     const response = await fetch(joinUrl(provider.baseUrl, "/chat/completions"), {
@@ -844,7 +844,7 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
               argumentsText: "",
             };
             const argumentDelta = toolDelta.function?.arguments;
-            pendingTools.set(key, {
+            const nextTool = {
               id: toolDelta.id ?? current.id,
               name: toolDelta.function?.name ?? current.name,
               argumentsText:
@@ -852,7 +852,13 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
               argumentsObject: typeof argumentDelta === "string" || argumentDelta === undefined
                 ? current.argumentsObject
                 : argumentDelta,
-            });
+            };
+            pendingTools.set(key, nextTool);
+            yield {
+              type: "tool_call_delta",
+              toolCallId: nextTool.id,
+              name: nextTool.name || undefined,
+            };
           }
 
           const content = choice.delta?.content;

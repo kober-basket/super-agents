@@ -101,12 +101,14 @@ export interface ModelRequest {
   system: string;
   messages: AgentMessage[];
   tools: ModelToolSchema[];
+  toolChoice?: "auto" | "required" | "none";
 }
 
 export type ModelEvent =
   | { type: "reasoning_delta"; text: string }
   | { type: "status_delta"; text: string }
   | { type: "text_delta"; text: string }
+  | { type: "tool_call_delta"; toolCallId?: string; name?: string }
   | { type: "tool_call"; toolCall: ToolCall }
   | { type: "done"; stopReason: string };
 

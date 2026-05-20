@@ -84,8 +84,8 @@ test("runtime trace group opens only while the turn is active", () => {
   assert.equal(shouldOpenRuntimeTraceGroup(undefined), false);
 });
 
-test("runtime trace group collapses once confirmed assistant text is visible", () => {
-  assert.equal(shouldOpenRuntimeTraceGroup({ isStreaming: true, hasAssistantText: true }), false);
+test("runtime trace group stays open while streaming provisional assistant text", () => {
+  assert.equal(shouldOpenRuntimeTraceGroup({ isStreaming: true, hasAssistantText: true }), true);
   assert.equal(shouldOpenRuntimeTraceGroup({ isStreaming: true, hasAssistantText: false }), true);
   assert.equal(shouldOpenRuntimeTraceGroup({ isStreaming: false, hasAssistantText: true }), false);
 });
@@ -180,6 +180,17 @@ test("runtime status markdown uses the same inline typography as assistant messa
 
   assert.match(css, /\.runtime-status-line\s+strong\s*{[^}]*font-weight:\s*650/s);
   assert.match(css, /\.runtime-status-line\s+code\s*{[^}]*font-family:\s*"JetBrains Mono"/s);
+});
+
+test("assistant message tables inherit the surrounding message type scale", () => {
+  const localCssPath = path.resolve(process.cwd(), "src/styles.css");
+  const cssPath = existsSync(localCssPath)
+    ? localCssPath
+    : path.resolve(process.cwd(), "..", "src/styles.css");
+  const css = readFileSync(cssPath, "utf8");
+
+  assert.match(css, /\.message-text\s+table\s*{[^}]*font-size:\s*inherit/s);
+  assert.match(css, /\.message-text\s+table\s*{[^}]*line-height:\s*inherit/s);
 });
 
 test("streaming reasoning preview is capped to three scrollable lines", () => {

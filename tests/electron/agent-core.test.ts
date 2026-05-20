@@ -331,7 +331,7 @@ test("native agent core forwards visible status separately from assistant text",
   });
 });
 
-test("native agent core treats pre-tool visible text as process status", async () => {
+test("native agent core routes pre-tool visible text into process status", async () => {
   const gateway = new ScriptedModelGateway([
     [
       { type: "text_delta", text: "I will inspect the file first. " },
@@ -341,6 +341,17 @@ test("native agent core treats pre-tool visible text as process status", async (
           id: "tool-prelude",
           name: "lookup",
           input: { key: "alpha" },
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "finish-after-prelude",
+          name: "finish_task",
+          input: {},
         },
       },
       { type: "done", stopReason: "tool_use" },
@@ -369,10 +380,6 @@ test("native agent core treats pre-tool visible text as process status", async (
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
     ["Final answer only."],
   );
-  assert.ok(
-    events.findIndex((event) => event.type === "status_delta") <
-      events.findIndex((event) => event.type === "tool_call_started"),
-  );
   assert.deepEqual(core.getSession("pre-tool-text-session")?.messages.at(-3), {
     role: "assistant",
     content: "I will inspect the file first. ",
@@ -386,7 +393,110 @@ test("native agent core treats pre-tool visible text as process status", async (
   });
 });
 
-test("native agent core treats no-tool text after tools as the final answer", async () => {
+test("native agent core clears provisional text before the final-only phase", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "tool-before-finish-preamble",
+          name: "lookup",
+          input: { key: "alpha" },
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "I have enough information now." },
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "finish-after-preamble",
+          name: "finish_task",
+          input: {},
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "Final answer." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createCore(gateway);
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "finish-clears-provisional-session",
+    agentId: "neutral",
+    content: "look up then finish",
+  })) {
+    events.push(event);
+  }
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "message_delta").map((event) => event.text),
+    ["Final answer."],
+  );
+  assert.deepEqual(events.filter((event) => event.type === "message_replace"), []);
+  assert.deepEqual(
+    events.filter((event) => event.type === "status_delta").map((event) => event.text),
+    ["I have enough information now."],
+  );
+  assert.deepEqual(core.getSession("finish-clears-provisional-session")?.messages.at(-1), {
+    role: "assistant",
+    content: "Final answer.",
+    toolCalls: [],
+  });
+});
+
+test("native agent core requires a tool choice after tool results until finish_task is called", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "tool-before-required-choice",
+          name: "lookup",
+          input: { key: "alpha" },
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "finish-required-choice",
+          name: "finish_task",
+          input: {},
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "Final answer." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createCore(gateway);
+
+  for await (const _event of core.sendTurn({
+    sessionId: "required-tool-choice-session",
+    agentId: "neutral",
+    content: "look up then finish",
+  })) {
+    // Drain the turn.
+  }
+
+  assert.equal(gateway.requests[0]?.toolChoice, "auto");
+  assert.equal(gateway.requests[1]?.toolChoice, "required");
+  assert.ok(gateway.requests[1]?.tools.some((tool) => tool.name === "finish_task"));
+  assert.equal(gateway.requests[2]?.tools.length, 0);
+  assert.equal(gateway.requests[2]?.toolChoice, "none");
+});
+
+test("native agent core routes no-tool text after tools into process status and keeps executing", async () => {
   const gateway = new ScriptedModelGateway([
     [
       {
@@ -404,6 +514,21 @@ test("native agent core treats no-tool text after tools as the final answer", as
       { type: "text_delta", text: "lookups are complete." },
       { type: "done", stopReason: "end_turn" },
     ],
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "finish-after-post-tool-text",
+          name: "finish_task",
+          input: {},
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "Final answer after the lookup." },
+      { type: "done", stopReason: "end_turn" },
+    ],
   ]);
   const core = createCore(gateway);
 
@@ -416,28 +541,119 @@ test("native agent core treats no-tool text after tools as the final answer", as
     events.push(event);
   }
 
-  assert.equal(gateway.requests.length, 2);
+  assert.equal(gateway.requests.length, 4);
   assert.equal(gateway.requests.some((request) => request.tools.some((tool) => tool.name === "final_answer")), false);
+  assert.match(
+    gateway.requests[2]?.messages.at(-1)?.content ?? "",
+    /previous response wrote process text but did not call a tool/i,
+  );
   assert.deepEqual(
     events.filter((event) => event.type === "tool_call_started").map((event) => event.toolCall.name),
     ["lookup"],
   );
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    [],
+    ["All requested ", "lookups are complete."],
   );
   assert.deepEqual(
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["All requested ", "lookups are complete."],
+    ["Final answer after the lookup."],
   );
   assert.deepEqual(core.getSession("final-answer-boundary-session")?.messages.at(-1), {
     role: "assistant",
-    content: "All requested lookups are complete.",
+    content: "Final answer after the lookup.",
     toolCalls: [],
   });
 });
 
-test("native agent core does not ask for final_answer after plain post-tool text", async () => {
+test("native agent core streams the final-only phase immediately after a finish signal", async () => {
+  let releaseFinal: (() => void) | undefined;
+  const finalMayFinish = new Promise<void>((resolve) => {
+    releaseFinal = resolve;
+  });
+  const gateway: ModelGateway & { requests: ModelRequest[] } = {
+    requests: [],
+    async *stream(input: ModelRequest): AsyncIterable<ModelEvent> {
+      this.requests.push(input);
+      if (this.requests.length === 1) {
+        yield {
+          type: "tool_call",
+          toolCall: {
+            id: "tool-before-finish",
+            name: "lookup",
+            input: { key: "alpha" },
+          },
+        };
+        yield { type: "done", stopReason: "tool_use" };
+        return;
+      }
+      if (this.requests.length === 2) {
+        yield {
+          type: "tool_call",
+          toolCall: {
+            id: "finish-after-tool",
+            name: "finish_task",
+            input: {},
+          },
+        };
+        yield { type: "done", stopReason: "tool_use" };
+        return;
+      }
+      yield { type: "text_delta", text: "Final " };
+      await finalMayFinish;
+      yield { type: "text_delta", text: "answer." };
+      yield { type: "done", stopReason: "end_turn" };
+    },
+  };
+  const core = createCore(gateway);
+  const iterator = core
+    .sendTurn({
+      sessionId: "finish-final-stream-session",
+      agentId: "neutral",
+      content: "look up then finish",
+    })
+    [Symbol.asyncIterator]();
+
+  const events = [];
+  let firstFinalDelta: Awaited<ReturnType<typeof iterator.next>> | undefined;
+  while (true) {
+    const next = await iterator.next();
+    if (next.done) {
+      break;
+    }
+    events.push(next.value);
+    if (next.value.type === "message_delta") {
+      firstFinalDelta = next;
+      break;
+    }
+  }
+
+  assert.equal(firstFinalDelta?.value.type, "message_delta");
+  assert.equal(firstFinalDelta?.value.text, "Final ");
+  assert.equal(gateway.requests.length, 3);
+  assert.equal(gateway.requests[2]?.tools.length, 0);
+
+  releaseFinal?.();
+  while (true) {
+    const next = await iterator.next();
+    if (next.done) {
+      break;
+    }
+    events.push(next.value);
+  }
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "message_delta").map((event) => event.text),
+    ["Final ", "answer."],
+  );
+  assert.deepEqual(core.getSession("finish-final-stream-session")?.messages.at(-1), {
+    role: "assistant",
+    content: "Final answer.",
+    toolCalls: [],
+  });
+});
+
+test("native agent core does not ask for final_answer after plain post-tool process text", async () => {
   const gateway = new ScriptedModelGateway([
     [
       {
@@ -461,6 +677,21 @@ test("native agent core does not ask for final_answer after plain post-tool text
       },
       { type: "done", stopReason: "end_turn" },
     ],
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "finish-after-plain-post-tool-text",
+          name: "finish_task",
+          input: {},
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "Final answer after plain process text." },
+      { type: "done", stopReason: "end_turn" },
+    ],
   ]);
   const core = createCore(gateway);
 
@@ -473,21 +704,21 @@ test("native agent core does not ask for final_answer after plain post-tool text
     events.push(event);
   }
 
-  assert.equal(gateway.requests.length, 2);
+  assert.equal(gateway.requests.length, 4);
   assert.equal(gateway.requests.some((request) => request.tools.some((tool) => tool.name === "final_answer")), false);
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    [],
+    ["Third lookup completed.\n\n", "All requested lookups are complete."],
   );
   assert.deepEqual(
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["Third lookup completed.\n\n", "All requested lookups are complete."],
+    ["Final answer after plain process text."],
   );
 
   const sessionMessages = core.getSession("plain-post-tool-text-session")?.messages ?? [];
   assert.deepEqual(sessionMessages.at(-1), {
     role: "assistant",
-    content: "Third lookup completed.\n\nAll requested lookups are complete.",
+    content: "Final answer after plain process text.",
     toolCalls: [],
   });
 });
@@ -1145,7 +1376,7 @@ test("native agent core ends an empty no-tool response after tools without final
   assert.equal(core.getSession("empty-no-tool-after-tool-session")?.messages.at(-1)?.role, "tool");
 });
 
-test("native agent core treats first no-tool text after tools as final text", async () => {
+test("native agent core treats first no-tool text after tools as process text", async () => {
   const gateway = new ScriptedModelGateway([
     [
       {
@@ -1163,6 +1394,21 @@ test("native agent core treats first no-tool text after tools as final text", as
       { type: "text_delta", text: "三个命令执行完毕，汇总如下。" },
       { type: "done", stopReason: "end_turn" },
     ],
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "finish-after-first-no-tool-text",
+          name: "finish_task",
+          input: {},
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "最终结论。" },
+      { type: "done", stopReason: "end_turn" },
+    ],
   ]);
   const core = createCore(gateway);
 
@@ -1175,17 +1421,16 @@ test("native agent core treats first no-tool text after tools as final text", as
     events.push(event);
   }
 
-  const finalText = "当前登录用户是 kober。\n\n三个命令执行完毕，汇总如下。";
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    [],
+    ["当前登录用户是 kober。\n\n", "三个命令执行完毕，汇总如下。"],
   );
   assert.deepEqual(
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["当前登录用户是 kober。\n\n", "三个命令执行完毕，汇总如下。"],
+    ["最终结论。"],
   );
-  assert.equal(gateway.requests.length, 2);
-  assert.equal(core.getSession("empty-after-tool-session")?.messages.at(-1)?.content, finalText);
+  assert.equal(gateway.requests.length, 4);
+  assert.equal(core.getSession("empty-after-tool-session")?.messages.at(-1)?.content, "最终结论。");
 });
 
 test("openai-compatible gateway maps streamed reasoning fields to reasoning deltas", async () => {
@@ -1332,6 +1577,66 @@ test("openai-compatible gateway requests automatic tool choice when tools are av
     }
 
     assert.equal(requestBody?.tool_choice, "auto");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openai-compatible gateway can request required tool choice for execution phases", async () => {
+  const originalFetch = globalThis.fetch;
+  const chunks = [{ choices: [{ delta: {}, finish_reason: "stop" }] }];
+  let requestBody: Record<string, unknown> | undefined;
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    return new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n", {
+      status: 200,
+    });
+  }) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "test-provider::tool-model",
+      modelProviders: [
+        {
+          id: "test-provider",
+          name: "Test Provider",
+          kind: "openai-compatible",
+          baseUrl: "https://example.test/v1",
+          apiKey: "test-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [
+            {
+              id: "tool-model",
+              label: "Tool Model",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }) as AppConfig);
+
+    for await (const _event of gateway.stream({
+      model: "tool-model",
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          name: "finish_task",
+          description: "Finish",
+          inputSchema: {
+            type: "object",
+            properties: {},
+          },
+        },
+      ],
+      toolChoice: "required",
+    })) {
+      // Drain the stream so the request body is captured.
+    }
+
+    assert.equal(requestBody?.tool_choice, "required");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1678,6 +1983,98 @@ test("openai-compatible gateway merges streamed tool arguments by index when the
         },
       ],
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openai-compatible gateway surfaces streamed tool-call deltas before final tool calls", async () => {
+  const originalFetch = globalThis.fetch;
+  const chunks = [
+    {
+      choices: [
+        {
+          delta: {
+            content: "I will inspect first. ",
+          },
+        },
+      ],
+    },
+    {
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: "early-tool-delta",
+                function: {
+                  name: "lookup",
+                  arguments: "{\"key\":\"alpha\"}",
+                },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    },
+  ];
+
+  globalThis.fetch = (async () =>
+    new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n", {
+      status: 200,
+    })) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "test-provider::tool-model",
+      modelProviders: [
+        {
+          id: "test-provider",
+          name: "Test Provider",
+          kind: "openai-compatible",
+          baseUrl: "https://example.test/v1",
+          apiKey: "test-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [
+            {
+              id: "tool-model",
+              label: "Tool Model",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }) as AppConfig);
+
+    const events = [];
+    for await (const event of gateway.stream({
+      model: "tool-model",
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          name: "lookup",
+          description: "Lookup values",
+          inputSchema: {
+            type: "object",
+            properties: { key: { type: "string" } },
+            required: ["key"],
+          },
+        },
+      ],
+    })) {
+      events.push(event);
+    }
+
+    assert.deepEqual(events.map((event) => event.type), ["text_delta", "tool_call_delta", "tool_call", "done"]);
+    const toolDelta = events.find((event) => event.type === "tool_call_delta");
+    assert.equal(toolDelta?.type, "tool_call_delta");
+    assert.equal(toolDelta.toolCallId, "early-tool-delta");
+    assert.equal(toolDelta.name, "lookup");
   } finally {
     globalThis.fetch = originalFetch;
   }

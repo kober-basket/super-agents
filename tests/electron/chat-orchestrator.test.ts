@@ -50,6 +50,22 @@ function createConfig(workspaceRoot: string): AppConfig {
   };
 }
 
+function waitFor<T>(promise: Promise<T>, label: string, timeoutMs = 500): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
 test("chat orchestrator forwards agent thoughts into runtime trace and thought events", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
   const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
@@ -106,6 +122,75 @@ test("chat orchestrator forwards agent thoughts into runtime trace and thought e
       ["turn_started", "thought_delta", "message_delta", "turn_finished"],
     );
     assert.equal(assistantMessage?.runtimeTrace?.events[1]?.text, "Planning. ");
+  } finally {
+    await conversationService.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("chat orchestrator emits message deltas before a native turn finishes", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
+  const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
+  await conversationService.initialize();
+
+  try {
+    const workspaceService = {
+      async getConfigSnapshot() {
+        return createConfig(tempDir);
+      },
+      async getEnabledSkillPromptContext() {
+        return "";
+      },
+      async searchKnowledgeBases() {
+        return { query: "", total: 0, results: [], searchedBases: [], warnings: [] };
+      },
+    } as unknown as WorkspaceService;
+
+    let releaseSecondDelta!: () => void;
+    const secondDeltaMayStream = new Promise<void>((resolve) => {
+      releaseSecondDelta = resolve;
+    });
+    let resolveFirstDelta!: () => void;
+    const firstDeltaSeen = new Promise<void>((resolve) => {
+      resolveFirstDelta = resolve;
+    });
+    const events: ChatEvent[] = [];
+    const orchestrator = new ChatOrchestrator(conversationService, workspaceService, (event) => {
+      events.push(event);
+      if (event.type === "message_delta" && event.textDelta === "Part 1 ") {
+        resolveFirstDelta();
+      }
+    });
+
+    (orchestrator as unknown as {
+      nativeCore: {
+        sendTurn(): AsyncIterable<AgentEvent>;
+      };
+    }).nativeCore = {
+      async *sendTurn() {
+        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "Part 1 " };
+        await secondDeltaMayStream;
+        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "Part 2" };
+        yield { type: "turn_finished", sessionId: "s", agentId: "a", stopReason: "end_turn" };
+      },
+    };
+
+    const execution = await orchestrator.startTurnWithCompletion({ content: "hello" });
+    await waitFor(firstDeltaSeen, "first message delta");
+
+    assert.deepEqual(
+      events.filter((event) => event.type === "message_delta").map((event) => event.textDelta),
+      ["Part 1 "],
+    );
+    assert.equal(events.some((event) => event.type === "turn_finished"), false);
+
+    releaseSecondDelta();
+    await execution.completion;
+
+    assert.deepEqual(
+      events.filter((event) => event.type === "message_delta").map((event) => event.textDelta),
+      ["Part 1 ", "Part 2"],
+    );
   } finally {
     await conversationService.shutdown();
     await rm(tempDir, { recursive: true, force: true });

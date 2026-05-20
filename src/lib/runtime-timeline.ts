@@ -104,12 +104,9 @@ export function isStreamingTimelineThoughtItem(
 export function shouldOpenRuntimeTraceGroup(
   options: boolean | { isStreaming?: boolean; hasAssistantText?: boolean } | undefined,
 ) {
-  const isStreaming =
-    typeof options === "boolean" || options === undefined ? options : options.isStreaming;
-  const hasAssistantText =
-    typeof options === "object" && options !== null ? options.hasAssistantText : false;
+  const isStreaming = typeof options === "boolean" || options === undefined ? options : options.isStreaming;
 
-  return Boolean(isStreaming && !hasAssistantText);
+  return Boolean(isStreaming);
 }
 
 export function shouldAutoScrollReasoningContent(options: {
