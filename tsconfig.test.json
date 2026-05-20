@@ -12,6 +12,7 @@
   },
   "include": [
     "electron/agent-core/**/*.ts",
+    "electron/media-permissions.ts",
     "electron/streaming-message-persister.ts",
     "electron/workspace-service.ts",
     "src/desktop-agent.d.ts",

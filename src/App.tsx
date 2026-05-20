@@ -2405,7 +2405,6 @@ export default function App() {
           knowledgeEnabled={activeKnowledgeBaseIds.length > 0}
           knowledgeRefreshing={knowledgeRefreshing}
           onDraftMessageChange={setDraftMessage}
-          onExportConversation={(format) => void exportActiveConversation(format)}
           onClearKnowledgeBases={clearKnowledgeBaseSelection}
           onManageKnowledgeBases={() => setView("knowledge")}
           onModelChange={(value) => updateConfigField("activeModelId", value)}
@@ -2424,7 +2423,6 @@ export default function App() {
           selectedKnowledgeBaseIds={activeKnowledgeBaseIds}
           skills={config.skills}
           scrollToBottomRequest={messageScrollRequest}
-          exportingConversationFormat={exportingConversationFormat}
           onToast={(message) => setToast(message)}
         />
       );

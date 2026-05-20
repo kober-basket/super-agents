@@ -84,6 +84,12 @@ test("runtime trace group opens only while the turn is active", () => {
   assert.equal(shouldOpenRuntimeTraceGroup(undefined), false);
 });
 
+test("runtime trace group collapses once confirmed assistant text is visible", () => {
+  assert.equal(shouldOpenRuntimeTraceGroup({ isStreaming: true, hasAssistantText: true }), false);
+  assert.equal(shouldOpenRuntimeTraceGroup({ isStreaming: true, hasAssistantText: false }), true);
+  assert.equal(shouldOpenRuntimeTraceGroup({ isStreaming: false, hasAssistantText: true }), false);
+});
+
 test("runtime trace group label follows active and failed states", () => {
   assert.equal(runtimeTraceGroupSummaryLabel({ isStreaming: true }), "处理中");
   assert.equal(runtimeTraceGroupSummaryLabel({ isStreaming: false }), "已处理");
@@ -152,6 +158,17 @@ test("runtime tool summary keeps tool names readable before truncating details",
 
   assert.match(css, /\.activity-summary-title\s+strong\s*{[^}]*flex:\s*0 0 auto/s);
   assert.match(css, /\.activity-summary-title\s+em\s*{[^}]*flex:\s*1 1 auto/s);
+});
+
+test("runtime status markdown stays compact inside the process timeline", () => {
+  const localCssPath = path.resolve(process.cwd(), "src/styles.css");
+  const cssPath = existsSync(localCssPath)
+    ? localCssPath
+    : path.resolve(process.cwd(), "..", "src/styles.css");
+  const css = readFileSync(cssPath, "utf8");
+
+  assert.match(css, /\.runtime-status-line\s+h1,\s*\.runtime-status-line\s+h2,\s*\.runtime-status-line\s+h3\s*{[^}]*font-size:\s*14px/s);
+  assert.match(css, /\.runtime-status-line\s+table\s*{[^}]*font-size:\s*12px/s);
 });
 
 test("streaming reasoning preview is capped to three scrollable lines", () => {

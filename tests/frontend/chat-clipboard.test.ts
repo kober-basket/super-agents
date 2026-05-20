@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { copyTextToClipboard } from "../../src/features/chat/clipboard";
+import { buildConversationCopyMarkdown } from "../../src/features/chat/conversation-markdown";
 
 test("message copy uses the Electron clipboard bridge before the browser clipboard", async () => {
   const calls: string[] = [];
@@ -61,6 +62,43 @@ test("message copy falls back to the browser clipboard when the Electron bridge 
   });
 
   assert.deepEqual(calls, ["browser:retry"]);
+});
+
+test("conversation copy markdown includes title metadata and messages", () => {
+  const markdown = buildConversationCopyMarkdown({
+    id: "conversation-1",
+    title: "需求整理",
+    createdAt: Date.UTC(2026, 4, 20, 8, 0, 0),
+    updatedAt: Date.UTC(2026, 4, 20, 8, 2, 0),
+    lastMessageAt: Date.UTC(2026, 4, 20, 8, 2, 0),
+    preview: "",
+    messageCount: 2,
+    selectedKnowledgeBaseIds: [],
+    messages: [
+      {
+        id: "message-1",
+        role: "user",
+        content: "帮我总结一下",
+        createdAt: Date.UTC(2026, 4, 20, 8, 0, 0),
+        updatedAt: Date.UTC(2026, 4, 20, 8, 0, 0),
+      },
+      {
+        id: "message-2",
+        role: "assistant",
+        content: "当然可以。",
+        createdAt: Date.UTC(2026, 4, 20, 8, 1, 0),
+        updatedAt: Date.UTC(2026, 4, 20, 8, 1, 0),
+      },
+    ],
+  });
+
+  assert.match(markdown, /^# 需求整理/m);
+  assert.match(markdown, /创建时间：2026-05-20 08:00/);
+  assert.match(markdown, /消息数：2/);
+  assert.match(markdown, /## 用户 · 2026-05-20 08:00/);
+  assert.match(markdown, /帮我总结一下/);
+  assert.match(markdown, /## Agent · 2026-05-20 08:01/);
+  assert.match(markdown, /当然可以。/);
 });
 
 test("message copy hover target stays reachable while moving from the bubble to the action row", () => {

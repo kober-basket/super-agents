@@ -11,6 +11,7 @@ import { ChatOrchestrator } from "./chat-orchestrator";
 import { exportConversationToFile } from "./conversation-export";
 import type { ToolApprovalDecision, ToolApprovalRequest } from "./agent-core";
 import { ConversationService } from "./conversation-service";
+import { isTrustedDesktopOrigin } from "./media-permissions";
 import { McpInspector } from "./mcp-inspector";
 import { RemoteControlService } from "./remote-control-service";
 import { buildWorkspaceToolCatalog } from "./tool-catalog";
@@ -180,14 +181,6 @@ async function requestToolApproval(request: ToolApprovalRequest): Promise<ToolAp
   return result.response === 0
     ? { type: "allow" }
     : { type: "deny", reason: "User denied tool execution." };
-}
-
-function isTrustedDesktopOrigin(origin: string) {
-  return (
-    origin.startsWith("file://") ||
-    /^https?:\/\/127\.0\.0\.1(?::\d+)?$/i.test(origin) ||
-    /^https?:\/\/localhost(?::\d+)?$/i.test(origin)
-  );
 }
 
 function configureMediaPermissions() {

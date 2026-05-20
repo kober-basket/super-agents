@@ -563,72 +563,27 @@ body {
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 8px;
+  grid-template-rows: minmax(0, 1fr);
   padding: var(--window-padding);
-}
-
-.window-frame.maximized {
-  --window-padding: 8px;
-  gap: 8px;
-}
-
-.window-titlebar {
-  min-height: 48px;
   position: relative;
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-  padding: 5px 8px 5px 16px;
-  border: 1px solid var(--titlebar-border);
-  border-radius: 14px;
-  background: var(--titlebar-bg);
-  box-shadow: none;
   app-region: drag;
   -webkit-app-region: drag;
 }
 
-.window-titlebar.mac {
-  padding-left: 84px;
+.window-frame.maximized {
+  --window-padding: 8px;
 }
 
-.window-titlebar-copy,
-.window-controls {
+.window-controls-overlay {
   display: flex;
   align-items: center;
-}
-
-.window-titlebar-copy {
-  width: fit-content;
-  max-width: min(420px, calc(100vw - 220px));
-  gap: 12px;
-  justify-self: start;
-}
-
-.window-titlebar-copy strong {
-  font-size: 17px;
-  font-weight: 750;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-
-.window-titlebar-copy span {
-  color: var(--muted-strong);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.window-controls {
   gap: 4px;
   position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  justify-self: auto;
+  right: calc(var(--window-padding) + 8px);
+  top: calc(var(--window-padding) + 8px);
   app-region: no-drag;
   -webkit-app-region: no-drag;
-  z-index: 2;
+  z-index: 20;
 }
 
 .window-control {
@@ -710,6 +665,8 @@ textarea {
   border-radius: 22px;
   background: var(--shell-bg);
   box-shadow: var(--shell-shadow);
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
 }
 
 .app-shell.with-preview {
@@ -1626,6 +1583,8 @@ textarea {
 }
 
 .workspace-main.is-thread .chat-column {
+  width: 100%;
+  margin: 0;
   height: 100%;
   display: grid;
 }
@@ -2366,10 +2325,10 @@ textarea {
 .chat-thread-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
+  justify-content: flex-start;
+  gap: 8px;
   min-width: 0;
-  padding: 16px 42px 0;
+  padding: 16px 18px 0;
 }
 
 .chat-thread-title {
@@ -2377,29 +2336,31 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--muted-strong);
-  font-size: 13px;
-  font-weight: 650;
+  color: #111827;
+  font-size: 15px;
+  font-weight: 720;
 }
 
-.chat-export-menu {
+.chat-thread-actions {
   position: relative;
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
 }
 
-.chat-export-trigger,
-.chat-export-option {
+.chat-thread-actions-trigger,
+.chat-thread-actions-option {
   border: 1px solid rgba(215, 207, 194, 0.82);
   background: rgba(255, 255, 255, 0.82);
   color: var(--text);
 }
 
-.chat-export-trigger {
+.chat-thread-actions-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -2407,26 +2368,20 @@ textarea {
   color: var(--muted-strong);
 }
 
-.chat-export-trigger:hover:not(:disabled),
-.chat-export-trigger.open {
+.chat-thread-actions-trigger:hover,
+.chat-thread-actions-trigger.open {
   color: var(--accent);
   background: transparent;
 }
 
-.chat-export-trigger:disabled,
-.chat-export-option:disabled {
-  cursor: wait;
-  opacity: 0.72;
-}
-
-.chat-export-panel {
+.chat-thread-actions-panel {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   z-index: 30;
   display: grid;
   gap: 4px;
-  min-width: 178px;
+  min-width: 168px;
   padding: 6px;
   border: 1px solid rgba(218, 210, 198, 0.92);
   border-radius: 8px;
@@ -2434,9 +2389,9 @@ textarea {
   box-shadow: 0 18px 45px rgba(17, 24, 39, 0.14);
 }
 
-.chat-export-option {
+.chat-thread-actions-option {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-height: 34px;
@@ -2448,13 +2403,7 @@ textarea {
   font-weight: 650;
 }
 
-.chat-export-option small {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.chat-export-option:hover:not(:disabled) {
+.chat-thread-actions-option:hover {
   background: rgba(var(--accent-rgb), 0.09);
   color: var(--accent);
 }
@@ -2466,6 +2415,11 @@ textarea {
   overflow: auto;
   gap: 14px;
   padding: 10px 42px 18px;
+}
+
+.workspace-main.is-thread .message-list {
+  width: min(100%, 820px);
+  margin: 0 auto;
 }
 
 .message-row {
@@ -2510,6 +2464,10 @@ textarea {
   display: grid;
   gap: 8px;
   max-width: 100%;
+}
+
+.message-bubble:has(> .runtime-trace-group) {
+  gap: 14px;
 }
 
 .message-actions {
@@ -2614,7 +2572,7 @@ textarea {
 
 .message-runtime-stack {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   width: 100%;
   max-width: none;
 }
@@ -2648,17 +2606,19 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--muted-strong);
 }
 
 .runtime-trace-summary-copy::before {
   content: "";
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
-  background: rgba(var(--accent-rgb), 0.42);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.08);
+  background: rgba(15, 23, 42, 0.28);
+  box-shadow: 0 0 0 4px rgba(15, 23, 42, 0.055);
 }
 
 .runtime-trace-group.streaming .runtime-trace-summary-copy {
@@ -2676,8 +2636,8 @@ textarea {
 
 .runtime-trace-group > .message-runtime-stack {
   position: relative;
-  margin-top: 5px;
-  padding: 0 0 6px 18px;
+  margin-top: 10px;
+  padding: 0 0 4px 18px;
 }
 
 .runtime-trace-group > .message-runtime-stack::before {
@@ -2741,11 +2701,42 @@ textarea {
   margin: 0;
 }
 
+.runtime-status-line h1,
+.runtime-status-line h2,
+.runtime-status-line h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.runtime-status-line h4,
+.runtime-status-line h5,
+.runtime-status-line h6 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 680;
+  letter-spacing: 0;
+}
+
 .runtime-status-line code {
   background: rgba(var(--accent-rgb), 0.08);
   border-radius: 6px;
   padding: 1px 5px;
   font-size: 0.92em;
+}
+
+.runtime-status-line table {
+  width: fit-content;
+  max-width: 100%;
+  font-size: 12px;
+}
+
+.runtime-status-line th,
+.runtime-status-line td {
+  padding: 5px 8px;
 }
 
 .runtime-thinking-indicator {
@@ -2798,14 +2789,14 @@ textarea {
   width: min(100%, 760px);
   color: var(--text);
   font-size: 14px;
-  line-height: 1.68;
+  line-height: 1.62;
 }
 
 .message-text h1 {
   margin: 0 0 7px;
   font-size: 18px;
   line-height: 1.35;
-  font-weight: 760;
+  font-weight: 700;
   letter-spacing: 0;
 }
 
@@ -2813,7 +2804,7 @@ textarea {
   margin: 0 0 6px;
   font-size: 16px;
   line-height: 1.38;
-  font-weight: 740;
+  font-weight: 680;
   letter-spacing: 0;
 }
 
@@ -2821,7 +2812,7 @@ textarea {
   margin: 0 0 6px;
   font-size: 14px;
   line-height: 1.42;
-  font-weight: 720;
+  font-weight: 650;
   letter-spacing: 0;
 }
 
@@ -2829,8 +2820,25 @@ textarea {
   margin: 0 0 6px;
   font-size: 13px;
   line-height: 1.45;
-  font-weight: 700;
+  font-weight: 650;
   letter-spacing: 0;
+}
+
+.message-text strong {
+  color: #111827;
+  font-weight: 650;
+}
+
+.message-text p:has(> strong:only-child) {
+  margin: 8px 0 4px;
+  color: var(--muted-strong);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.message-text p:has(> strong:only-child) strong {
+  color: inherit;
+  font-weight: 650;
 }
 
 .message-text h1 + *,
@@ -3287,7 +3295,7 @@ textarea {
 }
 
 .message-text p {
-  margin: 0 0 7px;
+  margin: 0 0 6px;
 }
 
 .message-text p:last-child,
@@ -3322,8 +3330,10 @@ textarea {
 .activity-markdown code {
   background: rgba(15, 23, 42, 0.06);
   border-radius: 5px;
-  padding: 1px 4px;
+  padding: 1px 4px 2px;
   font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  font-size: 0.92em;
+  font-weight: 600;
 }
 
 .message-text a,
@@ -3413,11 +3423,21 @@ textarea {
   list-style: none;
 }
 
+.message-text .task-list-item {
+  margin: 2px 0 6px;
+  color: var(--muted-strong);
+}
+
 .message-text .task-list-item input,
 .preview-markdown .task-list-item input,
 .activity-markdown .task-list-item input {
   margin: 0 8px 0 -18px;
-  accent-color: var(--accent);
+  accent-color: #8fa29a;
+}
+
+.message-text .task-list-item input {
+  transform: scale(0.88);
+  opacity: 0.82;
 }
 
 .message-text .footnotes,
@@ -8452,7 +8472,6 @@ body.pane-resizing * {
   color: var(--muted);
 }
 
-.window-frame.maximized .window-titlebar,
 .window-frame.maximized .app-shell {
   border-radius: 18px;
 }
@@ -8712,7 +8731,7 @@ textarea:focus,
 .activity-summary {
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 5px 8px;
 }
 
 .activity-summary-main {
@@ -8728,9 +8747,9 @@ textarea:focus,
 }
 
 .tool-message-card {
-  border-radius: 10px;
-  background: rgba(15, 23, 42, 0.032);
-  border-color: rgba(15, 23, 42, 0.055);
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.026);
+  border-color: rgba(15, 23, 42, 0.052);
   box-shadow: none;
 }
 
@@ -8740,12 +8759,12 @@ textarea:focus,
 }
 
 .activity-tool-icon {
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
   background: rgba(15, 23, 42, 0.05);
   border: 0;
-  color: #667085;
+  color: #7a8491;
 }
 
 .activity-summary-title strong {
@@ -8754,24 +8773,25 @@ textarea:focus,
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.35;
-  color: var(--text);
+  color: #111827;
   font-weight: 650;
 }
 
 .activity-summary-title em {
   font-size: 12px;
+  line-height: 1.35;
   color: var(--muted);
 }
 
 .activity-status-pill {
   gap: 3px;
   min-height: 0;
-  padding: 2px 6px;
+  padding: 2px 5px;
   background: rgba(15, 23, 42, 0.05);
   border: 0;
   color: #667085;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 580;
   flex: 0 0 auto;
 }
 
@@ -8794,8 +8814,8 @@ textarea:focus,
 }
 
 .activity-status-pill.success {
-  background: rgba(18, 183, 106, 0.1);
-  color: #16794b;
+  background: rgba(18, 183, 106, 0.075);
+  color: #1f7a52;
 }
 
 .activity-status-pill.error {
@@ -8806,7 +8826,7 @@ textarea:focus,
 .activity-summary-side {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .activity-summary-side time {
@@ -9047,7 +9067,7 @@ textarea:focus,
 .message-text th,
 .preview-markdown th {
   background: rgba(var(--accent-rgb), 0.06);
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .activity-markdown tr:last-child td,
@@ -9060,13 +9080,14 @@ textarea:focus,
   width: fit-content;
   min-width: min(100%, 520px);
   max-width: 100%;
+  margin: 10px 0 12px;
   font-size: 13px;
   background: rgba(255, 255, 255, 0.46);
 }
 
 .message-text th,
 .message-text td {
-  padding: 7px 10px;
+  padding: 7px 11px;
 }
 
 .message-text th {
@@ -9512,25 +9533,7 @@ textarea:focus,
 
 @media (max-width: 1080px) {
   .window-frame {
-    gap: 10px;
     padding: 10px;
-  }
-
-  .window-titlebar {
-    padding-left: 0;
-    padding-right: 8px;
-  }
-
-  .window-titlebar.mac {
-    padding-left: 0;
-  }
-
-  .window-titlebar-copy {
-    padding-left: 12px;
-  }
-
-  .window-titlebar.mac .window-titlebar-copy {
-    padding-left: 88px;
   }
 
   .app-shell {
@@ -9560,8 +9563,8 @@ textarea:focus,
   }
 
   .chat-thread-toolbar {
-    padding-left: 22px;
-    padding-right: 22px;
+    padding-left: 18px;
+    padding-right: 18px;
   }
 
   .chat-home-prompt-grid {
@@ -9572,19 +9575,6 @@ textarea:focus,
 @media (max-width: 840px) {
   .window-frame {
     padding: 8px;
-  }
-
-  .window-titlebar {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
-    padding-left: 8px;
-  }
-
-  .window-controls {
-    position: static;
-    top: auto;
-    right: auto;
-    transform: none;
   }
 
   .app-shell {
@@ -9641,13 +9631,11 @@ textarea:focus,
     flex-direction: row;
   }
 
-  .chat-export-menu {
+  .chat-thread-actions {
     width: auto;
   }
 
-  .chat-export-panel {
-    left: auto;
-    right: 0;
+  .chat-thread-actions-panel {
     width: min(220px, calc(100vw - 48px));
   }
 

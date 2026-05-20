@@ -8,6 +8,7 @@ import type {
   AgentEvent,
   AgentMessage,
   ModelGateway,
+  ModelToolSchema,
   ToolCall,
   ToolDefinition,
   ToolApprovalDecision,
@@ -19,6 +20,51 @@ const MAX_TOOL_RESULT_CHARS = 30_000;
 const MAX_TOOL_ERROR_CHARS = 2_000;
 const NO_ACTION_CONTINUATION_INSTRUCTION =
   "Your previous response contained only hidden reasoning and no visible answer or tool call. Continue now: if the task needs evidence, call the available tools; otherwise provide the user-facing answer. Do not respond with hidden reasoning only.";
+const FINAL_ANSWER_TOOL_NAME = "final_answer";
+const MAX_FINAL_ANSWER_PROTOCOL_RETRIES = 2;
+const FINAL_ANSWER_PROTOCOL_PROMPT = [
+  "# Final Answer Protocol",
+  `When the task is complete after tool use, call the ${FINAL_ANSWER_TOOL_NAME} tool instead of writing normal assistant text.`,
+  "Put any last tool-completion or process update in the status field.",
+  "Put only the final user-facing answer in the answer field.",
+  "Do not include tool execution completion lines in the answer field.",
+  "Ordinary assistant text after tool use is treated as process status, not as the final answer.",
+  "If more evidence is needed, call the relevant normal tool instead.",
+].join("\n");
+const FINAL_ANSWER_CONTINUATION_INSTRUCTION = [
+  `Your previous response was captured as process status because this turn already used tools.`,
+  `Now finish: call the ${FINAL_ANSWER_TOOL_NAME} tool.`,
+  "Put tool-completion/process notes in status and only the final user-facing answer in answer.",
+  "If more evidence is needed, call a normal tool instead.",
+].join("\n");
+const FINAL_ANSWER_STREAMING_PROMPT = [
+  "# Final Response Streaming",
+  "You are now writing the final user-facing answer.",
+  "Do not call tools.",
+  "Do not include tool-completion or process status lines.",
+  "Output only the final answer for the user.",
+].join("\n");
+const FINAL_ANSWER_PROTOCOL_FALLBACK_MESSAGE =
+  "The model did not return a structured final answer after tool use. The process text has been kept in the run trace; continue the conversation to request a final answer.";
+const FINAL_ANSWER_TOOL_SCHEMA: ModelToolSchema = {
+  name: FINAL_ANSWER_TOOL_NAME,
+  description: "Finish the turn with separated process status and final user-facing answer.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      status: {
+        type: "string",
+        description: "Optional final process/status note, such as the last tool completion summary.",
+      },
+      answer: {
+        type: "string",
+        description: "The final user-facing answer. Do not include tool execution status lines.",
+      },
+    },
+    required: ["answer"],
+    additionalProperties: false,
+  },
+};
 
 type SendTurnInput = {
   sessionId: string;
@@ -42,6 +88,11 @@ interface PendingDuplicateToolResult {
   toolCall: ToolCall;
   signature: string;
   slotIndex: number;
+}
+
+interface FinalAnswerPayload {
+  status: string;
+  answer: string;
 }
 
 function createMaxTurnsReachedMessage(maxTurns: number) {
@@ -195,6 +246,39 @@ const COMMON_LOCAL_DIRECTORIES = [
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringField(input: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function parseFinalAnswerPayload(input: unknown): FinalAnswerPayload {
+  if (!isRecord(input)) {
+    return { status: "", answer: String(input ?? "") };
+  }
+
+  return {
+    status: stringField(input, ["status", "progress", "process", "processSummary"]),
+    answer: stringField(input, ["answer", "finalAnswer", "final", "summary", "content"]),
+  };
+}
+
+function createFinalAnswerStreamingInstruction(payload: FinalAnswerPayload) {
+  return [
+    "The task is complete. Now provide the final user-facing answer as normal assistant text.",
+    payload.status.trim() ? `Process status already recorded: ${payload.status.trim()}` : "",
+    payload.answer.trim() ? `Draft final answer to preserve: ${payload.answer.trim()}` : "",
+    "Write only the final answer. Do not mention tool calls, process status, or this instruction.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function isExplicitToolSelfTestRequest(value: string) {
@@ -549,22 +633,53 @@ export class AgentCore {
     let emittedFinalText = false;
     let sawToolResultThisTurn = false;
     let noActionRetries = 0;
+    let finalAnswerProtocolRetries = 0;
+    let finalAnswerStreamingRequested = false;
+    let pendingFinalAnswerDraft = "";
     const toolCallIdsThisTurn = new Set<string>();
     let toolCallIdCollisionSequence = 0;
 
-    for (let step = 0; step < maxTurns; step += 1) {
+    for (let step = 0; step < maxTurns || finalAnswerStreamingRequested; step += 1) {
       const skills = this.options.skills.getMany(agent.skills);
       const tools = availableTools;
+      const finalAnswerStreamingStep = finalAnswerStreamingRequested;
+      finalAnswerStreamingRequested = false;
+      const finalAnswerToolAvailable = sawToolResultThisTurn && !finalAnswerStreamingStep;
       const system = this.promptComposer.compose({
         agent,
         skills,
         overrideSystemPrompt: input.overrideSystemPrompt,
         workspacePrompt: input.workspacePrompt,
+        appendSystemPrompt: finalAnswerStreamingStep
+          ? FINAL_ANSWER_STREAMING_PROMPT
+          : finalAnswerToolAvailable
+            ? FINAL_ANSWER_PROTOCOL_PROMPT
+            : undefined,
       });
+      const modelTools = finalAnswerStreamingStep
+        ? []
+        : finalAnswerToolAvailable
+        ? [
+            ...tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.inputSchema,
+            })),
+            FINAL_ANSWER_TOOL_SCHEMA,
+          ]
+        : tools.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+          }));
 
       let assistantText = "";
+      const assistantTextChunks: string[] = [];
+      let assistantTextStreamedAsStatus = false;
+      let assistantTextStreamedAsMessage = false;
       let toolCallsThisStep = 0;
       let calledTool = false;
+      let finalAnswerPayload: FinalAnswerPayload | undefined;
       const assistantToolCalls: ToolCall[] = [];
       const toolMessageSlots: Array<AgentMessage | undefined> = [];
       const preparedToolCalls: PreparedToolExecution[] = [];
@@ -574,11 +689,7 @@ export class AgentCore {
         model: agent.model,
         system,
         messages: [...session.messages],
-        tools: tools.map((tool) => ({
-          name: tool.name,
-          description: tool.description,
-          inputSchema: tool.inputSchema,
-        })),
+        tools: modelTools,
       })) {
         if (event.type === "reasoning_delta") {
           yield {
@@ -602,18 +713,37 @@ export class AgentCore {
 
         if (event.type === "text_delta") {
           assistantText += event.text;
-          if (!calledTool) {
+          assistantTextChunks.push(event.text);
+          if (finalAnswerStreamingStep) {
+            assistantTextStreamedAsMessage = true;
+            emittedFinalText = true;
             yield {
               type: "message_delta",
               sessionId: input.sessionId,
               agentId: agent.id,
               text: event.text,
             };
+            continue;
+          }
+          if (finalAnswerToolAvailable) {
+            assistantTextStreamedAsStatus = true;
+            yield {
+              type: "status_delta",
+              sessionId: input.sessionId,
+              agentId: agent.id,
+              text: event.text,
+            };
+            continue;
           }
           continue;
         }
 
         if (event.type === "tool_call") {
+          if (event.toolCall.name === FINAL_ANSWER_TOOL_NAME) {
+            finalAnswerPayload = parseFinalAnswerPayload(event.toolCall.input);
+            continue;
+          }
+
           let toolCall = repairImplicitLocalDirectoryToolCall(
             event.toolCall,
             input.content,
@@ -753,6 +883,56 @@ export class AgentCore {
         stopReason = event.stopReason;
       }
 
+      if (finalAnswerStreamingStep && !assistantText.trim() && pendingFinalAnswerDraft.trim()) {
+        assistantText = pendingFinalAnswerDraft;
+        assistantTextStreamedAsMessage = true;
+        emittedFinalText = true;
+        yield {
+          type: "message_delta",
+          sessionId: input.sessionId,
+          agentId: agent.id,
+          text: pendingFinalAnswerDraft,
+        };
+      }
+      if (finalAnswerStreamingStep) {
+        pendingFinalAnswerDraft = "";
+      }
+
+      if (finalAnswerPayload) {
+        const statusText = [
+          assistantTextStreamedAsStatus ? "" : assistantText.trim(),
+          finalAnswerPayload.status.trim(),
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        if (statusText) {
+          yield {
+            type: "status_delta",
+            sessionId: input.sessionId,
+            agentId: agent.id,
+            text: statusText,
+          };
+        }
+
+        finalAnswerStreamingRequested = true;
+        pendingFinalAnswerDraft = finalAnswerPayload.answer;
+        session.messages.push({
+          role: "user",
+          content: createFinalAnswerStreamingInstruction(finalAnswerPayload),
+        });
+        this.sessions.save(session);
+        continue;
+      }
+
+      if (calledTool && assistantText.trim() && !assistantTextStreamedAsStatus) {
+        yield {
+          type: "status_delta",
+          sessionId: input.sessionId,
+          agentId: agent.id,
+          text: assistantText,
+        };
+      }
+
       for await (const toolEvent of this.executePreparedToolCalls({
         turnInput: input,
         agentId: agent.id,
@@ -783,12 +963,34 @@ export class AgentCore {
       }
 
       const pendingToolMessages = toolMessageSlots.filter((message): message is AgentMessage => Boolean(message));
+      const hasPlainPostToolText =
+        finalAnswerToolAvailable && !calledTool && assistantText.trim().length > 0;
 
-      if (!calledTool && assistantText.trim()) {
-        emittedFinalText = true;
+      if (hasPlainPostToolText && !assistantTextStreamedAsStatus) {
+        yield {
+          type: "status_delta",
+          sessionId: input.sessionId,
+          agentId: agent.id,
+          text: assistantText,
+        };
       }
 
-      if (assistantText || assistantToolCalls.length > 0) {
+      if (!calledTool && assistantText.trim() && !hasPlainPostToolText && !assistantTextStreamedAsMessage) {
+        emittedFinalText = true;
+        for (const text of assistantTextChunks) {
+          if (!text) {
+            continue;
+          }
+          yield {
+            type: "message_delta",
+            sessionId: input.sessionId,
+            agentId: agent.id,
+            text,
+          };
+        }
+      }
+
+      if ((!hasPlainPostToolText && assistantText) || assistantToolCalls.length > 0) {
         session.messages.push({
           role: "assistant",
           content: assistantText,
@@ -800,6 +1002,40 @@ export class AgentCore {
       if (pendingToolMessages.length > 0) {
         this.sessions.save(session);
         sawToolResultThisTurn = true;
+      }
+
+      if (hasPlainPostToolText) {
+        finalAnswerProtocolRetries += 1;
+        if (step + 1 < maxTurns && finalAnswerProtocolRetries <= MAX_FINAL_ANSWER_PROTOCOL_RETRIES) {
+          session.messages.push({
+            role: "user",
+            content: FINAL_ANSWER_CONTINUATION_INSTRUCTION,
+          });
+          this.sessions.save(session);
+          continue;
+        }
+
+        stopReason = "end_turn";
+        emittedFinalText = true;
+        session.messages.push({
+          role: "assistant",
+          content: FINAL_ANSWER_PROTOCOL_FALLBACK_MESSAGE,
+          toolCalls: [],
+        });
+        this.sessions.save(session);
+        yield {
+          type: "message_delta",
+          sessionId: input.sessionId,
+          agentId: agent.id,
+          text: FINAL_ANSWER_PROTOCOL_FALLBACK_MESSAGE,
+        };
+        yield {
+          type: "turn_finished",
+          sessionId: input.sessionId,
+          agentId: agent.id,
+          stopReason,
+        };
+        return;
       }
 
       if (calledTool && step + 1 >= maxTurns) {

@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { AppTitleBar } from "../../src/features/navigation/AppTitleBar";
 import { PrimarySidebar } from "../../src/features/navigation/PrimarySidebar";
 
 test("primary sidebar no longer renders report or emergency modules", () => {
@@ -61,4 +62,25 @@ test("conversation rows swap time for delete in the same action slot on hover", 
     css,
     /\.sidebar-conversation-item:hover\s+\.sidebar-conversation-delete,\s*\.sidebar-conversation-item:focus-within\s+\.sidebar-conversation-delete\s*{[^}]*opacity:\s*1/s,
   );
+});
+
+test("window chrome does not reserve a top title area", () => {
+  const html = renderToStaticMarkup(
+    <AppTitleBar
+      view="chat"
+      sidebarWidth={280}
+      windowState={{ platform: "win32", maximized: false }}
+      onClose={() => undefined}
+      onMinimize={() => undefined}
+      onToggleMaximize={() => undefined}
+    />,
+  );
+
+  assert.doesNotMatch(html, /window-titlebar-copy/);
+  assert.doesNotMatch(html, /super-agents/);
+  assert.match(html, /window-controls-overlay/);
+
+  const css = readFileSync(path.resolve(process.cwd(), "..", "src/styles.css"), "utf8");
+  assert.match(css, /\.window-frame\s*{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)/s);
+  assert.match(css, /\.window-controls-overlay\s*{[^}]*position:\s*absolute/s);
 });

@@ -6,9 +6,8 @@
   CheckCircle2,
   ChevronDown,
   Copy,
-  Download,
-  FileText,
   LoaderCircle,
+  MoreHorizontal,
   Mic,
   Paperclip,
   Square,
@@ -57,11 +56,11 @@ import {
   shouldAutoScrollMessageList,
 } from "../../lib/chat-scroll";
 import { copyTextToClipboard } from "./clipboard";
+import { buildConversationCopyMarkdown } from "./conversation-markdown";
 import { ComposerRichInput, type ComposerRichInputHandle } from "./ComposerRichInput";
 import { RichMarkdown } from "../shared/RichMarkdown";
 import type {
   ChatConversation,
-  ChatConversationExportFormat,
   ChatMessage,
   ChatMessageRuntimeTrace,
   ChatConversationRuntimeState,
@@ -93,7 +92,6 @@ interface ChatWorkspaceProps {
   selectedKnowledgeBaseIds: string[];
   skills: SkillConfig[];
   onDraftMessageChange: (value: string) => void;
-  onExportConversation: (format: ChatConversationExportFormat) => void;
   onClearKnowledgeBases: () => void;
   onManageKnowledgeBases: () => void;
   onModelChange: (modelId: string) => void;
@@ -108,30 +106,33 @@ interface ChatWorkspaceProps {
   voiceInputState: "idle" | "recording" | "transcribing";
   voiceInputSupported: boolean;
   scrollToBottomRequest: number;
-  exportingConversationFormat: ChatConversationExportFormat | null;
   onToast: (message: string) => void;
 }
 
 function RuntimeTraceGroup({
   children,
   endedAt,
+  hasAssistantText,
   hasError,
   isStreaming,
   startedAt,
 }: {
   children: JSX.Element[];
   endedAt?: number;
+  hasAssistantText?: boolean;
   hasError?: boolean;
   isStreaming?: boolean;
   startedAt?: number;
 }) {
-  const [open, setOpen] = useState(() => shouldOpenRuntimeTraceGroup(isStreaming));
+  const [open, setOpen] = useState(() =>
+    shouldOpenRuntimeTraceGroup({ isStreaming, hasAssistantText }),
+  );
   const fallbackStartedAt = useRef(Date.now());
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    setOpen(shouldOpenRuntimeTraceGroup(isStreaming));
-  }, [isStreaming]);
+    setOpen(shouldOpenRuntimeTraceGroup({ isStreaming, hasAssistantText }));
+  }, [hasAssistantText, isStreaming]);
 
   useEffect(() => {
     if (!isStreaming) {
@@ -159,7 +160,7 @@ function RuntimeTraceGroup({
       className={`runtime-trace-group ${open ? "open" : ""} ${isStreaming ? "streaming" : ""}`}
       onToggle={(event) => {
         const nextOpen = event.currentTarget.open;
-        if (isStreaming && !nextOpen) {
+        if (shouldOpenRuntimeTraceGroup({ isStreaming, hasAssistantText }) && !nextOpen) {
           setOpen(true);
           return;
         }
@@ -175,16 +176,6 @@ function RuntimeTraceGroup({
     </details>
   );
 }
-
-const CONVERSATION_EXPORT_OPTIONS: Array<{
-  format: ChatConversationExportFormat;
-  label: string;
-  detail: string;
-}> = [
-  { format: "pdf", label: "PDF", detail: ".pdf" },
-  { format: "markdown", label: "Markdown", detail: ".md" },
-  { format: "word", label: "Word", detail: ".docx" },
-];
 
 function formatCompactModelLabel(label: string) {
   const trimmed = label.trim();
@@ -347,7 +338,6 @@ export function ChatWorkspace({
   selectedKnowledgeBaseIds,
   skills,
   onDraftMessageChange,
-  onExportConversation,
   onClearKnowledgeBases,
   onManageKnowledgeBases,
   onModelChange,
@@ -362,14 +352,13 @@ export function ChatWorkspace({
   voiceInputState,
   voiceInputSupported,
   scrollToBottomRequest,
-  exportingConversationFormat,
   onToast,
 }: ChatWorkspaceProps) {
   const composerInputRef = useRef<ComposerRichInputHandle | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const knowledgePickerRef = useRef<HTMLDivElement | null>(null);
   const modelPickerRef = useRef<HTMLDivElement | null>(null);
-  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  const threadActionMenuRef = useRef<HTMLDivElement | null>(null);
   const autoScrollManuallyDetachedRef = useRef(false);
   const autoScrollPinnedToBottomRef = useRef(true);
   const autoScrollStateRef = useRef<{
@@ -383,7 +372,7 @@ export function ChatWorkspace({
   });
   const [knowledgePickerOpen, setKnowledgePickerOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [threadActionMenuOpen, setThreadActionMenuOpen] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [activeSkillSuggestionIndex, setActiveSkillSuggestionIndex] = useState(0);
   const composerSkillTrigger = getComposerSkillTrigger(draftMessage);
@@ -414,7 +403,7 @@ export function ChatWorkspace({
   }, [composerSkillTrigger?.query, skillSuggestions.length]);
 
   useEffect(() => {
-    if (!knowledgePickerOpen && !modelPickerOpen && !exportMenuOpen) return undefined;
+    if (!knowledgePickerOpen && !modelPickerOpen && !threadActionMenuOpen) return undefined;
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -427,8 +416,8 @@ export function ChatWorkspace({
         setModelPickerOpen(false);
       }
 
-      if (exportMenuRef.current && !exportMenuRef.current.contains(target)) {
-        setExportMenuOpen(false);
+      if (threadActionMenuRef.current && !threadActionMenuRef.current.contains(target)) {
+        setThreadActionMenuOpen(false);
       }
     };
 
@@ -436,7 +425,7 @@ export function ChatWorkspace({
       if (event.key === "Escape") {
         setKnowledgePickerOpen(false);
         setModelPickerOpen(false);
-        setExportMenuOpen(false);
+        setThreadActionMenuOpen(false);
       }
     };
 
@@ -446,7 +435,7 @@ export function ChatWorkspace({
       window.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleWindowKeyDown);
     };
-  }, [exportMenuOpen, knowledgePickerOpen, modelPickerOpen]);
+  }, [knowledgePickerOpen, modelPickerOpen, threadActionMenuOpen]);
 
   const isHome = activeConversation === null;
   const canSend = !busy && (draftMessage.trim().length > 0 || attachments.length > 0);
@@ -758,46 +747,47 @@ export function ChatWorkspace({
     }
   }
 
-  function renderExportMenu() {
-    const exporting = Boolean(exportingConversationFormat);
+  async function copyConversationMarkdown() {
+    if (!activeConversation) {
+      onToast("没有可复制内容");
+      return;
+    }
 
+    try {
+      await copyTextToClipboard(buildConversationCopyMarkdown(activeConversation));
+      setThreadActionMenuOpen(false);
+      onToast("已复制 Markdown");
+    } catch {
+      onToast("复制失败");
+    }
+  }
+
+  function renderThreadActions() {
     return (
-      <div ref={exportMenuRef} className="chat-export-menu">
+      <div ref={threadActionMenuRef} className="chat-thread-actions">
         <button
-          aria-expanded={exportMenuOpen}
+          aria-expanded={threadActionMenuOpen}
           aria-haspopup="menu"
-          aria-label={exporting ? "正在导出会话" : "导出会话"}
-          className={`chat-export-trigger ${exportMenuOpen ? "open" : ""}`}
-          disabled={exporting}
-          onClick={() => setExportMenuOpen((current) => !current)}
-          title={exporting ? "正在导出" : "导出会话"}
+          aria-label="会话操作"
+          className={`chat-thread-actions-trigger ${threadActionMenuOpen ? "open" : ""}`}
+          onClick={() => setThreadActionMenuOpen((current) => !current)}
+          title="会话操作"
           type="button"
         >
-          {exporting ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />}
+          <MoreHorizontal size={17} />
         </button>
 
-        {exportMenuOpen ? (
-          <div className="chat-export-panel" role="menu">
-            {CONVERSATION_EXPORT_OPTIONS.map((option) => {
-              const optionExporting = exportingConversationFormat === option.format;
-              return (
-                <button
-                  key={option.format}
-                  className="chat-export-option"
-                  disabled={exporting}
-                  onClick={() => {
-                    setExportMenuOpen(false);
-                    onExportConversation(option.format);
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <FileText size={15} />
-                  <span>{option.label}</span>
-                  <small>{optionExporting ? "导出中" : option.detail}</small>
-                </button>
-              );
-            })}
+        {threadActionMenuOpen ? (
+          <div className="chat-thread-actions-panel" role="menu">
+            <button
+              className="chat-thread-actions-option"
+              onClick={() => void copyConversationMarkdown()}
+              role="menuitem"
+              type="button"
+            >
+              <Copy size={15} />
+              <span>复制为 Markdown</span>
+            </button>
           </div>
         ) : null}
       </div>
@@ -1528,6 +1518,7 @@ export function ChatWorkspace({
 
   function renderRuntimeActivity(blocks: JSX.Element[], options?: {
     endedAt?: number;
+    hasAssistantText?: boolean;
     hasError?: boolean;
     isStreaming?: boolean;
     startedAt?: number;
@@ -1541,6 +1532,7 @@ export function ChatWorkspace({
         <div className="message-bubble">
           <RuntimeTraceGroup
             endedAt={options?.endedAt}
+            hasAssistantText={options?.hasAssistantText}
             hasError={options?.hasError}
             isStreaming={options?.isStreaming}
             startedAt={options?.startedAt}
@@ -1689,7 +1681,7 @@ export function ChatWorkspace({
           <div className="chat-thread-title" title={activeConversation.title}>
             {activeConversation.title}
           </div>
-          {renderExportMenu()}
+          {renderThreadActions()}
         </div>
         <div
           ref={messageListRef}
@@ -1711,6 +1703,7 @@ export function ChatWorkspace({
 
           {renderRuntimeActivity(runtimeBlocks, {
             endedAt: inlineAssistantMessage?.updatedAt,
+            hasAssistantText: hasStreamingAssistantText,
             hasError: runtimeState?.status === "failed",
             isStreaming: runtimeInProgress,
             startedAt: inlineAssistantMessage?.createdAt,

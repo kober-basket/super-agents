@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { createRuntimeModelId } from "../../src/lib/model-config";
 import { getAudioTranscriptionModelCandidates, WorkspaceService } from "../../electron/workspace-service";
 
 test("audio transcription candidates prefer configured speech models before fallbacks", () => {
@@ -28,6 +29,154 @@ test("audio transcription candidates prefer configured speech models before fall
     "gpt-4o-transcribe",
     "whisper-1",
   ]);
+});
+
+test("audio transcription falls back to a speech-capable provider when the active provider does not support it", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const service = new WorkspaceService(statePath);
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; model: string }> = [];
+
+  globalThis.fetch = (async (url, init) => {
+    const body = init?.body instanceof FormData ? init.body : null;
+    calls.push({
+      url: String(url),
+      model: String(body?.get("model") ?? ""),
+    });
+
+    if (String(url).startsWith("https://api.deepseek.com")) {
+      return new Response(JSON.stringify({ error: { message: "model not found" } }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify({ text: "你好" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await service.updateConfig({
+      activeModelId: createRuntimeModelId("deepseek", "deepseek-chat"),
+      modelProviders: [
+        {
+          id: "deepseek",
+          name: "DeepSeek",
+          kind: "openai-compatible",
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKey: "sk-deepseek",
+          temperature: 0.2,
+          maxTokens: 4096,
+          enabled: true,
+          models: [{ id: "deepseek-chat", label: "DeepSeek Chat", enabled: true }],
+        },
+        {
+          id: "openai",
+          name: "OpenAI",
+          kind: "openai-compatible",
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "sk-openai",
+          temperature: 0.2,
+          maxTokens: 4096,
+          enabled: true,
+          models: [{ id: "gpt-4o-mini-transcribe", label: "GPT-4o Mini Transcribe", enabled: true }],
+        },
+      ],
+    });
+
+    const result = await service.transcribeAudio({
+      providerId: "deepseek",
+      fileName: "voice-input.webm",
+      mimeType: "audio/webm",
+      audioBase64: Buffer.from("fake audio").toString("base64"),
+      language: "zh",
+    });
+
+    assert.equal(result.text, "你好");
+    assert.equal(result.providerId, "openai");
+    assert.equal(result.modelId, "gpt-4o-mini-transcribe");
+    assert.equal(calls.some((call) => call.url === "https://api.deepseek.com/v1/audio/transcriptions"), true);
+    assert.equal(calls.at(-1)?.url, "https://api.openai.com/v1/audio/transcriptions");
+  } finally {
+    globalThis.fetch = originalFetch;
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("audio transcription retries fallback models when a distributor has no channel for the first model", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const service = new WorkspaceService(statePath);
+  const originalFetch = globalThis.fetch;
+  const models: string[] = [];
+
+  globalThis.fetch = (async (_url, init) => {
+    const body = init?.body instanceof FormData ? init.body : null;
+    const model = String(body?.get("model") ?? "");
+    models.push(model);
+
+    if (model === "gpt-4o-mini-transcribe") {
+      return new Response(
+        JSON.stringify({
+          error: {
+            message:
+              "No available channel for model gpt-4o-mini-transcribe under group default (distributor)",
+          },
+        }),
+        {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    }
+
+    return new Response(JSON.stringify({ text: "你好" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await service.updateConfig({
+      activeModelId: createRuntimeModelId("openai", "gpt-5-mini"),
+      modelProviders: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          kind: "openai-compatible",
+          baseUrl: "https://api.example.com/v1",
+          apiKey: "sk-openai",
+          temperature: 0.2,
+          maxTokens: 4096,
+          enabled: true,
+          models: [
+            { id: "gpt-5-mini", label: "GPT-5 Mini", enabled: true },
+            { id: "gpt-4o-mini-transcribe", label: "GPT-4o Mini Transcribe", enabled: true },
+          ],
+        },
+      ],
+    });
+
+    const result = await service.transcribeAudio({
+      providerId: "openai",
+      fileName: "voice-input.webm",
+      mimeType: "audio/webm",
+      audioBase64: Buffer.from("fake audio").toString("base64"),
+      language: "zh",
+    });
+
+    assert.equal(result.text, "你好");
+    assert.equal(result.modelId, "gpt-4o-transcribe");
+    assert.deepEqual(models, ["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("workspace service keeps full filesystem access disabled by default", async () => {

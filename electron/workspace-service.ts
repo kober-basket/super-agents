@@ -353,12 +353,70 @@ export function getAudioTranscriptionModelCandidates(provider: ModelProviderConf
   return Array.from(new Set([...configured, ...DEFAULT_TRANSCRIPTION_MODEL_IDS]));
 }
 
+function hasConfiguredAudioTranscriptionModel(provider: ModelProviderConfig) {
+  return provider.models.some((model) =>
+    TRANSCRIPTION_MODEL_REGEX.test(`${model.id} ${model.label} ${model.description ?? ""}`),
+  );
+}
+
+function getAudioTranscriptionProviderCandidates(config: AppConfig, requestedProviderId: string) {
+  const activeModel = getActiveModelOption(config.modelProviders, config.activeModelId);
+  const candidateIds = [
+    requestedProviderId,
+    activeModel?.providerId ?? "",
+    ...config.modelProviders
+      .filter((provider) => hasConfiguredAudioTranscriptionModel(provider))
+      .map((provider) => provider.id),
+    ...config.modelProviders.map((provider) => provider.id),
+  ]
+    .map((providerId) => providerId.trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const candidates: ModelProviderConfig[] = [];
+
+  for (const providerId of candidateIds) {
+    if (seen.has(providerId)) {
+      continue;
+    }
+    seen.add(providerId);
+
+    const provider = config.modelProviders.find((item) => item.id === providerId);
+    if (provider && provider.enabled !== false) {
+      candidates.push(provider);
+    }
+  }
+
+  return candidates;
+}
+
 function shouldRetryWithAnotherTranscriptionModel(status: number, message: string) {
+  if (
+    /(no available channel|channel.*not available|no route|no provider|distributor)/i.test(
+      message,
+    )
+  ) {
+    return true;
+  }
+
   if (!(status === 400 || status === 404)) {
     return false;
   }
 
   return /(model|engine).*(not found|does not exist|unsupported|invalid)|unknown model|unsupported model/i.test(
+    message,
+  );
+}
+
+function shouldRetryWithAnotherTranscriptionProvider(status: number, message: string) {
+  if (shouldRetryWithAnotherTranscriptionModel(status, message)) {
+    return true;
+  }
+
+  if (status !== 400 && status !== 404) {
+    return false;
+  }
+
+  return /audio\/transcriptions|transcription|endpoint|route|not found|cannot\s+(post|get)/i.test(
     message,
   );
 }
@@ -1057,29 +1115,10 @@ export class WorkspaceService {
   async transcribeAudio(input: AudioTranscriptionInput): Promise<AudioTranscriptionResult> {
     const config = (await this.loadState()).config;
     const requestedProviderId = input.providerId?.trim() || "";
-    const provider =
-      (requestedProviderId
-        ? config.modelProviders.find((item) => item.id === requestedProviderId)
-        : null) ??
-      (() => {
-        const activeModel = getActiveModelOption(config.modelProviders, config.activeModelId);
-        return activeModel
-          ? config.modelProviders.find((item) => item.id === activeModel.providerId)
-          : null;
-      })() ??
-      config.modelProviders.find((item) => item.enabled !== false) ??
-      null;
+    const providers = getAudioTranscriptionProviderCandidates(config, requestedProviderId);
 
-    if (!provider || provider.enabled === false) {
+    if (providers.length === 0) {
       throw new Error("请先配置可用的模型提供商，再使用语音输入");
-    }
-
-    if (provider.kind !== "openai-compatible") {
-      throw new Error("当前仅支持 OpenAI 兼容提供商的语音转写");
-    }
-
-    if (!provider.baseUrl.trim()) {
-      throw new Error("当前提供商缺少接口地址，无法进行语音转写");
     }
 
     const audioBase64 = input.audioBase64.trim();
@@ -1094,55 +1133,68 @@ export class WorkspaceService {
 
     const mimeType = input.mimeType.trim() || "audio/webm";
     const fileName = input.fileName.trim() || "voice-input.webm";
-    const url = createAudioTranscriptionUrl(provider.baseUrl);
-    const headers = createOpenAiCompatibleHeaders(provider.apiKey);
-    const modelCandidates = getAudioTranscriptionModelCandidates(provider);
     let retryableErrorMessage = "";
 
-    for (const modelId of modelCandidates) {
-      const formData = new FormData();
-      formData.set(
-        "file",
-        new File([audioBuffer], fileName, {
-          type: mimeType,
-        }),
-      );
-      formData.set("model", modelId);
-      formData.set("language", input.language?.trim() || "zh");
+    for (const provider of providers) {
+      if (provider.kind !== "openai-compatible") {
+        retryableErrorMessage = "当前仅支持 OpenAI 兼容提供商的语音转写";
+        continue;
+      }
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: formData,
-      });
-      const rawText = await response.text();
-      const parsed = rawText ? safeParseJson(rawText) : null;
-      const fallbackMessage = rawText.trim() || `语音转写失败 (${response.status})`;
+      if (!provider.baseUrl.trim()) {
+        retryableErrorMessage = "当前提供商缺少接口地址，无法进行语音转写";
+        continue;
+      }
 
-      if (!response.ok) {
-        const message = extractResponseErrorMessage(parsed, fallbackMessage);
-        if (shouldRetryWithAnotherTranscriptionModel(response.status, message)) {
-          retryableErrorMessage = message;
-          continue;
+      const url = createAudioTranscriptionUrl(provider.baseUrl);
+      const headers = createOpenAiCompatibleHeaders(provider.apiKey);
+      const modelCandidates = getAudioTranscriptionModelCandidates(provider);
+
+      for (const modelId of modelCandidates) {
+        const formData = new FormData();
+        formData.set(
+          "file",
+          new File([audioBuffer], fileName, {
+            type: mimeType,
+          }),
+        );
+        formData.set("model", modelId);
+        formData.set("language", input.language?.trim() || "zh");
+
+        const response = await fetch(url, {
+          method: "POST",
+          headers,
+          body: formData,
+        });
+        const rawText = await response.text();
+        const parsed = rawText ? safeParseJson(rawText) : null;
+        const fallbackMessage = rawText.trim() || `语音转写失败 (${response.status})`;
+
+        if (!response.ok) {
+          const message = extractResponseErrorMessage(parsed, fallbackMessage);
+          if (shouldRetryWithAnotherTranscriptionProvider(response.status, message)) {
+            retryableErrorMessage = message;
+            continue;
+          }
+
+          throw new Error(message);
         }
 
-        throw new Error(message);
+        const text =
+          typeof (parsed as { text?: unknown } | null)?.text === "string"
+            ? String((parsed as { text: string }).text).trim()
+            : rawText.trim();
+
+        if (!text) {
+          throw new Error("语音转写完成，但没有返回可用文本");
+        }
+
+        return {
+          text,
+          providerId: provider.id,
+          modelId,
+        };
       }
-
-      const text =
-        typeof (parsed as { text?: unknown } | null)?.text === "string"
-          ? String((parsed as { text: string }).text).trim()
-          : rawText.trim();
-
-      if (!text) {
-        throw new Error("语音转写完成，但没有返回可用文本");
-      }
-
-      return {
-        text,
-        providerId: provider.id,
-        modelId,
-      };
     }
 
     throw new Error(
