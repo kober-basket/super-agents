@@ -190,11 +190,7 @@ function summarizeAttachments(attachments: FileDropEntry[]) {
 }
 
 function buildConversationTitle(content: string, attachments: FileDropEntry[]) {
-  const attachmentSummary = summarizeAttachments(attachments);
-  const base = (content || (attachmentSummary ? `Attachments: ${attachmentSummary}` : "New conversation"))
-    .replace(/\s+/g, " ")
-    .trim();
-  return base.length > 32 ? `${base.slice(0, 32)}...` : base;
+  return "新对话";
 }
 
 function buildConversationPreview(content: string, attachments: FileDropEntry[]) {
@@ -562,6 +558,29 @@ export class ConversationService {
         WHERE id = ?
       `)
       .run(now, now, preview, conversationId);
+  }
+
+  async updateConversationTitle(conversationId: string, title: string): Promise<ChatConversation> {
+    const nextTitle = title.replace(/\s+/g, " ").trim();
+    if (!nextTitle) {
+      throw new Error("Conversation title is required");
+    }
+
+    const database = this.getDatabase();
+    const now = Date.now();
+    const result = database
+      .prepare(`
+        UPDATE conversations
+        SET title = ?, updated_at = ?
+        WHERE id = ?
+      `)
+      .run(nextTitle, now, conversationId);
+
+    if (result.changes === 0) {
+      throw new Error("Conversation not found");
+    }
+
+    return await this.getConversation(conversationId);
   }
 
   async setConversationAgentSession(

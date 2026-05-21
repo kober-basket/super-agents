@@ -274,21 +274,6 @@ test("native agent core continues when a model returns only hidden reasoning", a
       { type: "text_delta", text: "Gold report based on value:gold." },
       { type: "done", stopReason: "end_turn" },
     ],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-gold-status",
-          name: "finish_task",
-          input: {},
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      { type: "text_delta", text: "Final gold report." },
-      { type: "done", stopReason: "end_turn" },
-    ],
   ]);
   const core = createCore(gateway);
 
@@ -307,13 +292,13 @@ test("native agent core continues when a model returns only hidden reasoning", a
   );
   assert.deepEqual(
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["Final gold report."],
+    ["Gold report based on value:gold."],
   );
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    ["Gold report based on value:gold."],
+    [],
   );
-  assert.equal(gateway.requests.length, 5);
+  assert.equal(gateway.requests.length, 3);
   assert.match(
     gateway.requests[1]?.messages.at(-1)?.content ?? "",
     /only hidden reasoning and no visible answer or tool call/i,
@@ -365,17 +350,6 @@ test("native agent core routes pre-tool visible text into process status", async
       { type: "done", stopReason: "tool_use" },
     ],
     [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-prelude",
-          name: "finish_task",
-          input: {},
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
       { type: "text_delta", text: "Final answer only." },
       { type: "done", stopReason: "end_turn" },
     ],
@@ -412,7 +386,7 @@ test("native agent core routes pre-tool visible text into process status", async
   });
 });
 
-test("native agent core clears provisional text before the final-only phase", async () => {
+test("native agent core uses the first no-tool text after tools as the final answer", async () => {
   const gateway = new ScriptedModelGateway([
     [
       {
@@ -427,18 +401,6 @@ test("native agent core clears provisional text before the final-only phase", as
     ],
     [
       { type: "text_delta", text: "I have enough information now." },
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-preamble",
-          name: "finish_task",
-          input: {},
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      { type: "text_delta", text: "Final answer." },
       { type: "done", stopReason: "end_turn" },
     ],
   ]);
@@ -455,21 +417,21 @@ test("native agent core clears provisional text before the final-only phase", as
 
   assert.deepEqual(
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["Final answer."],
+    ["I have enough information now."],
   );
   assert.deepEqual(events.filter((event) => event.type === "message_replace"), []);
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    ["I have enough information now."],
+    [],
   );
   assert.deepEqual(core.getSession("finish-clears-provisional-session")?.messages.at(-1), {
     role: "assistant",
-    content: "Final answer.",
+    content: "I have enough information now.",
     toolCalls: [],
   });
 });
 
-test("native agent core requires a tool choice after tool results until finish_task is called", async () => {
+test("native agent core does not require finish_task after tool results", async () => {
   const gateway = new ScriptedModelGateway([
     [
       {
@@ -478,17 +440,6 @@ test("native agent core requires a tool choice after tool results until finish_t
           id: "tool-before-required-choice",
           name: "lookup",
           input: { key: "alpha" },
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-required-choice",
-          name: "finish_task",
-          input: {},
         },
       },
       { type: "done", stopReason: "tool_use" },
@@ -509,13 +460,12 @@ test("native agent core requires a tool choice after tool results until finish_t
   }
 
   assert.equal(gateway.requests[0]?.toolChoice, "auto");
-  assert.equal(gateway.requests[1]?.toolChoice, "required");
-  assert.ok(gateway.requests[1]?.tools.some((tool) => tool.name === "finish_task"));
-  assert.equal(gateway.requests[2]?.tools.length, 0);
-  assert.equal(gateway.requests[2]?.toolChoice, "none");
+  assert.equal(gateway.requests[1]?.toolChoice, "auto");
+  assert.equal(gateway.requests.some((request) => request.tools.some((tool) => tool.name === "finish_task")), false);
+  assert.equal(gateway.requests.length, 2);
 });
 
-test("native agent core routes no-tool text after tools into process status and keeps executing", async () => {
+test("native agent core uses no-tool text after tools as the final answer", async () => {
   const gateway = new ScriptedModelGateway([
     [
       {
@@ -533,21 +483,6 @@ test("native agent core routes no-tool text after tools into process status and 
       { type: "text_delta", text: "lookups are complete." },
       { type: "done", stopReason: "end_turn" },
     ],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-post-tool-text",
-          name: "finish_task",
-          input: {},
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      { type: "text_delta", text: "Final answer after the lookup." },
-      { type: "done", stopReason: "end_turn" },
-    ],
   ]);
   const core = createCore(gateway);
 
@@ -560,119 +495,29 @@ test("native agent core routes no-tool text after tools into process status and 
     events.push(event);
   }
 
-  assert.equal(gateway.requests.length, 4);
+  assert.equal(gateway.requests.length, 2);
   assert.equal(gateway.requests.some((request) => request.tools.some((tool) => tool.name === "final_answer")), false);
-  assert.match(
-    gateway.requests[2]?.messages.at(-1)?.content ?? "",
-    /previous execution-phase response did not call a tool/i,
-  );
+  assert.equal(gateway.requests.some((request) => request.tools.some((tool) => tool.name === "finish_task")), false);
   assert.deepEqual(
     events.filter((event) => event.type === "tool_call_started").map((event) => event.toolCall.name),
     ["lookup"],
   );
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    ["All requested ", "lookups are complete."],
+    [],
   );
   assert.deepEqual(
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["Final answer after the lookup."],
+    ["All requested lookups are complete."],
   );
   assert.deepEqual(core.getSession("final-answer-boundary-session")?.messages.at(-1), {
     role: "assistant",
-    content: "Final answer after the lookup.",
+    content: "All requested lookups are complete.",
     toolCalls: [],
   });
 });
 
-test("native agent core streams the final-only phase immediately after a finish signal", async () => {
-  let releaseFinal: (() => void) | undefined;
-  const finalMayFinish = new Promise<void>((resolve) => {
-    releaseFinal = resolve;
-  });
-  const gateway: ModelGateway & { requests: ModelRequest[] } = {
-    requests: [],
-    async *stream(input: ModelRequest): AsyncIterable<ModelEvent> {
-      this.requests.push(input);
-      if (this.requests.length === 1) {
-        yield {
-          type: "tool_call",
-          toolCall: {
-            id: "tool-before-finish",
-            name: "lookup",
-            input: { key: "alpha" },
-          },
-        };
-        yield { type: "done", stopReason: "tool_use" };
-        return;
-      }
-      if (this.requests.length === 2) {
-        yield {
-          type: "tool_call",
-          toolCall: {
-            id: "finish-after-tool",
-            name: "finish_task",
-            input: {},
-          },
-        };
-        yield { type: "done", stopReason: "tool_use" };
-        return;
-      }
-      yield { type: "text_delta", text: "Final " };
-      await finalMayFinish;
-      yield { type: "text_delta", text: "answer." };
-      yield { type: "done", stopReason: "end_turn" };
-    },
-  };
-  const core = createCore(gateway);
-  const iterator = core
-    .sendTurn({
-      sessionId: "finish-final-stream-session",
-      agentId: "neutral",
-      content: "look up then finish",
-    })
-    [Symbol.asyncIterator]();
-
-  const events = [];
-  let firstFinalDelta: Awaited<ReturnType<typeof iterator.next>> | undefined;
-  while (true) {
-    const next = await iterator.next();
-    if (next.done) {
-      break;
-    }
-    events.push(next.value);
-    if (next.value.type === "message_delta") {
-      firstFinalDelta = next;
-      break;
-    }
-  }
-
-  assert.equal(firstFinalDelta?.value.type, "message_delta");
-  assert.equal(firstFinalDelta?.value.text, "Final ");
-  assert.equal(gateway.requests.length, 3);
-  assert.equal(gateway.requests[2]?.tools.length, 0);
-
-  releaseFinal?.();
-  while (true) {
-    const next = await iterator.next();
-    if (next.done) {
-      break;
-    }
-    events.push(next.value);
-  }
-
-  assert.deepEqual(
-    events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["Final ", "answer."],
-  );
-  assert.deepEqual(core.getSession("finish-final-stream-session")?.messages.at(-1), {
-    role: "assistant",
-    content: "Final answer.",
-    toolCalls: [],
-  });
-});
-
-test("native agent core does not ask for final_answer after plain post-tool process text", async () => {
+test("native agent core does not ask for final_answer after plain post-tool text", async () => {
   const gateway = new ScriptedModelGateway([
     [
       {
@@ -696,21 +541,6 @@ test("native agent core does not ask for final_answer after plain post-tool proc
       },
       { type: "done", stopReason: "end_turn" },
     ],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-plain-post-tool-text",
-          name: "finish_task",
-          input: {},
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      { type: "text_delta", text: "Final answer after plain process text." },
-      { type: "done", stopReason: "end_turn" },
-    ],
   ]);
   const core = createCore(gateway);
 
@@ -723,21 +553,21 @@ test("native agent core does not ask for final_answer after plain post-tool proc
     events.push(event);
   }
 
-  assert.equal(gateway.requests.length, 4);
+  assert.equal(gateway.requests.length, 2);
   assert.equal(gateway.requests.some((request) => request.tools.some((tool) => tool.name === "final_answer")), false);
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    ["Third lookup completed.\n\n", "All requested lookups are complete."],
+    [],
   );
   assert.deepEqual(
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["Final answer after plain process text."],
+    ["Third lookup completed.\n\nAll requested lookups are complete."],
   );
 
   const sessionMessages = core.getSession("plain-post-tool-text-session")?.messages ?? [];
   assert.deepEqual(sessionMessages.at(-1), {
     role: "assistant",
-    content: "Final answer after plain process text.",
+    content: "Third lookup completed.\n\nAll requested lookups are complete.",
     toolCalls: [],
   });
 });
@@ -988,21 +818,6 @@ test("native agent core grants extra turns for explicit tool self-tests", async 
       { type: "text_delta", text: "工具自测完成。" },
       { type: "done", stopReason: "end_turn" },
     ],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-tool-self-test",
-          name: "finish_task",
-          input: {},
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      { type: "text_delta", text: "工具自测完成。" },
-      { type: "done", stopReason: "end_turn" },
-    ],
   ]);
   const agents = new AgentRegistry();
   const skills = new SkillRegistry();
@@ -1145,7 +960,7 @@ test("native agent core reports max turns instead of forcing synthesis after too
   assert.equal(turnFinished?.stopReason, "max_turns");
 });
 
-test("native agent core reuses duplicate tool calls within the same turn and keeps post-tool text in status", async () => {
+test("native agent core reuses duplicate tool calls within the same turn", async () => {
   const gateway = new ScriptedModelGateway([
     [
       {
@@ -1165,21 +980,6 @@ test("native agent core reuses duplicate tool calls within the same turn and kee
           id: "tool-second",
           name: "lookup",
           input: { key: "alpha" },
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      { type: "text_delta", text: "Final after reuse." },
-      { type: "done", stopReason: "end_turn" },
-    ],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-duplicate-reuse",
-          name: "finish_task",
-          input: {},
         },
       },
       { type: "done", stopReason: "tool_use" },
@@ -1210,7 +1010,7 @@ test("native agent core reuses duplicate tool calls within the same turn and kee
   );
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    ["Final after reuse."],
+    [],
   );
   assert.deepEqual(
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
@@ -1384,7 +1184,7 @@ test("native agent core runs concurrency-safe tool calls in parallel while prese
   assert.deepEqual(toolMessages, ["value:alpha", "value:beta"]);
 });
 
-test("native agent core retries an empty no-tool response after tools until finish signal", async () => {
+test("native agent core retries an empty no-tool response after tools until final text", async () => {
   const gateway = new ScriptedModelGateway([
     [
       {
@@ -1398,17 +1198,6 @@ test("native agent core retries an empty no-tool response after tools until fini
       { type: "done", stopReason: "tool_use" },
     ],
     [{ type: "done", stopReason: "end_turn" }],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-empty-tool-response",
-          name: "finish_task",
-          input: {},
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
     [
       { type: "text_delta", text: "最终结论。" },
       { type: "done", stopReason: "end_turn" },
@@ -1427,11 +1216,11 @@ test("native agent core retries an empty no-tool response after tools until fini
 
   const messageDeltas = events.filter((event) => event.type === "message_delta").map((event) => event.text);
   assert.deepEqual(messageDeltas, ["最终结论。"]);
-  assert.equal(gateway.requests.length, 4);
+  assert.equal(gateway.requests.length, 3);
   assert.ok((gateway.requests[1]?.tools.length ?? 0) > 0);
   assert.match(
     gateway.requests[2]?.messages.at(-1)?.content ?? "",
-    /previous execution-phase response did not call a tool/i,
+    /did not call a tool or write a visible answer/i,
   );
   const turnFinished = events.at(-1);
   assert.equal(turnFinished?.type, "turn_finished");
@@ -1439,7 +1228,7 @@ test("native agent core retries an empty no-tool response after tools until fini
   assert.equal(core.getSession("empty-no-tool-after-tool-session")?.messages.at(-1)?.content, "最终结论。");
 });
 
-test("native agent core treats first no-tool text after tools as process text", async () => {
+test("native agent core treats first no-tool text after tools as final text", async () => {
   const gateway = new ScriptedModelGateway([
     [
       {
@@ -1457,21 +1246,6 @@ test("native agent core treats first no-tool text after tools as process text", 
       { type: "text_delta", text: "三个命令执行完毕，汇总如下。" },
       { type: "done", stopReason: "end_turn" },
     ],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-first-no-tool-text",
-          name: "finish_task",
-          input: {},
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      { type: "text_delta", text: "最终结论。" },
-      { type: "done", stopReason: "end_turn" },
-    ],
   ]);
   const core = createCore(gateway);
 
@@ -1486,14 +1260,17 @@ test("native agent core treats first no-tool text after tools as process text", 
 
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    ["当前登录用户是 kober。\n\n", "三个命令执行完毕，汇总如下。"],
+    [],
   );
   assert.deepEqual(
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["最终结论。"],
+    ["当前登录用户是 kober。\n\n三个命令执行完毕，汇总如下。"],
   );
-  assert.equal(gateway.requests.length, 4);
-  assert.equal(core.getSession("empty-after-tool-session")?.messages.at(-1)?.content, "最终结论。");
+  assert.equal(gateway.requests.length, 2);
+  assert.equal(
+    core.getSession("empty-after-tool-session")?.messages.at(-1)?.content,
+    "当前登录用户是 kober。\n\n三个命令执行完毕，汇总如下。",
+  );
 });
 
 test("openai-compatible gateway maps streamed reasoning fields to reasoning deltas", async () => {
@@ -3366,21 +3143,6 @@ test("native agent core skips approval gates when full filesystem access is enab
       { type: "text_delta", text: "done" },
       { type: "done", stopReason: "end_turn" },
     ],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-full-access",
-          name: "finish_task",
-          input: {},
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      { type: "text_delta", text: "done" },
-      { type: "done", stopReason: "end_turn" },
-    ],
   ]);
   let approvalRequestCount = 0;
 
@@ -3441,7 +3203,7 @@ test("native agent core skips approval gates when full filesystem access is enab
   );
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    ["done"],
+    [],
   );
 });
 
@@ -3456,21 +3218,6 @@ test("native agent core rejects invalid required tool inputs before approval or 
         toolCall: {
           id: "invalid-shell-1",
           name: "shell_probe",
-          input: {},
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      { type: "text_delta", text: "参数无效，已停止。" },
-      { type: "done", stopReason: "end_turn" },
-    ],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-invalid-input",
-          name: "finish_task",
           input: {},
         },
       },
@@ -3548,7 +3295,7 @@ test("native agent core rejects invalid required tool inputs before approval or 
   );
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    ["参数无效，已停止。"],
+    [],
   );
 });
 
@@ -3561,21 +3308,6 @@ test("native agent core executes an allowed tool and feeds the result back to th
           id: "tool-1",
           name: "lookup",
           input: { key: "alpha" },
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      { type: "text_delta", text: "查到 value:alpha" },
-      { type: "done", stopReason: "end_turn" },
-    ],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-allowed-tool",
-          name: "finish_task",
-          input: {},
         },
       },
       { type: "done", stopReason: "tool_use" },
@@ -3598,7 +3330,7 @@ test("native agent core executes an allowed tool and feeds the result back to th
 
   assert.equal(events.some((event) => event.type === "tool_call_started"), true);
   assert.equal(events.some((event) => event.type === "tool_call_finished"), true);
-  assert.equal(gateway.requests.length, 4);
+  assert.equal(gateway.requests.length, 2);
   assert.deepEqual(gateway.requests[1]?.messages.at(-1), {
     role: "tool",
     name: "lookup",
@@ -3624,21 +3356,6 @@ test("native agent core denies tools outside the agent permission policy", async
       { type: "text_delta", text: "我不能执行这个工具。" },
       { type: "done", stopReason: "end_turn" },
     ],
-    [
-      {
-        type: "tool_call",
-        toolCall: {
-          id: "finish-after-denied-tool",
-          name: "finish_task",
-          input: {},
-        },
-      },
-      { type: "done", stopReason: "tool_use" },
-    ],
-    [
-      { type: "text_delta", text: "我不能执行这个工具。" },
-      { type: "done", stopReason: "end_turn" },
-    ],
   ]);
   const core = createCore(gateway);
 
@@ -3654,7 +3371,7 @@ test("native agent core denies tools outside the agent permission policy", async
   const denied = events.find((event) => event.type === "permission_denied");
   assert.equal(denied?.type, "permission_denied");
   assert.match(denied?.reason ?? "", /not registered|not allowed/);
-  assert.equal(gateway.requests.length, 4);
+  assert.equal(gateway.requests.length, 2);
   assert.match(gateway.requests[1]?.messages.at(-1)?.content ?? "", /Permission denied/);
 });
 

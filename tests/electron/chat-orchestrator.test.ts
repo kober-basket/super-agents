@@ -128,6 +128,78 @@ test("chat orchestrator forwards agent thoughts into runtime trace and thought e
   }
 });
 
+test("chat orchestrator updates a new conversation title from an AI summary after the first exchange", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
+  const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
+  await conversationService.initialize();
+
+  try {
+    const workspaceService = {
+      async getConfigSnapshot() {
+        return createConfig(tempDir);
+      },
+      async getEnabledSkillPromptContext() {
+        return "";
+      },
+      async searchKnowledgeBases() {
+        return { query: "", total: 0, results: [], searchedBases: [], warnings: [] };
+      },
+    } as unknown as WorkspaceService;
+
+    let resolveTitleUpdate!: (event: Extract<ChatEvent, { type: "conversation_updated" }>) => void;
+    const titleUpdated = new Promise<Extract<ChatEvent, { type: "conversation_updated" }>>((resolve) => {
+      resolveTitleUpdate = resolve;
+    });
+    const events: ChatEvent[] = [];
+    const orchestrator = new ChatOrchestrator(conversationService, workspaceService, (event) => {
+      events.push(event);
+      if (event.type === "conversation_updated") {
+        resolveTitleUpdate(event);
+      }
+    });
+
+    (orchestrator as unknown as {
+      nativeCore: {
+        sendTurn(): AsyncIterable<AgentEvent>;
+      };
+      titleGenerator: {
+        generate(input: { userMessage: string; assistantMessage: string }): Promise<string | null>;
+      };
+    }).nativeCore = {
+      async *sendTurn() {
+        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "I found the title-worthy intent." };
+        yield { type: "turn_finished", sessionId: "s", agentId: "a", stopReason: "end_turn" };
+      },
+    };
+    (orchestrator as unknown as {
+      titleGenerator: {
+        generate(input: { userMessage: string; assistantMessage: string }): Promise<string | null>;
+      };
+    }).titleGenerator = {
+      async generate(input) {
+        assert.equal(input.userMessage, "make title smarter");
+        assert.equal(input.assistantMessage, "I found the title-worthy intent.");
+        return "AI title summary";
+      },
+    };
+
+    const execution = await orchestrator.startTurnWithCompletion({ content: "make title smarter" });
+
+    assert.equal(execution.result.conversation.title, "新对话");
+    await execution.completion;
+
+    const updated = await waitFor(titleUpdated, "conversation title update");
+    assert.equal(updated.conversation.title, "AI title summary");
+    assert.equal(events.some((event) => event.type === "conversation_updated"), true);
+
+    const loaded = await conversationService.getConversation(execution.result.conversation.id);
+    assert.equal(loaded.title, "AI title summary");
+  } finally {
+    await conversationService.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("chat orchestrator emits message deltas before a native turn finishes", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
   const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));

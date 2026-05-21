@@ -35,6 +35,7 @@ import {
   upsertRuntimePermissionToolCall,
   upsertRuntimeToolCallStarted,
 } from "./chat/runtime-trace-recorder";
+import { ModelConversationTitleGenerator, type ConversationTitleGenerator } from "./chat-title-generator";
 import { ConversationService } from "./conversation-service";
 import { StreamingMessagePersister } from "./streaming-message-persister";
 import { WorkspaceService } from "./workspace-service";
@@ -57,6 +58,8 @@ interface ActiveTurn {
   runtimeTrace: ChatMessageRuntimeTrace;
   eventLog: TurnEventLog;
   messagePersister: StreamingMessagePersister;
+  shouldGenerateTitle: boolean;
+  userMessageContent: string;
   completion: Deferred<ChatTurnCompletionResult>;
   unregisterSessionHandlers: () => void;
   closed: boolean;
@@ -116,6 +119,7 @@ export class ChatOrchestrator {
   private readonly agentCoreId = "native";
   private readonly defaultAgentId = DEFAULT_AGENT_ID;
   private readonly nativeCore: AgentCore;
+  private titleGenerator: ConversationTitleGenerator;
 
   constructor(
     private readonly conversationService: ConversationService,
@@ -131,11 +135,13 @@ export class ChatOrchestrator {
     }
     tools.register(createSkillToolDefinition(this.workspaceService));
 
+    const modelGateway = new OpenAICompatibleModelGateway(async () => await this.workspaceService.getConfigSnapshot());
+    this.titleGenerator = new ModelConversationTitleGenerator(modelGateway);
     this.nativeCore = new AgentCore({
       agents,
       skills,
       tools,
-      modelGateway: new OpenAICompatibleModelGateway(async () => await this.workspaceService.getConfigSnapshot()),
+      modelGateway,
       sessions: new PersistentAgentSessionManager(this.conversationService),
       approvalHandler: this.approvalHandler,
     });
@@ -189,6 +195,8 @@ export class ChatOrchestrator {
         runtimeTrace: started.assistantMessage.runtimeTrace ?? createChatRuntimeTrace(),
         eventLog: new TurnEventLog(started.assistantMessage.runtimeTrace?.events ?? []),
         messagePersister: null as unknown as StreamingMessagePersister,
+        shouldGenerateTitle: started.createdConversation,
+        userMessageContent: started.userMessage.content,
         completion,
         unregisterSessionHandlers: () => undefined,
         closed: false,
@@ -349,6 +357,10 @@ export class ChatOrchestrator {
         assistantMessage,
         stopReason,
       });
+
+      if (activeTurn.shouldGenerateTitle && stopReason !== "cancelled") {
+        void this.generateTitleForCompletedTurn(activeTurn, assistantMessage.content);
+      }
 
       this.emitEvent({
         type: "turn_finished",
@@ -647,5 +659,25 @@ export class ChatOrchestrator {
     activeTurn.messagePersister.cancel();
     activeTurn.unregisterSessionHandlers();
     this.activeTurns.delete(activeTurn.conversationId);
+  }
+
+  private async generateTitleForCompletedTurn(activeTurn: ActiveTurn, assistantMessage: string) {
+    try {
+      const title = await this.titleGenerator.generate({
+        userMessage: activeTurn.userMessageContent,
+        assistantMessage,
+      });
+      if (!title) {
+        return;
+      }
+
+      const conversation = await this.conversationService.updateConversationTitle(activeTurn.conversationId, title);
+      this.emitEvent({
+        type: "conversation_updated",
+        conversation,
+      });
+    } catch {
+      // Auto-title failures should never invalidate the completed chat turn.
+    }
   }
 }

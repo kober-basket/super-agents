@@ -108,10 +108,29 @@ test("message copy hover target stays reachable while moving from the bubble to 
     : path.resolve(process.cwd(), "..", "src/styles.css");
   const css = readFileSync(cssPath, "utf8");
 
-  assert.match(css, /\.message-row:hover\s+\.message-actions/s);
   assert.match(css, /\.message-row\s*{[^}]*position:\s*relative/s);
-  assert.match(css, /\.message-row::before\s*{[^}]*bottom:\s*-3[0-9]px/s);
+  assert.match(css, /\.message-row::before\s*{[^}]*pointer-events:\s*none/s);
+  assert.match(css, /\.message-bubble::before\s*{[^}]*bottom:\s*-2[0-9]px[^}]*height:\s*2[0-9]px/s);
+  assert.match(css, /\.message-bubble::before\s*{[^}]*width:\s*max\(calc\(100% \+ 28px\),\s*120px\)/s);
+  assert.doesNotMatch(css, /\.message-row:hover\s+\.message-actions/s);
+  assert.match(css, /\.message-bubble:hover\s+\.message-actions/s);
   assert.match(css, /\.message-actions\s*{[^}]*top:\s*calc\(100% \+ 4px\)/s);
+  assert.match(css, /\.message-actions\s*{[^}]*justify-content:\s*flex-start/s);
+  assert.match(css, /\.message-actions\.assistant\s*{[^}]*left:\s*0/s);
+  assert.match(css, /\.message-actions\.assistant\s*{[^}]*right:\s*auto/s);
   assert.doesNotMatch(css, /\.message-actions\s*{[^}]*bottom:\s*-/s);
   assert.match(css, /\.message-actions::before\s*{[^}]*top:\s*-1[0-9]px[^}]*left:\s*-1[0-9]px/s);
+});
+
+test("assistant message actions place copy before the timestamp", () => {
+  const localSourcePath = path.resolve(process.cwd(), "src/features/chat/ChatWorkspace.tsx");
+  const sourcePath = existsSync(localSourcePath)
+    ? localSourcePath
+    : path.resolve(process.cwd(), "..", "src/features/chat/ChatWorkspace.tsx");
+  const source = readFileSync(sourcePath, "utf8");
+
+  assert.match(
+    source,
+    /className=\{`message-actions[\s\S]*message\.role === "assistant"[\s\S]*<button[\s\S]*className=\{`message-action-button[\s\S]*<\/button>[\s\S]*<span className="message-time">/,
+  );
 });

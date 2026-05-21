@@ -8,7 +8,6 @@ import type {
   AgentEvent,
   AgentMessage,
   ModelGateway,
-  ModelToolSchema,
   ToolCall,
   ToolDefinition,
   ToolApprovalDecision,
@@ -21,26 +20,10 @@ const MAX_TOOL_ERROR_CHARS = 2_000;
 const NO_ACTION_CONTINUATION_INSTRUCTION =
   "Your previous response contained only hidden reasoning and no visible answer or tool call. Continue now: if the task needs evidence, call the available tools; otherwise provide the user-facing answer. Do not respond with hidden reasoning only.";
 const REQUIRED_TOOL_ACTION_CONTINUATION_INSTRUCTION =
-  "Your previous execution-phase response did not call a tool. Continue the execution phase now: either call the next required tool, or call finish_task with an empty object if all tool work is complete. Do not write the final user-facing answer in this phase.";
-const FINISH_TASK_TOOL_NAME = "finish_task";
-const FINISH_TASK_TOOL: ModelToolSchema = {
-  name: FINISH_TASK_TOOL_NAME,
-  description:
-    "Signal that all required tool work for this turn is complete. Call this instead of writing the final user-facing answer during the tool-execution phase.",
-  inputSchema: {
-    type: "object",
-    properties: {},
-  },
-};
+  "Your previous response did not call a tool or write a visible answer. Continue now: call the next required tool if more work is needed; otherwise write the final user-facing answer.";
 const TOOL_COMPLETION_PROTOCOL = [
-  "You are still in the tool-execution phase.",
-  `If more evidence or actions are needed, call the available tools. If the task is complete, call ${FINISH_TASK_TOOL_NAME} with an empty object.`,
-  "Do not write the final user-facing answer in this phase; the runtime will ask for that in a separate final response phase.",
-].join("\n");
-const FINAL_RESPONSE_PROTOCOL = [
-  "You are now in the final response phase.",
-  "Tools are disabled. Produce the final user-facing answer now.",
-  "Do not mention this phase boundary or internal runtime protocol.",
+  "If more evidence or actions are needed, call the available tools.",
+  "If the task is complete, write the final user-facing answer directly.",
 ].join("\n");
 
 type SendTurnInput = {
@@ -569,86 +552,10 @@ export class AgentCore {
       : baseMaxTurns;
     let stopReason = "max_turns";
     const completedToolResults = new Map<string, ToolResult>();
-    let emittedFinalText = false;
     let sawToolResultThisTurn = false;
     let noActionRetries = 0;
     const toolCallIdsThisTurn = new Set<string>();
     let toolCallIdCollisionSequence = 0;
-    const options = this.options;
-    const promptComposer = this.promptComposer;
-    const sessions = this.sessions;
-    const streamFinalResponse = async function* (): AsyncIterable<AgentEvent> {
-      const skills = options.skills.getMany(agent.skills);
-      const system = promptComposer.compose({
-        agent,
-        skills,
-        overrideSystemPrompt: input.overrideSystemPrompt,
-        workspacePrompt: input.workspacePrompt,
-        appendSystemPrompt: FINAL_RESPONSE_PROTOCOL,
-      });
-      let finalText = "";
-      let finalStopReason = "end_turn";
-
-      for await (const event of options.modelGateway.stream({
-        model: agent.model,
-        system,
-        messages: [...session.messages],
-        tools: [],
-        toolChoice: "none",
-      })) {
-        if (event.type === "reasoning_delta") {
-          yield {
-            type: "thought_delta",
-            sessionId: input.sessionId,
-            agentId: agent.id,
-            text: event.text,
-          };
-          continue;
-        }
-
-        if (event.type === "status_delta") {
-          yield {
-            type: "status_delta",
-            sessionId: input.sessionId,
-            agentId: agent.id,
-            text: event.text,
-          };
-          continue;
-        }
-
-        if (event.type === "text_delta") {
-          finalText += event.text;
-          emittedFinalText = true;
-          yield {
-            type: "message_delta",
-            sessionId: input.sessionId,
-            agentId: agent.id,
-            text: event.text,
-          };
-          continue;
-        }
-
-        if (event.type === "done") {
-          finalStopReason = event.stopReason;
-        }
-      }
-
-      if (finalText.trim()) {
-        session.messages.push({
-          role: "assistant",
-          content: finalText,
-          toolCalls: [],
-        });
-        sessions.save(session);
-      }
-
-      yield {
-        type: "turn_finished",
-        sessionId: input.sessionId,
-        agentId: agent.id,
-        stopReason: finalStopReason,
-      };
-    };
 
     for (let step = 0; step < maxTurns; step += 1) {
       const skills = this.options.skills.getMany(agent.skills);
@@ -665,16 +572,12 @@ export class AgentCore {
         description: tool.description,
         inputSchema: tool.inputSchema,
       }));
-      if (sawToolResultThisTurn) {
-        modelTools.push(FINISH_TASK_TOOL);
-      }
 
       let assistantText = "";
       let assistantTextStreamedAsStatus = false;
-      let routeAssistantTextToStatus = sawToolResultThisTurn;
+      let routeAssistantTextToStatus = false;
       let toolCallsThisStep = 0;
       let calledTool = false;
-      let finishRequested = false;
       const assistantToolCalls: ToolCall[] = [];
       const toolMessageSlots: Array<AgentMessage | undefined> = [];
       const preparedToolCalls: PreparedToolExecution[] = [];
@@ -685,7 +588,7 @@ export class AgentCore {
         system,
         messages: [...session.messages],
         tools: modelTools,
-        toolChoice: sawToolResultThisTurn ? "required" : "auto",
+        toolChoice: "auto",
       })) {
         if (event.type === "reasoning_delta") {
           yield {
@@ -736,12 +639,6 @@ export class AgentCore {
         }
 
         if (event.type === "tool_call") {
-          if (event.toolCall.name === FINISH_TASK_TOOL_NAME) {
-            finishRequested = true;
-            stopReason = "end_turn";
-            break;
-          }
-
           let toolCall = repairImplicitLocalDirectoryToolCall(
             event.toolCall,
             input.content,
@@ -881,7 +778,7 @@ export class AgentCore {
         stopReason = event.stopReason;
       }
 
-      if ((calledTool || finishRequested) && assistantText.trim() && !assistantTextStreamedAsStatus) {
+      if (calledTool && assistantText.trim() && !assistantTextStreamedAsStatus) {
         yield {
           type: "status_delta",
           sessionId: input.sessionId,
@@ -921,8 +818,7 @@ export class AgentCore {
 
       const pendingToolMessages = toolMessageSlots.filter((message): message is AgentMessage => Boolean(message));
 
-      if (!calledTool && !finishRequested && assistantText.trim() && !sawToolResultThisTurn) {
-        emittedFinalText = true;
+      if (!calledTool && assistantText.trim()) {
         yield {
           type: "message_delta",
           sessionId: input.sessionId,
@@ -931,7 +827,7 @@ export class AgentCore {
         };
       }
 
-      if (assistantToolCalls.length > 0 || (!finishRequested && assistantText)) {
+      if (assistantToolCalls.length > 0 || assistantText) {
         session.messages.push({
           role: "assistant",
           content: assistantText,
@@ -943,11 +839,6 @@ export class AgentCore {
       if (pendingToolMessages.length > 0) {
         this.sessions.save(session);
         sawToolResultThisTurn = true;
-      }
-
-      if (finishRequested) {
-        yield* streamFinalResponse();
-        return;
       }
 
       if (calledTool && step + 1 >= maxTurns) {
@@ -975,7 +866,16 @@ export class AgentCore {
       }
 
       if (!calledTool) {
-        if (sawToolResultThisTurn && !finishRequested) {
+        if (assistantText.trim()) {
+          yield {
+            type: "turn_finished",
+            sessionId: input.sessionId,
+            agentId: agent.id,
+            stopReason,
+          };
+          return;
+        }
+        if (sawToolResultThisTurn) {
           if (noActionRetries >= 2) {
             yield {
               type: "turn_finished",

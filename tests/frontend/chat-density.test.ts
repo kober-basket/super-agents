@@ -19,20 +19,26 @@ function readSource(relativePath: string) {
   return readFileSync(sourcePath, "utf8");
 }
 
-test("assistant markdown content uses compact transcript heading sizes", () => {
+test("assistant markdown content uses uniform restrained transcript heading styles", () => {
   const css = readStyles();
 
-  assert.match(css, /\.message-text\s+h1\s*{[^}]*font-size:\s*18px/s);
-  assert.match(css, /\.message-text\s+h2\s*{[^}]*font-size:\s*16px/s);
+  assert.match(css, /\.message-text\s+h1\s*{[^}]*font-size:\s*14px/s);
+  assert.match(css, /\.message-text\s+h2\s*{[^}]*font-size:\s*14px/s);
   assert.match(css, /\.message-text\s+h3\s*{[^}]*font-size:\s*14px/s);
+  assert.match(css, /\.message-text\s+h4\s*{[^}]*font-size:\s*14px/s);
+  assert.match(css, /\.message-text\s+h1\s*{[^}]*font-weight:\s*600/s);
+  assert.match(css, /\.message-text\s+h2\s*{[^}]*font-weight:\s*600/s);
+  assert.match(css, /\.message-text\s+h3\s*{[^}]*font-weight:\s*600/s);
+  assert.match(css, /\.message-text\s+h4\s*{[^}]*font-weight:\s*600/s);
   assert.match(css, /\.message-text\s+strong\s*{[^}]*font-weight:\s*650/s);
   assert.doesNotMatch(css, /\.message-text\s+h1\s*{[^}]*font-size:\s*2em/s);
+  assert.doesNotMatch(css, /\.message-text\s+h1\s*{[^}]*font-weight:\s*700/s);
 });
 
-test("chat transcript spacing is tighter for work logs", () => {
+test("chat transcript spacing keeps messages readable without becoming loose", () => {
   const css = readStyles();
 
-  assert.match(css, /\.message-list\s*{[^}]*gap:\s*14px/s);
+  assert.match(css, /\.message-list\s*{[^}]*gap:\s*18px/s);
   assert.match(css, /\.message-bubble\s*{[^}]*gap:\s*8px/s);
   assert.match(css, /\.message-runtime-stack\s*{[^}]*gap:\s*4px/s);
   assert.match(css, /\.activity-summary\s*{[^}]*padding:\s*5px 8px/s);

@@ -698,26 +698,30 @@ export interface ChatTurnStartResult {
 }
 
 export type ChatEvent =
-    | {
-        type: "message_updated";
-        conversationId: string;
-        turnId: string;
-        messageId: string;
-        content: string;
-        visuals: ChatVisual[];
-      }
-    | {
-        type: "message_runtime_trace_updated";
-        conversationId: string;
-        turnId: string;
-        messageId: string;
-        runtimeTrace: ChatMessageRuntimeTrace;
-      }
-    | {
-        type: "message_delta";
-        conversationId: string;
-        turnId: string;
-        messageId: string;
+  | {
+      type: "conversation_updated";
+      conversation: ChatConversation;
+    }
+  | {
+      type: "message_updated";
+      conversationId: string;
+      turnId: string;
+      messageId: string;
+      content: string;
+      visuals: ChatVisual[];
+    }
+  | {
+      type: "message_runtime_trace_updated";
+      conversationId: string;
+      turnId: string;
+      messageId: string;
+      runtimeTrace: ChatMessageRuntimeTrace;
+    }
+  | {
+      type: "message_delta";
+      conversationId: string;
+      turnId: string;
+      messageId: string;
       textDelta: string;
     }
   | {

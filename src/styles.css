@@ -1,6 +1,6 @@
 ﻿:root {
   color-scheme: light;
-  font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", sans-serif;
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
   --window: #f4f4f3;
   --sidebar: #efefee;
   --panel: #ffffff;
@@ -2413,7 +2413,7 @@ textarea {
   align-content: start;
   min-height: 0;
   overflow: auto;
-  gap: 14px;
+  gap: 50px;
   padding: 10px 42px 18px;
 }
 
@@ -2438,7 +2438,7 @@ textarea {
   left: 0;
   z-index: 0;
   background: rgba(255, 255, 255, 0);
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .message-row.user {
@@ -2466,6 +2466,16 @@ textarea {
   max-width: 100%;
 }
 
+.message-bubble::before {
+  content: "";
+  position: absolute;
+  right: -14px;
+  bottom: -22px;
+  width: max(calc(100% + 28px), 120px);
+  height: 26px;
+  z-index: 0;
+}
+
 .message-bubble:has(> .runtime-trace-group) {
   gap: 14px;
 }
@@ -2477,7 +2487,7 @@ textarea {
   z-index: 3;
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 6px;
   min-height: 22px;
   padding: 0 2px;
@@ -2489,6 +2499,11 @@ textarea {
   transition:
     color 0.15s ease,
     opacity 0.15s ease;
+}
+
+.message-actions.assistant {
+  right: auto;
+  left: 0;
 }
 
 .message-actions::before {
@@ -2514,7 +2529,6 @@ textarea {
   color: currentColor;
 }
 
-.message-row:hover .message-actions,
 .message-row:focus-within .message-actions,
 .message-bubble:hover .message-actions,
 .message-bubble:focus-within .message-actions,
@@ -2801,33 +2815,33 @@ textarea {
 
 .message-text h1 {
   margin: 0 0 7px;
-  font-size: 18px;
-  line-height: 1.35;
-  font-weight: 700;
+  font-size: 14px;
+  line-height: 1.45;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
 .message-text h2 {
   margin: 0 0 6px;
-  font-size: 16px;
-  line-height: 1.38;
-  font-weight: 680;
+  font-size: 14px;
+  line-height: 1.45;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
 .message-text h3 {
   margin: 0 0 6px;
   font-size: 14px;
-  line-height: 1.42;
-  font-weight: 650;
+  line-height: 1.45;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
 .message-text h4 {
   margin: 0 0 6px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.45;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
@@ -6528,7 +6542,7 @@ textarea {
 
 .settings-stage-header h1 {
   margin: 0;
-  font-family: "Segoe UI Variable Display", "Aptos Display", "PingFang SC", sans-serif;
+  font-family: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
   font-size: 26px;
   font-weight: 700;
   letter-spacing: -0.03em;
@@ -7915,7 +7929,7 @@ body.pane-resizing * {
 
 .provider-detail-copy h3 {
   margin: 0;
-  font-family: "Segoe UI Variable Display", "Aptos Display", "PingFang SC", sans-serif;
+  font-family: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.03em;

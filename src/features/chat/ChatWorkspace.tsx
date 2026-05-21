@@ -1496,10 +1496,11 @@ export function ChatWorkspace({
           ) : null}
           {messageCopyText ? (
             <div
-              className={`message-actions ${copied ? "copied" : ""}`}
+              className={`message-actions ${message.role === "assistant" ? "assistant" : "user"} ${
+                copied ? "copied" : ""
+              }`}
               aria-label={`${formatMessageTime(message.createdAt)} 消息操作`}
             >
-              <span className="message-time">{formatMessageTime(message.createdAt)}</span>
               <button
                 aria-label={copied ? "已复制消息" : "复制消息"}
                 className={`message-action-button ${copied ? "copied" : ""}`}
@@ -1509,6 +1510,7 @@ export function ChatWorkspace({
               >
                 {copied ? <Check size={15} /> : <Copy size={15} />}
               </button>
+              <span className="message-time">{formatMessageTime(message.createdAt)}</span>
             </div>
           ) : null}
         </div>

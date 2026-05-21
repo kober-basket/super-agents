@@ -100,6 +100,37 @@ test("conversation service keeps knowledge base selection per conversation", asy
   }
 });
 
+test("conversation title updates do not move the conversation in the message timeline", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-conversations-"));
+  const service = new ConversationService(path.join(tempDir, "data", "app.db"));
+
+  await service.initialize();
+
+  try {
+    const started = await service.startTurn(
+      {
+        content: "Help me debug the login flow",
+      },
+      { agentCore: "native" },
+    );
+    const before = await service.getConversation(started.conversation.id);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const renamed = await service.updateConversationTitle(started.conversation.id, "Login flow debug");
+
+    assert.equal(renamed.title, "Login flow debug");
+    assert.equal(renamed.updatedAt, before.updatedAt);
+    assert.equal(renamed.lastMessageAt, before.lastMessageAt);
+
+    const listed = await service.listConversations();
+    assert.equal(listed.conversations[0]?.updatedAt, before.updatedAt);
+    assert.equal(listed.conversations[0]?.lastMessageAt, before.lastMessageAt);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("conversation service persists assistant visuals separately from text", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-conversations-"));
   const service = new ConversationService(path.join(tempDir, "data", "app.db"));

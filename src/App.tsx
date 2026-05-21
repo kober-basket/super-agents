@@ -749,6 +749,14 @@ export default function App() {
 
   useEffect(() => {
     return workspaceClient.onChatEvent((event) => {
+      if (event.type === "conversation_updated") {
+        setActiveConversation((current) =>
+          current?.id === event.conversation.id ? event.conversation : current,
+        );
+        upsertConversationSummary(toConversationSummary(event.conversation));
+        return;
+      }
+
       if (event.type === "message_updated") {
         const now = Date.now();
         delete streamingPreviewByMessageRef.current[`${event.conversationId}:${event.messageId}`];
