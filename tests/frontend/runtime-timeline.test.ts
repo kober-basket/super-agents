@@ -10,6 +10,7 @@ import {
   isStreamingTimelineThoughtItem,
   runtimeActivityRenderMode,
   runtimeTraceGroupSummaryLabel,
+  shouldRenderRuntimeLiveTimer,
   shouldRenderRuntimeStateBlocks,
   shouldAutoScrollReasoningContent,
   shouldRenderLiveThinkingPlaceholder,
@@ -118,6 +119,12 @@ test("runtime activity renders live outside the trace group until the turn is co
   assert.equal(runtimeActivityRenderMode({ blockCount: 0, isStreaming: true }), "hidden");
   assert.equal(runtimeActivityRenderMode({ blockCount: 2, isStreaming: true }), "live");
   assert.equal(runtimeActivityRenderMode({ blockCount: 2, isStreaming: false }), "trace");
+});
+
+test("runtime live activity keeps the processing timer visible while streaming", () => {
+  assert.equal(shouldRenderRuntimeLiveTimer({ blockCount: 1, isStreaming: true }), true);
+  assert.equal(shouldRenderRuntimeLiveTimer({ blockCount: 0, isStreaming: true }), false);
+  assert.equal(shouldRenderRuntimeLiveTimer({ blockCount: 1, isStreaming: false }), false);
 });
 
 test("completed runtime state does not render loose tool cards before persisted trace arrives", () => {

@@ -184,6 +184,13 @@ export function runtimeActivityRenderMode(options: {
   return options.isStreaming ? "live" : "trace";
 }
 
+export function shouldRenderRuntimeLiveTimer(options: {
+  blockCount: number;
+  isStreaming?: boolean;
+}) {
+  return runtimeActivityRenderMode(options) === "live";
+}
+
 export function shouldRenderRuntimeStateBlocks(options: {
   hasPersistedTrace?: boolean;
   isStreaming?: boolean;

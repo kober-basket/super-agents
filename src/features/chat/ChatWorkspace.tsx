@@ -50,6 +50,7 @@ import {
   sanitizeTimelineStatusText,
   shouldOpenRuntimeTraceGroup,
   shouldRenderLiveThinkingPlaceholder,
+  shouldRenderRuntimeLiveTimer,
   shouldRenderRuntimeStateBlocks,
   shouldShowRuntimeThinkingIndicator,
 } from "../../lib/runtime-timeline";
@@ -178,6 +179,46 @@ function RuntimeTraceGroup({
       </summary>
       {children.length > 0 ? <div className="message-runtime-stack">{children}</div> : null}
     </details>
+  );
+}
+
+function RuntimeLiveStatus({
+  blockCount,
+  hasError,
+  isStreaming,
+  startedAt,
+}: {
+  blockCount: number;
+  hasError?: boolean;
+  isStreaming?: boolean;
+  startedAt?: number;
+}) {
+  const fallbackStartedAt = useRef(Date.now());
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!isStreaming) {
+      return undefined;
+    }
+
+    const tick = () => setNow(Date.now());
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [isStreaming]);
+
+  if (!shouldRenderRuntimeLiveTimer({ blockCount, isStreaming })) {
+    return null;
+  }
+
+  const start = startedAt ?? fallbackStartedAt.current;
+  const durationMs = Math.max(0, now - start);
+  const label = runtimeTraceGroupSummaryLabel({ isStreaming, hasError, durationMs });
+
+  return (
+    <div className="runtime-live-status" aria-live="polite">
+      <span className="runtime-trace-summary-copy">{label}</span>
+    </div>
   );
 }
 
@@ -1600,6 +1641,12 @@ export function ChatWorkspace({
       return (
         <div className="message-row">
           <div className="message-bubble live-runtime-bubble">
+            <RuntimeLiveStatus
+              blockCount={blocks.length}
+              hasError={options?.hasError}
+              isStreaming={options?.isStreaming}
+              startedAt={options?.startedAt}
+            />
             <div className="message-runtime-stack live-runtime-stack">{blocks}</div>
           </div>
         </div>
