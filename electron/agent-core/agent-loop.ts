@@ -574,8 +574,6 @@ export class AgentCore {
       }));
 
       let assistantText = "";
-      let assistantTextStreamedAsStatus = false;
-      let routeAssistantTextToStatus = false;
       let toolCallsThisStep = 0;
       let calledTool = false;
       const assistantToolCalls: ToolCall[] = [];
@@ -612,29 +610,16 @@ export class AgentCore {
 
         if (event.type === "text_delta") {
           assistantText += event.text;
-          if (routeAssistantTextToStatus) {
-            assistantTextStreamedAsStatus = true;
-            yield {
-              type: "status_delta",
-              sessionId: input.sessionId,
-              agentId: agent.id,
-              text: event.text,
-            };
-          }
+          yield {
+            type: "message_delta",
+            sessionId: input.sessionId,
+            agentId: agent.id,
+            text: event.text,
+          };
           continue;
         }
 
         if (event.type === "tool_call_delta") {
-          routeAssistantTextToStatus = true;
-          if (assistantText.trim() && !assistantTextStreamedAsStatus) {
-            assistantTextStreamedAsStatus = true;
-            yield {
-              type: "status_delta",
-              sessionId: input.sessionId,
-              agentId: agent.id,
-              text: assistantText,
-            };
-          }
           continue;
         }
 
@@ -778,15 +763,6 @@ export class AgentCore {
         stopReason = event.stopReason;
       }
 
-      if (calledTool && assistantText.trim() && !assistantTextStreamedAsStatus) {
-        yield {
-          type: "status_delta",
-          sessionId: input.sessionId,
-          agentId: agent.id,
-          text: assistantText,
-        };
-      }
-
       for await (const toolEvent of this.executePreparedToolCalls({
         turnInput: input,
         agentId: agent.id,
@@ -817,15 +793,6 @@ export class AgentCore {
       }
 
       const pendingToolMessages = toolMessageSlots.filter((message): message is AgentMessage => Boolean(message));
-
-      if (!calledTool && assistantText.trim()) {
-        yield {
-          type: "message_delta",
-          sessionId: input.sessionId,
-          agentId: agent.id,
-          text: assistantText,
-        };
-      }
 
       if (assistantToolCalls.length > 0 || assistantText) {
         session.messages.push({

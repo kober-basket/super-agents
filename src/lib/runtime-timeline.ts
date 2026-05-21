@@ -2,10 +2,23 @@ import type {
   ChatRuntimeActivityItem,
   ChatRuntimeTimelineItem,
   ChatToolCall,
+  ChatTurnEventLogEntry,
 } from "../types";
 
 const INTERNAL_DUPLICATE_TOOL_STATUS_PATTERN =
   /^Skipped duplicate tool call "[^"]+"; reused the previous result\.$/;
+
+export type ChatRuntimeLiveRenderItem =
+  | {
+      id: string;
+      type: "text";
+      text: string;
+    }
+  | {
+      id: string;
+      type: "tool";
+      toolCallId: string;
+    };
 
 export function appendTimelineTextItem(
   items: ChatRuntimeTimelineItem[],
@@ -89,6 +102,57 @@ export function buildRuntimeTimelineRenderItems(
   return [...visibleTimelineItems, ...missingToolItems];
 }
 
+export function buildRuntimeLiveRenderItems(
+  events: Pick<ChatTurnEventLogEntry, "id" | "text" | "timestamp" | "toolCallId" | "type">[],
+  toolCalls: Pick<ChatToolCall, "toolCallId">[],
+): ChatRuntimeLiveRenderItem[] {
+  const toolCallIds = new Set(toolCalls.map((toolCall) => toolCall.toolCallId));
+  const renderItems: ChatRuntimeLiveRenderItem[] = [];
+
+  for (const event of events) {
+    if (event.type === "message_delta" || event.type === "message_replace") {
+      const text = event.text ?? "";
+      if (!text) {
+        continue;
+      }
+
+      const lastItem = renderItems.at(-1);
+      if (lastItem?.type === "text") {
+        renderItems[renderItems.length - 1] = {
+          ...lastItem,
+          text: event.type === "message_replace" ? text : `${lastItem.text}${text}`,
+        };
+        continue;
+      }
+
+      renderItems.push({
+        id: `live-text-${event.id}`,
+        type: "text",
+        text,
+      });
+      continue;
+    }
+
+    if (event.type === "tool_call_started" && event.toolCallId && toolCallIds.has(event.toolCallId)) {
+      if (
+        renderItems.some(
+          (item) => item.type === "tool" && item.toolCallId === event.toolCallId,
+        )
+      ) {
+        continue;
+      }
+
+      renderItems.push({
+        id: `live-tool-${event.toolCallId}`,
+        type: "tool",
+        toolCallId: event.toolCallId,
+      });
+    }
+  }
+
+  return renderItems;
+}
+
 export function isStreamingTimelineThoughtItem(
   timelineItems: ChatRuntimeTimelineItem[],
   index: number,
@@ -109,6 +173,24 @@ export function shouldOpenRuntimeTraceGroup(
   return Boolean(isStreaming);
 }
 
+export function runtimeActivityRenderMode(options: {
+  blockCount: number;
+  isStreaming?: boolean;
+}): "hidden" | "live" | "trace" {
+  if (options.blockCount === 0) {
+    return "hidden";
+  }
+
+  return options.isStreaming ? "live" : "trace";
+}
+
+export function shouldRenderRuntimeStateBlocks(options: {
+  hasPersistedTrace?: boolean;
+  isStreaming?: boolean;
+}) {
+  return Boolean(options.isStreaming);
+}
+
 export function shouldAutoScrollReasoningContent(options: {
   isOpen: boolean;
   isStreaming: boolean;
@@ -122,6 +204,22 @@ export function shouldShowRuntimeThinkingIndicator(options: {
   isThinking?: boolean;
 }) {
   return Boolean(options.isStreaming && options.isThinking && !options.hasAssistantText);
+}
+
+export function shouldRenderLiveThinkingPlaceholder(options: {
+  blockCount: number;
+  hasAssistantText?: boolean;
+  isStreaming?: boolean;
+}) {
+  if (options.blockCount > 0) {
+    return false;
+  }
+
+  return shouldShowRuntimeThinkingIndicator({
+    hasAssistantText: options.hasAssistantText,
+    isStreaming: options.isStreaming,
+    isThinking: true,
+  });
 }
 
 export function formatRuntimeTraceDuration(durationMs: number) {

@@ -488,7 +488,7 @@ test("chat orchestrator marks errored tool results as failed runtime tool calls"
   }
 });
 
-test("chat orchestrator seals streamed pre-tool assistant text into process timeline", async () => {
+test("chat orchestrator commits pre-tool assistant text into process timeline after turn completion", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
   const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
   await conversationService.initialize();
@@ -518,7 +518,7 @@ test("chat orchestrator seals streamed pre-tool assistant text into process time
     }).nativeCore = {
       async *sendTurn() {
         const readCall = { id: "tool-read", name: "read", input: { path: "src/App.tsx" } };
-        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "我先看一下文件。" };
+        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "Looking first. " };
         yield { type: "tool_call_started", sessionId: "s", agentId: "a", toolCall: readCall };
         yield {
           type: "tool_call_finished",
@@ -527,7 +527,7 @@ test("chat orchestrator seals streamed pre-tool assistant text into process time
           toolCall: readCall,
           result: { content: "file content", metadata: { path: "src/App.tsx" } },
         };
-        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "最终结论。" };
+        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "Final answer." };
         yield { type: "turn_finished", sessionId: "s", agentId: "a", stopReason: "end_turn" };
       },
     };
@@ -537,26 +537,27 @@ test("chat orchestrator seals streamed pre-tool assistant text into process time
 
     assert.deepEqual(
       events.filter((event) => event.type === "message_delta").map((event) => event.textDelta),
-      ["我先看一下文件。", "最终结论。"],
+      ["Looking first. ", "Final answer."],
     );
     assert.deepEqual(
       events.filter((event) => event.type === "status_delta").map((event) => event.textDelta),
-      ["我先看一下文件。"],
+      [],
     );
-    assert.ok(
+    assert.equal(
       events.some(
         (event) =>
           event.type === "message_updated" &&
           event.messageId === execution.result.conversation.messages.at(-1)?.id &&
           event.content === "",
       ),
+      false,
     );
 
     const loaded = await conversationService.getConversation(execution.result.conversation.id);
     const assistantMessage = loaded.messages.find((message) => message.role === "assistant");
     const timelineItems = assistantMessage?.runtimeTrace?.timelineItems ?? [];
-    assert.equal(assistantMessage?.content, "最终结论。");
-    assert.equal(timelineItems[0]?.type === "status" ? timelineItems[0].text : "", "我先看一下文件。");
+    assert.equal(assistantMessage?.content, "Final answer.");
+    assert.equal(timelineItems[0]?.type === "status" ? timelineItems[0].text : "", "Looking first. ");
     assert.equal(timelineItems[2]?.type === "tool" ? timelineItems[2].toolCallId : "", "tool-read");
   } finally {
     await conversationService.shutdown();

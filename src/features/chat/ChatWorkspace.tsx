@@ -42,11 +42,15 @@ import {
   type RuntimeToolDiff,
 } from "../../lib/runtime-tool-display";
 import {
+  buildRuntimeLiveRenderItems,
   buildRuntimeTimelineRenderItems,
   isStreamingTimelineThoughtItem,
+  runtimeActivityRenderMode,
   runtimeTraceGroupSummaryLabel,
   sanitizeTimelineStatusText,
   shouldOpenRuntimeTraceGroup,
+  shouldRenderLiveThinkingPlaceholder,
+  shouldRenderRuntimeStateBlocks,
   shouldShowRuntimeThinkingIndicator,
 } from "../../lib/runtime-timeline";
 import {
@@ -1435,7 +1439,65 @@ export function ChatWorkspace({
     return blocks;
   }
 
-  function renderMessage(message: ChatMessage) {
+  function renderLiveRuntimeBlocks(
+    trace: Pick<ChatConversationRuntimeState, "events" | "toolCalls" | "terminalOutputs"> | null | undefined,
+  ) {
+    if (!trace) {
+      return [];
+    }
+
+    const blocks: JSX.Element[] = [];
+    const toolCallsById = new Map(trace.toolCalls.map((toolCall) => [toolCall.toolCallId, toolCall]));
+    const linkedTerminalIds = new Set(
+      trace.toolCalls.flatMap((toolCall) =>
+        toolCall.content
+          .filter((content) => content.type === "terminal")
+          .map((content) => content.terminalId),
+      ),
+    );
+
+    buildRuntimeLiveRenderItems(trace.events, trace.toolCalls).forEach((item) => {
+      if (item.type === "text") {
+        blocks.push(
+          <RichMarkdown
+            key={item.id}
+            className="message-text"
+            content={item.text}
+            onClick={handleMessageClick}
+          />,
+        );
+        return;
+      }
+
+      const toolCall = toolCallsById.get(item.toolCallId);
+      if (!toolCall) {
+        return;
+      }
+
+      const toolCard = renderToolCard(
+        toolCall,
+        trace.terminalOutputs,
+        true,
+        `runtime-${item.id}`,
+      );
+      if (toolCard) {
+        blocks.push(toolCard);
+      }
+    });
+
+    const unlinkedTerminalCards = renderUnlinkedTerminals(
+      trace.terminalOutputs,
+      linkedTerminalIds,
+      "runtime-live",
+    );
+    if (unlinkedTerminalCards) {
+      blocks.push(...unlinkedTerminalCards);
+    }
+
+    return blocks;
+  }
+
+  function renderMessage(message: ChatMessage, options?: { suppressRuntimeTrace?: boolean }) {
     const parsedMessage =
       message.role === "assistant"
         ? parseChatMessageContent(message.content, message.visuals)
@@ -1451,7 +1513,7 @@ export function ChatWorkspace({
     return (
       <div key={message.id} className={`message-row ${message.role === "user" ? "user" : ""}`}>
         <div className={`message-bubble ${message.role === "user" ? "user" : ""}`}>
-          {message.role === "assistant" && message.runtimeTrace ? (
+          {message.role === "assistant" && message.runtimeTrace && !options?.suppressRuntimeTrace ? (
             <RuntimeTraceGroup
               endedAt={message.updatedAt}
               hasError={Boolean(message.runtimeTrace.error)}
@@ -1525,8 +1587,23 @@ export function ChatWorkspace({
     isStreaming?: boolean;
     startedAt?: number;
   }) {
-    if (blocks.length === 0 && !options?.isStreaming) {
+    const mode = runtimeActivityRenderMode({
+      blockCount: blocks.length,
+      isStreaming: options?.isStreaming,
+    });
+
+    if (mode === "hidden") {
       return null;
+    }
+
+    if (mode === "live") {
+      return (
+        <div className="message-row">
+          <div className="message-bubble live-runtime-bubble">
+            <div className="message-runtime-stack live-runtime-stack">{blocks}</div>
+          </div>
+        </div>
+      );
     }
 
     return (
@@ -1550,7 +1627,7 @@ export function ChatWorkspace({
     const composerPlaceholder = cancelInFlight
       ? "正在停止当前回复..."
       : busy
-        ? "智能体处理中..."
+        ? "正在生成回复..."
         : home
           ? "输入消息后按 Enter 发送"
           : "继续这段对话";
@@ -1646,30 +1723,33 @@ export function ChatWorkspace({
     const hasStreamingAssistantText = Boolean(
       runtimeInProgress && lastMessage?.role === "assistant" && hasVisibleText(lastMessage.content),
     );
-    const runtimeBlocks =
-      runtimeState && (runtimeInProgress || !lastAssistantHasPersistedTrace)
-        ? renderTraceBlocks(
-            {
-              activityItems: runtimeState.activityItems,
-              timelineItems: runtimeState.timelineItems,
-              thoughtText: runtimeState.thoughtText,
-              toolCalls: runtimeState.toolCalls,
-              terminalOutputs: runtimeState.terminalOutputs,
-              error: runtimeState.status === "failed" ? runtimeState.error : undefined,
-            },
-            {
-              hasAssistantText: hasStreamingAssistantText,
-              keyPrefix: "runtime",
-              isStreaming: runtimeInProgress,
-              fallbackText: cancelInFlight ? "Stopping current reply..." : "Generating reasoning...",
-            },
-          )
+    const showRuntimeStateBlocks = shouldRenderRuntimeStateBlocks({
+      hasPersistedTrace: lastAssistantHasPersistedTrace,
+      isStreaming: runtimeInProgress,
+    });
+    let runtimeBlocks =
+      runtimeState && showRuntimeStateBlocks
+        ? renderLiveRuntimeBlocks(runtimeState)
         : [];
+    const liveThinkingPlaceholder = shouldRenderLiveThinkingPlaceholder({
+      blockCount: runtimeBlocks.length,
+      hasAssistantText: hasStreamingAssistantText,
+      isStreaming: runtimeInProgress,
+    })
+      ? renderThinkingIndicator("runtime-live-thinking", {
+          hasAssistantText: hasStreamingAssistantText,
+          isStreaming: runtimeInProgress,
+          isThinking: true,
+        })
+      : null;
+    if (liveThinkingPlaceholder) {
+      runtimeBlocks = [liveThinkingPlaceholder];
+    }
 
-    const hasRuntimeActivity = runtimeBlocks.length > 0 || runtimeInProgress;
-    const inlineAssistantMessage =
-      hasRuntimeActivity && lastMessage?.role === "assistant" ? lastMessage : null;
-    const leadingMessages = inlineAssistantMessage
+    const hasRuntimeActivity = runtimeBlocks.length > 0;
+    const streamingAssistantMessage =
+      runtimeInProgress && lastMessage?.role === "assistant" ? lastMessage : null;
+    const leadingMessages = streamingAssistantMessage
       ? activeConversation.messages.slice(0, -1)
       : activeConversation.messages;
     const showLoadingBubble =
@@ -1698,19 +1778,18 @@ export function ChatWorkspace({
             <div className="message-row">
               <div className="message-loading">
                 <LoaderCircle size={14} className="spin" />
-                <span>{cancelInFlight ? "正在停止..." : "智能体处理中..."}</span>
+                <span>{cancelInFlight ? "正在停止..." : "正在思考"}</span>
               </div>
             </div>
           ) : null}
 
           {renderRuntimeActivity(runtimeBlocks, {
-            endedAt: inlineAssistantMessage?.updatedAt,
+            endedAt: streamingAssistantMessage?.updatedAt,
             hasAssistantText: hasStreamingAssistantText,
             hasError: runtimeState?.status === "failed",
             isStreaming: runtimeInProgress,
-            startedAt: inlineAssistantMessage?.createdAt,
+            startedAt: streamingAssistantMessage?.createdAt,
           })}
-          {inlineAssistantMessage ? renderMessage(inlineAssistantMessage) : null}
         </div>
 
         {renderComposer(false)}

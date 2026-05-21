@@ -1,6 +1,6 @@
 ﻿:root {
   color-scheme: light;
-  font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
   --window: #f4f4f3;
   --sidebar: #efefee;
   --panel: #ffffff;
@@ -8,6 +8,7 @@
   --line: #e5e5e3;
   --line-soft: #ededeb;
   --text: #171717;
+  --text-strong: color-mix(in srgb, var(--text) 88%, CanvasText 12%);
   --muted: #8a8a86;
   --muted-strong: #5f5f5a;
   --accent: #171717;
@@ -44,7 +45,19 @@
   --toast-bg: rgba(28, 29, 33, 0.92);
   --toast-text: #ffffff;
   --window-padding: 10px;
-  font-size: 13px;
+  --font-size-micro: 11px;
+  --font-size-caption: 12px;
+  --font-size-ui: 13px;
+  --font-size-content: 14px;
+  --font-size-title: 15px;
+  --font-size-heading: 18px;
+  --chat-content-font-size: var(--font-size-content);
+  --chat-content-line-height: 1.64;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  font-size: var(--font-size-ui);
 }
 
 :root[data-theme="porcelain"] {
@@ -711,8 +724,8 @@ textarea {
   padding: 0 11px;
   border-radius: 12px;
   color: var(--muted-strong);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
   text-align: left;
   transition: background 140ms ease, color 140ms ease, transform 140ms ease;
 }
@@ -740,8 +753,8 @@ textarea {
   justify-content: space-between;
   padding: 0 4px;
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -755,8 +768,8 @@ textarea {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.82);
   color: var(--muted-strong);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
 }
 
 .sidebar-conversation-section,
@@ -858,14 +871,14 @@ textarea {
 
 .sidebar-conversation-copy strong {
   color: var(--text);
-  font-size: 12px;
-  font-weight: 680;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
   line-height: 1.15;
 }
 
 .sidebar-conversation-copy span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-size-caption);
   line-height: 1.1;
 }
 
@@ -889,7 +902,7 @@ textarea {
 .sidebar-conversation-time {
   max-width: 64px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-size-caption);
   line-height: 1.1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1113,14 +1126,14 @@ textarea {
 
 .sidebar-placeholder-status strong,
 .sidebar-placeholder-empty strong {
-  font-size: 12px;
+  font-size: var(--font-size-ui);
   color: var(--text);
 }
 
 .sidebar-placeholder-status span,
 .sidebar-placeholder-empty span {
   color: var(--muted-strong);
-  font-size: 12px;
+  font-size: var(--font-size-ui);
   line-height: 1.55;
 }
 
@@ -1181,7 +1194,7 @@ textarea {
   margin-top: 6px;
   max-width: 520px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--font-size-ui);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1190,8 +1203,8 @@ textarea {
 .workspace-label {
   display: inline-flex;
   margin-bottom: 4px;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted-strong);
@@ -1205,8 +1218,8 @@ textarea {
 
 .workspace-title h1 {
   max-width: 520px;
-  font-size: 18px;
-  font-weight: 760;
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1406,8 +1419,8 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
   text-align: left;
 }
 
@@ -1508,13 +1521,13 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
 }
 
 .surface-select-option-copy span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1.45;
 }
 
@@ -1640,7 +1653,7 @@ textarea {
 .chat-home-center-copy h1 {
   margin: 0;
   font-size: clamp(28px, 4.2vw, 44px);
-  font-weight: 760;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.02em;
   line-height: 1.2;
   color: var(--text);
@@ -1650,7 +1663,7 @@ textarea {
   max-width: 420px;
   margin: 12px auto 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--font-size-content);
   line-height: 1.7;
 }
 
@@ -1798,13 +1811,13 @@ textarea {
 }
 
 .chat-skill-suggestion-name {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
   color: #477431;
 }
 
 .chat-skill-suggestion-desc {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   color: var(--muted);
 }
 
@@ -1834,8 +1847,8 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
 }
 
 .chat-knowledge-active-chip-remove {
@@ -1900,8 +1913,8 @@ textarea {
   display: grid;
   place-items: center;
   border-radius: 14px;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.08em;
 }
 
@@ -1920,14 +1933,14 @@ textarea {
 
 .chat-attachment-card-copy strong {
   color: var(--text);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
   line-height: 1.3;
 }
 
 .chat-attachment-card-copy span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-size-caption);
 }
 
 .chat-attachment-card-tag {
@@ -1939,8 +1952,8 @@ textarea {
   border-radius: 999px;
   background: rgba(200, 191, 178, 0.3);
   color: #78726c;
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-medium);
   white-space: nowrap;
 }
 
@@ -2117,7 +2130,7 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--font-weight-medium);
   text-align: left;
   cursor: pointer;
 }
@@ -2211,7 +2224,7 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--font-weight-medium);
   color: var(--text);
 }
 
@@ -2338,7 +2351,7 @@ textarea {
   white-space: nowrap;
   color: #111827;
   font-size: 15px;
-  font-weight: 720;
+  font-weight: var(--font-weight-semibold);
 }
 
 .chat-thread-actions {
@@ -2399,8 +2412,8 @@ textarea {
   border-color: transparent;
   border-radius: 7px;
   text-align: left;
-  font-size: 12px;
-  font-weight: 650;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
 }
 
 .chat-thread-actions-option:hover {
@@ -2492,7 +2505,7 @@ textarea {
   min-height: 22px;
   padding: 0 2px;
   color: #8f949d;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1;
   opacity: 0;
   pointer-events: none;
@@ -2581,7 +2594,7 @@ textarea {
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid var(--line);
   color: var(--muted-strong);
-  font-size: 13px;
+  font-size: var(--font-size-ui);
 }
 
 .message-runtime-stack {
@@ -2621,7 +2634,7 @@ textarea {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--font-weight-normal);
   line-height: 1.55;
   color: var(--muted-strong);
 }
@@ -2636,11 +2649,11 @@ textarea {
 }
 
 .runtime-trace-group.streaming .runtime-trace-summary-copy {
-  color: #475467;
+  color: var(--muted-strong);
 }
 
 .runtime-trace-summary svg {
-  color: #98a2b3;
+  color: var(--muted);
   transition: transform 160ms ease;
 }
 
@@ -2673,7 +2686,7 @@ textarea {
   max-width: 100%;
   padding: 2px 4px;
   color: var(--muted-strong);
-  font-size: 13px;
+  font-size: var(--font-size-ui);
   line-height: 1.5;
 }
 
@@ -2682,7 +2695,7 @@ textarea {
   height: 18px;
   display: grid;
   place-items: center;
-  color: #98a2b3;
+  color: var(--muted);
   flex: 0 0 auto;
 }
 
@@ -2692,7 +2705,7 @@ textarea {
 }
 
 .runtime-activity-line.running .runtime-activity-line-icon {
-  color: #667085;
+  color: var(--muted-strong);
 }
 
 .runtime-activity-line.failed {
@@ -2705,9 +2718,9 @@ textarea {
 
 .runtime-status-line {
   width: min(100%, 760px);
-  color: #101828;
-  font-size: 14px;
-  line-height: 1.65;
+  color: var(--text);
+  font-size: var(--chat-content-font-size);
+  line-height: var(--chat-content-line-height);
   overflow-wrap: anywhere;
 }
 
@@ -2716,17 +2729,17 @@ textarea {
 }
 
 .runtime-status-line strong {
-  color: #111827;
-  font-weight: 650;
+  color: var(--text-strong);
+  font-weight: var(--font-weight-semibold);
 }
 
 .runtime-status-line h1,
 .runtime-status-line h2,
 .runtime-status-line h3 {
   margin: 0 0 4px;
-  font-size: 14px;
+  font-size: var(--chat-content-font-size);
   line-height: 1.5;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0;
 }
 
@@ -2734,9 +2747,9 @@ textarea {
 .runtime-status-line h5,
 .runtime-status-line h6 {
   margin: 0 0 4px;
-  font-size: 13px;
-  line-height: 1.45;
-  font-weight: 680;
+  font-size: var(--chat-content-font-size);
+  line-height: 1.5;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0;
 }
 
@@ -2744,9 +2757,10 @@ textarea {
   background: rgba(var(--accent-rgb), 0.08);
   border-radius: 6px;
   padding: 1px 5px;
+  color: var(--text);
   font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
   font-size: 0.92em;
-  font-weight: 600;
+  font-weight: var(--font-weight-medium);
 }
 
 .runtime-status-line table {
@@ -2764,8 +2778,8 @@ textarea {
   width: fit-content;
   max-width: 100%;
   padding: 2px 0;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-semibold);
   line-height: 1.5;
   background: linear-gradient(90deg, #667085 0%, #344054 42%, #98a2b3 58%, #667085 100%);
   background-size: 220% 100%;
@@ -2798,7 +2812,7 @@ textarea {
 }
 
 .workspace-issue strong {
-  font-size: 13px;
+  font-size: var(--font-size-ui);
 }
 
 .workspace-issue span {
@@ -2809,57 +2823,63 @@ textarea {
 .message-text {
   width: min(100%, 760px);
   color: var(--text);
-  font-size: 14px;
-  line-height: 1.62;
+  font-size: var(--chat-content-font-size);
+  line-height: var(--chat-content-line-height);
 }
 
 .message-text h1 {
   margin: 0 0 7px;
-  font-size: 14px;
-  line-height: 1.45;
-  font-weight: 600;
+  font-size: var(--chat-content-font-size);
+  line-height: 1.5;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0;
 }
 
 .message-text h2 {
   margin: 0 0 6px;
-  font-size: 14px;
-  line-height: 1.45;
-  font-weight: 600;
+  font-size: var(--chat-content-font-size);
+  line-height: 1.5;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0;
 }
 
 .message-text h3 {
   margin: 0 0 6px;
-  font-size: 14px;
-  line-height: 1.45;
-  font-weight: 600;
+  font-size: var(--chat-content-font-size);
+  line-height: 1.5;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0;
 }
 
 .message-text h4 {
   margin: 0 0 6px;
-  font-size: 14px;
-  line-height: 1.45;
-  font-weight: 600;
+  font-size: var(--chat-content-font-size);
+  line-height: 1.5;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0;
 }
 
 .message-text strong {
-  color: #111827;
-  font-weight: 650;
+  color: var(--text-strong);
+  font-weight: var(--font-weight-semibold);
+}
+
+.preview-markdown strong,
+.activity-markdown strong {
+  color: var(--text-strong);
+  font-weight: var(--font-weight-semibold);
 }
 
 .message-text p:has(> strong:only-child) {
   margin: 8px 0 4px;
   color: var(--muted-strong);
-  font-size: 13px;
+  font-size: var(--font-size-ui);
   line-height: 1.45;
 }
 
 .message-text p:has(> strong:only-child) strong {
-  color: inherit;
-  font-weight: 650;
+  color: var(--text-strong);
+  font-weight: var(--font-weight-semibold);
 }
 
 .message-text h1 + *,
@@ -2883,7 +2903,7 @@ textarea {
   gap: 8px;
   padding: 8px 12px;
   border-radius: 14px;
-  font-size: 12px;
+  font-size: var(--font-size-ui);
   line-height: 1.5;
 }
 
@@ -2904,7 +2924,7 @@ textarea {
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 14px;
   padding: 8px 12px;
-  font-size: 13px;
+  font-size: var(--font-size-content);
   line-height: 1.55;
 }
 
@@ -2918,8 +2938,8 @@ textarea {
   border-radius: 10px;
   background: rgba(var(--accent-rgb), 0.1);
   color: var(--accent);
-  font-size: 12px;
-  font-weight: 650;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
 }
 
 .message-inline-skill-chip svg {
@@ -2979,7 +2999,7 @@ textarea {
 
 .chat-visual-copy strong {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   color: var(--text);
 }
 
@@ -3077,7 +3097,7 @@ textarea {
 
 .chat-visual-selection strong {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   color: var(--text);
 }
 
@@ -3103,7 +3123,7 @@ textarea {
   border-radius: 999px;
   border: 1px solid rgba(var(--accent-rgb), 0.14);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--font-weight-medium);
   transition:
     transform 140ms ease,
     background 140ms ease,
@@ -3352,9 +3372,10 @@ textarea {
   background: rgba(15, 23, 42, 0.06);
   border-radius: 5px;
   padding: 1px 4px 2px;
+  color: var(--text);
   font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
   font-size: 0.92em;
-  font-weight: 600;
+  font-weight: var(--font-weight-medium);
 }
 
 .message-text a,
@@ -3636,15 +3657,15 @@ textarea {
 .activity-summary-title strong {
   flex: 0 0 auto;
   max-width: min(180px, 42%);
+  color: var(--text-strong);
   font-size: 13px;
-  font-weight: 500;
-  color: #0f172a;
+  font-weight: var(--font-weight-semibold);
 }
 
 .activity-summary-title em {
   flex: 1 1 auto;
   font-style: normal;
-  color: #64748b;
+  color: var(--muted);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3662,8 +3683,9 @@ textarea {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(214, 205, 191, 0.7);
-  color: #6b7280;
+  color: var(--muted-strong);
   font-size: 11px;
+  font-weight: var(--font-weight-medium);
   flex: 0 0 auto;
 }
 
@@ -3724,11 +3746,11 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #8a7661;
+  color: var(--muted);
   font-size: 11px;
   letter-spacing: 0.01em;
   text-transform: none;
-  font-weight: 600;
+  font-weight: var(--font-weight-medium);
 }
 
 .reasoning-block {
@@ -3920,7 +3942,7 @@ textarea {
 }
 
 .question-block-copy span {
-  font-size: 11px;
+  font-size: var(--font-size-micro);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -3956,11 +3978,11 @@ textarea {
 }
 
 .question-option strong {
-  font-size: 13px;
+  font-size: var(--font-size-ui);
 }
 
 .question-option span {
-  font-size: 12px;
+  font-size: var(--font-size-ui);
   line-height: 1.55;
 }
 
@@ -4131,7 +4153,7 @@ textarea {
   background: #f6f3ed;
   border: 1px solid var(--line);
   color: var(--muted-strong);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .composer-file-chip button {
@@ -4148,7 +4170,7 @@ textarea {
   border: 0;
   padding: 4px 2px;
   background: transparent;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -4214,13 +4236,13 @@ textarea {
 }
 
 .slash-skill-copy strong {
-  font-size: 13px;
+  font-size: var(--font-size-ui);
 }
 
 .slash-skill-copy span,
 .slash-skill-option small {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .composer-toolbar {
@@ -4242,7 +4264,7 @@ textarea {
 .knowledge-toolbar-trigger em {
   font-style: normal;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-size-caption);
 }
 
 .knowledge-toolbar-trigger.active {
@@ -4340,7 +4362,7 @@ textarea {
 }
 
 .knowledge-picker-copy strong {
-  font-size: 13px;
+  font-size: var(--font-size-ui);
 }
 
 .knowledge-picker-check {
@@ -4418,7 +4440,7 @@ textarea {
 
 .status-emphasis {
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--font-size-ui);
 }
 
 .panel-page {
@@ -4436,7 +4458,7 @@ textarea {
 
 .panel-head p {
   margin: 6px 0 0;
-  font-size: 13px;
+  font-size: var(--font-size-ui);
 }
 
 .panel-grid,
@@ -4483,19 +4505,19 @@ textarea {
 
 .form-card p {
   margin: 6px 0 0;
-  font-size: 13px;
+  font-size: var(--font-size-ui);
 }
 
 .field-note {
   margin: -2px 0 2px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .form-card label {
   display: grid;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--font-size-ui);
   color: var(--muted);
 }
 
@@ -4533,7 +4555,7 @@ textarea {
   border-radius: 999px;
   background: #f2ece3;
   color: var(--muted-strong);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   white-space: nowrap;
 }
 
@@ -4566,8 +4588,8 @@ textarea {
   margin-bottom: 16px;
   border-radius: 16px;
   color: var(--muted-strong);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
   text-align: left;
 }
 
@@ -4590,8 +4612,8 @@ textarea {
   padding: 0 16px;
   border-radius: 16px;
   color: var(--muted-strong);
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
   text-align: left;
 }
 
@@ -4621,8 +4643,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   margin-bottom: 12px;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent);
@@ -4644,7 +4666,7 @@ textarea {
   max-width: 420px;
   margin: 8px 0 0;
   color: var(--muted-strong);
-  font-size: 13px;
+  font-size: var(--font-size-ui);
   line-height: 1.55;
 }
 
@@ -4669,7 +4691,7 @@ textarea {
 .settings-stage-header p {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--font-size-ui);
   line-height: 1.6;
 }
 
@@ -4767,7 +4789,7 @@ textarea {
   border-radius: 999px;
   background: rgba(var(--accent-rgb), 0.06);
   color: var(--accent);
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
 }
 
 .skill-grid {
@@ -4846,7 +4868,7 @@ textarea {
 
 .skill-tile-copy strong {
   font-size: 15px;
-  font-weight: 650;
+  font-weight: var(--font-weight-semibold);
   color: var(--text);
 }
 
@@ -4868,7 +4890,7 @@ textarea {
   padding: 0 10px;
   border-radius: 999px;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
 }
 
 .skill-status-chip.subtle {
@@ -5008,7 +5030,7 @@ textarea {
 .skill-detail-markdown.preview-markdown h4 {
   margin: 1.5em 0 0.6em;
   color: #262b27;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   line-height: 1.22;
   letter-spacing: -0.02em;
 }
@@ -5038,7 +5060,7 @@ textarea {
 
 .skill-detail-markdown.preview-markdown strong {
   color: #2d322e;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
 }
 
 .skill-detail-markdown.preview-markdown ul,
@@ -5147,7 +5169,7 @@ textarea {
   place-items: center;
   border-radius: 12px;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.04em;
 }
 
@@ -5183,7 +5205,7 @@ textarea {
   background: rgba(var(--accent-rgb), 0.06);
   color: var(--muted-strong);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
 }
 
 .skill-chip.success {
@@ -5366,7 +5388,7 @@ textarea {
 
 .skill-tile-copy strong {
   font-size: 15px;
-  font-weight: 650;
+  font-weight: var(--font-weight-semibold);
   color: var(--text);
   min-width: 0;
   overflow: hidden;
@@ -5497,7 +5519,7 @@ textarea {
 .knowledge-sidebar-head h2 {
   margin: 0;
   font-size: 19px;
-  font-weight: 740;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.02em;
 }
 
@@ -5578,7 +5600,7 @@ textarea {
 
 .knowledge-base-copy strong {
   font-size: 16px;
-  font-weight: 680;
+  font-weight: var(--font-weight-semibold);
   color: var(--text);
 }
 
@@ -5586,7 +5608,7 @@ textarea {
 .knowledge-base-row em {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 520;
+  font-weight: var(--font-weight-normal);
 }
 
 .knowledge-base-row em {
@@ -5608,7 +5630,7 @@ textarea {
 
 .knowledge-sidebar-create-head strong {
   font-size: 17px;
-  font-weight: 720;
+  font-weight: var(--font-weight-semibold);
   color: var(--text);
 }
 
@@ -5752,7 +5774,7 @@ textarea {
   gap: 8px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.02em;
 }
 
@@ -5790,7 +5812,7 @@ textarea {
 
 .knowledge-setting-empty strong {
   font-size: 15px;
-  font-weight: 650;
+  font-weight: var(--font-weight-semibold);
   color: var(--text);
   line-height: 1.35;
 }
@@ -5885,7 +5907,7 @@ textarea {
   color: var(--muted);
   font-style: normal;
   font-size: 11px;
-  font-weight: 650;
+  font-weight: var(--font-weight-medium);
 }
 
 .knowledge-tab.active {
@@ -5929,7 +5951,7 @@ textarea {
 
 .knowledge-composer-copy strong {
   font-size: 15px;
-  font-weight: 680;
+  font-weight: var(--font-weight-semibold);
 }
 
 .knowledge-composer-grid {
@@ -5984,7 +6006,7 @@ textarea {
 
 .knowledge-dropzone strong {
   font-size: 16px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   color: var(--text);
 }
 
@@ -6055,7 +6077,7 @@ textarea {
 .knowledge-list-title-row strong {
   min-width: 0;
   font-size: 15px;
-  font-weight: 650;
+  font-weight: var(--font-weight-semibold);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6162,7 +6184,7 @@ textarea {
 
 .knowledge-empty strong {
   font-size: 18px;
-  font-weight: 720;
+  font-weight: var(--font-weight-semibold);
   color: var(--muted-strong);
 }
 
@@ -6226,7 +6248,7 @@ textarea {
 
 .knowledge-modal-head strong {
   font-size: 17px;
-  font-weight: 720;
+  font-weight: var(--font-weight-semibold);
 }
 
 .knowledge-modal-head span {
@@ -6542,9 +6564,9 @@ textarea {
 
 .settings-stage-header h1 {
   margin: 0;
-  font-family: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-family: "Segoe UI Variable Display", "Segoe UI", "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
   font-size: 26px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.03em;
 }
 
@@ -6594,7 +6616,7 @@ textarea {
   gap: 10px;
   flex: 0 0 auto;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
   color: var(--muted);
 }
 
@@ -6625,7 +6647,7 @@ textarea {
 .settings-stat-card span {
   color: var(--muted-strong);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--font-weight-normal);
 }
 
 .appearance-preview {
@@ -7214,7 +7236,7 @@ body.pane-resizing * {
   border: 1px solid rgba(255, 255, 255, 0.72);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -7250,7 +7272,7 @@ body.pane-resizing * {
   color: var(--muted-strong);
   font-size: 11px;
   font-style: normal;
-  font-weight: 600;
+  font-weight: var(--font-weight-medium);
 }
 
 .preview-pane {
@@ -7305,7 +7327,7 @@ body.pane-resizing * {
   border: 1px solid rgba(255, 255, 255, 0.72);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -7328,7 +7350,7 @@ body.pane-resizing * {
   background: rgba(var(--accent-rgb), 0.08);
   color: var(--text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
   transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
 }
 
@@ -7406,14 +7428,14 @@ body.pane-resizing * {
 .preview-surface-head span {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .preview-surface-head strong {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
 }
 
 .preview-code-shell .preview-code {
@@ -7469,7 +7491,7 @@ body.pane-resizing * {
   background: transparent;
   color: var(--text);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
   transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
 }
 
@@ -7560,7 +7582,7 @@ body.pane-resizing * {
   background: rgba(84, 70, 52, 0.08);
   color: var(--muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
 }
 
 .pdf-state {
@@ -7600,7 +7622,7 @@ body.pane-resizing * {
   padding: 10px 16px;
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -7838,7 +7860,7 @@ body.pane-resizing * {
   min-width: 0;
   max-width: 100%;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7865,7 +7887,7 @@ body.pane-resizing * {
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
 }
 
 .provider-nav-actions {
@@ -7929,9 +7951,9 @@ body.pane-resizing * {
 
 .provider-detail-copy h3 {
   margin: 0;
-  font-family: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-family: "Segoe UI Variable Display", "Segoe UI", "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
   font-size: 22px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.03em;
 }
 
@@ -7968,7 +7990,7 @@ body.pane-resizing * {
   margin-bottom: 10px;
   color: var(--muted-strong);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: var(--font-weight-medium);
 }
 
 .provider-models-head {
@@ -7990,7 +8012,7 @@ body.pane-resizing * {
 
 .provider-models-head strong {
   font-size: 16px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
 }
 
 .provider-model-copy span {
@@ -8794,8 +8816,8 @@ textarea:focus,
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.35;
-  color: #111827;
-  font-weight: 650;
+  color: var(--text-strong);
+  font-weight: var(--font-weight-semibold);
 }
 
 .activity-summary-title em {
@@ -8810,9 +8832,9 @@ textarea:focus,
   padding: 2px 5px;
   background: rgba(15, 23, 42, 0.05);
   border: 0;
-  color: #667085;
+  color: var(--muted-strong);
   font-size: 10px;
-  font-weight: 580;
+  font-weight: var(--font-weight-medium);
   flex: 0 0 auto;
 }
 
@@ -8826,12 +8848,12 @@ textarea:focus,
 
 .activity-status-pill.default {
   background: rgba(15, 23, 42, 0.05);
-  color: #667085;
+  color: var(--muted-strong);
 }
 
 .activity-status-pill.loading {
   background: rgba(15, 23, 42, 0.07);
-  color: #101828;
+  color: var(--text);
 }
 
 .activity-status-pill.success {
@@ -8856,7 +8878,7 @@ textarea:focus,
 
 .activity-summary-side svg {
   flex: 0 0 auto;
-  color: #98a2b3;
+  color: var(--muted);
 }
 
 .activity-summary:hover {
@@ -8882,7 +8904,7 @@ textarea:focus,
 
 .activity-panel-label {
   font-size: 9px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
@@ -8903,9 +8925,9 @@ textarea:focus,
   border-radius: 10px;
   border: 0;
   background: rgba(15, 23, 42, 0.05);
-  color: var(--muted-strong);
-  font-size: 12px;
-  line-height: 1.55;
+  color: var(--text);
+  font-size: var(--chat-content-font-size);
+  line-height: var(--chat-content-line-height);
 }
 
 .activity-markdown {
@@ -8913,9 +8935,9 @@ textarea:focus,
   border-radius: 10px;
   border: 0;
   background: rgba(15, 23, 42, 0.05);
-  color: var(--muted-strong);
-  font-size: 12px;
-  line-height: 1.6;
+  color: var(--text);
+  font-size: var(--chat-content-font-size);
+  line-height: var(--chat-content-line-height);
 }
 
 .activity-command-panel,
@@ -9088,7 +9110,7 @@ textarea:focus,
 .message-text th,
 .preview-markdown th {
   background: rgba(var(--accent-rgb), 0.06);
-  font-weight: 650;
+  font-weight: var(--font-weight-semibold);
 }
 
 .activity-markdown tr:last-child td,
@@ -9126,7 +9148,7 @@ textarea:focus,
   background: rgba(139, 92, 246, 0.12);
   color: #7c3aed;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--font-weight-medium);
   line-height: 1.25;
   vertical-align: baseline;
   user-select: none;
@@ -9189,7 +9211,7 @@ textarea:focus,
 
 .slash-skill-panel-head strong {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted-strong);
@@ -9206,7 +9228,7 @@ textarea:focus,
   background: rgba(17, 24, 39, 0.06);
   color: var(--muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
 }
 
 .slash-skill-option {
@@ -9236,7 +9258,7 @@ textarea:focus,
   background: linear-gradient(135deg, rgba(63, 94, 251, 0.12), rgba(252, 70, 107, 0.1));
   color: transparent;
   font-size: 0;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
 }
 
 .slash-skill-glyph::before {
@@ -9369,7 +9391,7 @@ textarea:focus,
   background: rgba(var(--accent-rgb), 0.08);
   color: var(--accent);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
 }
 
 .toolbar-resource-button {
@@ -9384,7 +9406,7 @@ textarea:focus,
 .knowledge-toolbar-trigger strong {
   min-width: 18px;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
   color: var(--muted);
   text-align: center;
 }
@@ -9838,7 +9860,7 @@ textarea:focus,
 .remote-card-top h3 {
   margin: 0;
   font-size: 18px;
-  font-weight: 720;
+  font-weight: var(--font-weight-semibold);
 }
 
 .remote-card-top p {

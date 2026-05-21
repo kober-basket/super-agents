@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type {
   ChatConversation,
   ChatEvent,
+  ChatRuntimeTimelineItem,
   ChatMessageRuntimeTrace,
   ChatMessage,
   ChatSendInput,
@@ -112,6 +113,17 @@ const INTERRUPTED_ASSISTANT_REPLY_TEXT = "已停止回复。你可以继续发�
 
 function looksLikeTurnCancellation(value?: string) {
   return Boolean(value && /(cancel|abort|interrupt|stop(ped)?)/i.test(value));
+}
+
+function isToolBoundaryEvent(
+  event: ChatMessageRuntimeTrace["events"][number],
+) {
+  return (
+    event.type === "tool_call_started" ||
+    event.type === "tool_call_finished" ||
+    event.type === "permission_requested" ||
+    event.type === "permission_denied"
+  );
 }
 
 export class ChatOrchestrator {
@@ -330,6 +342,7 @@ export class ChatOrchestrator {
       }
 
       await activeTurn.messagePersister.flush();
+      this.commitAssistantTextLayout(activeTurn);
       await this.ensureInterruptedReplyHint(activeTurn, stopReason);
       activeTurn.runtimeTrace.stopReason = stopReason;
       activeTurn.runtimeTrace.error = undefined;
@@ -487,21 +500,79 @@ export class ChatOrchestrator {
     appendRuntimeToolTimelineItem(activeTurn.runtimeTrace, toolCallId);
   }
 
-  private async sealAssistantCandidateAsProcess(activeTurn: ActiveTurn) {
-    const processText = activeTurn.assistantRawText;
-    if (!processText.trim()) {
+  private commitAssistantTextLayout(activeTurn: ActiveTurn) {
+    const events = activeTurn.eventLog.snapshot();
+    const processSegments: Array<{ beforeToolCallId: string; text: string }> = [];
+    let pendingAssistantText = "";
+    let sawToolBoundary = false;
+
+    for (const event of events) {
+      if (event.type === "message_delta") {
+        pendingAssistantText += event.text ?? "";
+        continue;
+      }
+
+      if (event.type === "message_replace") {
+        pendingAssistantText = event.text ?? "";
+        continue;
+      }
+
+      if (isToolBoundaryEvent(event)) {
+        sawToolBoundary = true;
+        if (event.toolCallId && pendingAssistantText.trim()) {
+          processSegments.push({
+            beforeToolCallId: event.toolCallId,
+            text: pendingAssistantText,
+          });
+        }
+        pendingAssistantText = "";
+      }
+    }
+
+    if (!sawToolBoundary) {
       return;
     }
 
-    activeTurn.assistantRawText = "";
-    this.appendTextTimelineItem(activeTurn, "status", processText);
-    this.emitEvent({
-      type: "status_delta",
-      conversationId: activeTurn.conversationId,
-      turnId: activeTurn.turnId,
-      textDelta: processText,
-    });
-    await this.persistAssistantState(activeTurn, { emitUpdate: true, forceEmitUpdate: true });
+    activeTurn.assistantRawText = pendingAssistantText;
+
+    for (const segment of processSegments) {
+      this.insertProcessTextBeforeTool(
+        activeTurn.runtimeTrace,
+        segment.beforeToolCallId,
+        segment.text,
+      );
+    }
+  }
+
+  private insertProcessTextBeforeTool(
+    trace: ChatMessageRuntimeTrace,
+    toolCallId: string,
+    text: string,
+  ) {
+    const item: ChatRuntimeTimelineItem = {
+      id: `status-${randomUUID()}`,
+      type: "status",
+      text,
+    };
+    const toolIndex = trace.timelineItems.findIndex(
+      (timelineItem) => timelineItem.type === "tool" && timelineItem.toolCallId === toolCallId,
+    );
+
+    if (toolIndex < 0) {
+      trace.timelineItems = [...trace.timelineItems, item];
+      return;
+    }
+
+    let insertionIndex = toolIndex;
+    while (insertionIndex > 0 && trace.timelineItems[insertionIndex - 1]?.type === "activity") {
+      insertionIndex -= 1;
+    }
+
+    trace.timelineItems = [
+      ...trace.timelineItems.slice(0, insertionIndex),
+      item,
+      ...trace.timelineItems.slice(insertionIndex),
+    ];
   }
 
   private emitActivitySummary(activeTurn: ActiveTurn) {
@@ -581,7 +652,6 @@ export class ChatOrchestrator {
     }
 
     if (event.type === "tool_call_started") {
-      await this.sealAssistantCandidateAsProcess(activeTurn);
       const toolCall = upsertRuntimeToolCallStarted(
         activeTurn.runtimeTrace,
         event.toolCall,
@@ -619,7 +689,6 @@ export class ChatOrchestrator {
     }
 
     if (event.type === "permission_denied" || event.type === "permission_requested") {
-      await this.sealAssistantCandidateAsProcess(activeTurn);
       const recorded = upsertRuntimePermissionToolCall(activeTurn.runtimeTrace, {
         toolCall: event.toolCall,
         status: event.type === "permission_denied" ? "failed" : "pending",

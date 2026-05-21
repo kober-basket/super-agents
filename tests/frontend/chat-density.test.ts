@@ -22,17 +22,32 @@ function readSource(relativePath: string) {
 test("assistant markdown content uses uniform restrained transcript heading styles", () => {
   const css = readStyles();
 
-  assert.match(css, /\.message-text\s+h1\s*{[^}]*font-size:\s*14px/s);
-  assert.match(css, /\.message-text\s+h2\s*{[^}]*font-size:\s*14px/s);
-  assert.match(css, /\.message-text\s+h3\s*{[^}]*font-size:\s*14px/s);
-  assert.match(css, /\.message-text\s+h4\s*{[^}]*font-size:\s*14px/s);
-  assert.match(css, /\.message-text\s+h1\s*{[^}]*font-weight:\s*600/s);
-  assert.match(css, /\.message-text\s+h2\s*{[^}]*font-weight:\s*600/s);
-  assert.match(css, /\.message-text\s+h3\s*{[^}]*font-weight:\s*600/s);
-  assert.match(css, /\.message-text\s+h4\s*{[^}]*font-weight:\s*600/s);
-  assert.match(css, /\.message-text\s+strong\s*{[^}]*font-weight:\s*650/s);
+  assert.match(css, /\.message-text\s+h1\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)/s);
+  assert.match(css, /\.message-text\s+h2\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)/s);
+  assert.match(css, /\.message-text\s+h3\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)/s);
+  assert.match(css, /\.message-text\s+h4\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)/s);
+  assert.match(css, /\.message-text\s+h1\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.message-text\s+h2\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.message-text\s+h3\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.message-text\s+h4\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.message-text\s+strong\s*{[^}]*color:\s*var\(--text-strong\)[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
   assert.doesNotMatch(css, /\.message-text\s+h1\s*{[^}]*font-size:\s*2em/s);
   assert.doesNotMatch(css, /\.message-text\s+h1\s*{[^}]*font-weight:\s*700/s);
+});
+
+test("runtime transcript typography uses the same restrained text colors", () => {
+  const css = readStyles();
+
+  assert.match(css, /--chat-content-font-size:\s*var\(--font-size-content\)/s);
+  assert.match(css, /--chat-content-line-height:\s*1\.64/s);
+  assert.match(css, /\.message-text\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)[^}]*line-height:\s*var\(--chat-content-line-height\)/s);
+  assert.match(css, /\.runtime-status-line\s*{[^}]*color:\s*var\(--text\)[^}]*font-size:\s*var\(--chat-content-font-size\)[^}]*line-height:\s*var\(--chat-content-line-height\)/s);
+  assert.match(css, /\.activity-markdown\s*{[^}]*color:\s*var\(--text\)[^}]*font-size:\s*var\(--chat-content-font-size\)[^}]*line-height:\s*var\(--chat-content-line-height\)/s);
+  assert.match(css, /\.runtime-status-line\s+strong\s*{[^}]*color:\s*var\(--text-strong\)[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.activity-summary-title\s+strong\s*{[^}]*color:\s*var\(--text-strong\)[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.activity-status-pill\s*{[^}]*color:\s*var\(--muted-strong\)[^}]*font-weight:\s*var\(--font-weight-medium\)/s);
+  assert.match(css, /\.preview-markdown\s+strong,\s*\.activity-markdown\s+strong\s*{[^}]*color:\s*var\(--text-strong\)[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.message-text\s+code,\s*\.preview-markdown\s+code,\s*\.activity-markdown\s+code\s*{[^}]*color:\s*var\(--text\)[^}]*font-weight:\s*var\(--font-weight-medium\)/s);
 });
 
 test("chat transcript spacing keeps messages readable without becoming loose", () => {

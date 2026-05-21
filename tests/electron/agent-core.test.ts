@@ -146,7 +146,7 @@ function getBuiltinTool(name: string) {
   return tool;
 }
 
-test("native agent core emits direct text once no tool call is present", async () => {
+test("native agent core streams direct text deltas before the turn finishes", async () => {
   const gateway = new ScriptedModelGateway([
     [
       { type: "text_delta", text: "你好" },
@@ -167,7 +167,7 @@ test("native agent core emits direct text once no tool call is present", async (
 
   assert.deepEqual(
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["你好，我是中立助手。"],
+    ["你好", "，我是中立助手。"],
   );
   assert.equal(events.at(-1)?.type, "turn_finished");
   assert.match(gateway.requests[0]?.system ?? "", /Answer directly without assuming/);
@@ -335,7 +335,7 @@ test("native agent core forwards visible status separately from assistant text",
   });
 });
 
-test("native agent core routes pre-tool visible text into process status", async () => {
+test("native agent core streams pre-tool visible text as provisional assistant text", async () => {
   const gateway = new ScriptedModelGateway([
     [
       { type: "text_delta", text: "I will inspect the file first. " },
@@ -367,11 +367,11 @@ test("native agent core routes pre-tool visible text into process status", async
 
   assert.deepEqual(
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
-    ["I will inspect the file first. "],
+    [],
   );
   assert.deepEqual(
     events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["Final answer only."],
+    ["I will inspect the file first. ", "Final answer only."],
   );
   assert.deepEqual(core.getSession("pre-tool-text-session")?.messages.at(-3), {
     role: "assistant",
@@ -506,9 +506,9 @@ test("native agent core uses no-tool text after tools as the final answer", asyn
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
     [],
   );
-  assert.deepEqual(
-    events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["All requested lookups are complete."],
+  assert.equal(
+    events.filter((event) => event.type === "message_delta").map((event) => event.text).join(""),
+    "All requested lookups are complete.",
   );
   assert.deepEqual(core.getSession("final-answer-boundary-session")?.messages.at(-1), {
     role: "assistant",
@@ -559,9 +559,9 @@ test("native agent core does not ask for final_answer after plain post-tool text
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
     [],
   );
-  assert.deepEqual(
-    events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["Third lookup completed.\n\nAll requested lookups are complete."],
+  assert.equal(
+    events.filter((event) => event.type === "message_delta").map((event) => event.text).join(""),
+    "Third lookup completed.\n\nAll requested lookups are complete.",
   );
 
   const sessionMessages = core.getSession("plain-post-tool-text-session")?.messages ?? [];
@@ -1262,9 +1262,9 @@ test("native agent core treats first no-tool text after tools as final text", as
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
     [],
   );
-  assert.deepEqual(
-    events.filter((event) => event.type === "message_delta").map((event) => event.text),
-    ["当前登录用户是 kober。\n\n三个命令执行完毕，汇总如下。"],
+  assert.equal(
+    events.filter((event) => event.type === "message_delta").map((event) => event.text).join(""),
+    "当前登录用户是 kober。\n\n三个命令执行完毕，汇总如下。",
   );
   assert.equal(gateway.requests.length, 2);
   assert.equal(

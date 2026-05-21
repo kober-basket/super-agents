@@ -5,10 +5,14 @@ import test from "node:test";
 
 import {
   buildRuntimeTimelineRenderItems,
+  buildRuntimeLiveRenderItems,
   formatRuntimeTraceDuration,
   isStreamingTimelineThoughtItem,
+  runtimeActivityRenderMode,
   runtimeTraceGroupSummaryLabel,
+  shouldRenderRuntimeStateBlocks,
   shouldAutoScrollReasoningContent,
+  shouldRenderLiveThinkingPlaceholder,
   shouldOpenRuntimeTraceGroup,
   shouldShowRuntimeThinkingIndicator,
   sanitizeTimelineStatusText,
@@ -39,6 +43,26 @@ test("runtime timeline render items include tool calls missing from the stored t
     renderItems.map((item) => (item.type === "tool" ? item.toolCallId : item.type)),
     ["thought", "tool-a", "tool-b"],
   );
+});
+
+test("runtime live render items preserve message and tool order", () => {
+  const renderItems = buildRuntimeLiveRenderItems(
+    [
+      { id: "m1", timestamp: 1, type: "message_delta", text: "First. " },
+      { id: "tool-a-start", timestamp: 2, type: "tool_call_started", toolCallId: "tool-a" },
+      { id: "m2", timestamp: 3, type: "message_delta", text: "Second. " },
+      { id: "m3", timestamp: 4, type: "message_delta", text: "More." },
+      { id: "tool-b-start", timestamp: 5, type: "tool_call_started", toolCallId: "tool-b" },
+    ],
+    [toolCall("tool-a"), toolCall("tool-b")],
+  );
+
+  assert.deepEqual(renderItems, [
+    { id: "live-text-m1", type: "text", text: "First. " },
+    { id: "live-tool-tool-a", type: "tool", toolCallId: "tool-a" },
+    { id: "live-text-m2", type: "text", text: "Second. More." },
+    { id: "live-tool-tool-b", type: "tool", toolCallId: "tool-b" },
+  ]);
 });
 
 test("runtime timeline render items omit activity summary rows", () => {
@@ -90,6 +114,19 @@ test("runtime trace group stays open while streaming provisional assistant text"
   assert.equal(shouldOpenRuntimeTraceGroup({ isStreaming: false, hasAssistantText: true }), false);
 });
 
+test("runtime activity renders live outside the trace group until the turn is committed", () => {
+  assert.equal(runtimeActivityRenderMode({ blockCount: 0, isStreaming: true }), "hidden");
+  assert.equal(runtimeActivityRenderMode({ blockCount: 2, isStreaming: true }), "live");
+  assert.equal(runtimeActivityRenderMode({ blockCount: 2, isStreaming: false }), "trace");
+});
+
+test("completed runtime state does not render loose tool cards before persisted trace arrives", () => {
+  assert.equal(shouldRenderRuntimeStateBlocks({ isStreaming: true, hasPersistedTrace: false }), true);
+  assert.equal(shouldRenderRuntimeStateBlocks({ isStreaming: true, hasPersistedTrace: true }), true);
+  assert.equal(shouldRenderRuntimeStateBlocks({ isStreaming: false, hasPersistedTrace: true }), false);
+  assert.equal(shouldRenderRuntimeStateBlocks({ isStreaming: false, hasPersistedTrace: false }), false);
+});
+
 test("runtime trace group label follows active and failed states", () => {
   assert.equal(runtimeTraceGroupSummaryLabel({ isStreaming: true }), "处理中");
   assert.equal(runtimeTraceGroupSummaryLabel({ isStreaming: false }), "已处理");
@@ -136,6 +173,41 @@ test("runtime thinking indicator hides once assistant text is streaming", () => 
   );
 });
 
+test("live runtime shows thinking placeholder before text or tools arrive", () => {
+  assert.equal(
+    shouldRenderLiveThinkingPlaceholder({
+      blockCount: 0,
+      hasAssistantText: false,
+      isStreaming: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldRenderLiveThinkingPlaceholder({
+      blockCount: 1,
+      hasAssistantText: false,
+      isStreaming: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRenderLiveThinkingPlaceholder({
+      blockCount: 0,
+      hasAssistantText: true,
+      isStreaming: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRenderLiveThinkingPlaceholder({
+      blockCount: 0,
+      hasAssistantText: false,
+      isStreaming: false,
+    }),
+    false,
+  );
+});
+
 test("timeline reasoning aligns its label and content with message text", () => {
   const localCssPath = path.resolve(process.cwd(), "src/styles.css");
   const cssPath = existsSync(localCssPath)
@@ -167,7 +239,7 @@ test("runtime status markdown stays compact inside the process timeline", () => 
     : path.resolve(process.cwd(), "..", "src/styles.css");
   const css = readFileSync(cssPath, "utf8");
 
-  assert.match(css, /\.runtime-status-line\s+h1,\s*\.runtime-status-line\s+h2,\s*\.runtime-status-line\s+h3\s*{[^}]*font-size:\s*14px/s);
+  assert.match(css, /\.runtime-status-line\s+h1,\s*\.runtime-status-line\s+h2,\s*\.runtime-status-line\s+h3\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)/s);
   assert.match(css, /\.runtime-status-line\s+table\s*{[^}]*font-size:\s*12px/s);
 });
 
@@ -178,7 +250,7 @@ test("runtime status markdown uses the same inline typography as assistant messa
     : path.resolve(process.cwd(), "..", "src/styles.css");
   const css = readFileSync(cssPath, "utf8");
 
-  assert.match(css, /\.runtime-status-line\s+strong\s*{[^}]*font-weight:\s*650/s);
+  assert.match(css, /\.runtime-status-line\s+strong\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
   assert.match(css, /\.runtime-status-line\s+code\s*{[^}]*font-family:\s*"JetBrains Mono"/s);
 });
 

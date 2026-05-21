@@ -567,14 +567,13 @@ export class ConversationService {
     }
 
     const database = this.getDatabase();
-    const now = Date.now();
     const result = database
       .prepare(`
         UPDATE conversations
-        SET title = ?, updated_at = ?
+        SET title = ?
         WHERE id = ?
       `)
-      .run(nextTitle, now, conversationId);
+      .run(nextTitle, conversationId);
 
     if (result.changes === 0) {
       throw new Error("Conversation not found");

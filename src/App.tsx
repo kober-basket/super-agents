@@ -853,6 +853,28 @@ export default function App() {
             .sort((left, right) => right.lastMessageAt - left.lastMessageAt || right.createdAt - left.createdAt),
         );
 
+        setConversationRuntimeStates((current) => {
+          const previous = current[event.conversationId] ?? createConversationRuntimeState("running");
+          return {
+            ...current,
+            [event.conversationId]: {
+              ...previous,
+              status: preserveActiveTurnStatus(previous.status),
+              error: undefined,
+              stopReason: undefined,
+              events: [
+                ...previous.events,
+                {
+                  id: createRuntimeTimelineId("message"),
+                  timestamp: now,
+                  type: "message_delta",
+                  text: event.textDelta,
+                },
+              ],
+            },
+          };
+        });
+
         return;
       }
 
@@ -967,6 +989,7 @@ export default function App() {
       }
 
       if (event.type === "tool_call_started") {
+        const now = Date.now();
         setConversationRuntimeStates((current) => {
           const previous = current[event.conversationId] ?? createConversationRuntimeState("running");
           return {
@@ -979,6 +1002,20 @@ export default function App() {
               toolCalls: [
                 ...previous.toolCalls.filter((toolCall) => toolCall.toolCallId !== event.toolCall.toolCallId),
                 event.toolCall,
+              ],
+              events: [
+                ...previous.events.filter(
+                  (entry) =>
+                    entry.type !== "tool_call_started" ||
+                    entry.toolCallId !== event.toolCall.toolCallId,
+                ),
+                {
+                  id: createRuntimeTimelineId(`tool-${event.toolCall.toolCallId}`),
+                  timestamp: now,
+                  type: "tool_call_started",
+                  toolCallId: event.toolCall.toolCallId,
+                  toolName: event.toolCall.title,
+                },
               ],
               timelineItems: upsertTimelineToolItem(
                 previous.timelineItems,
