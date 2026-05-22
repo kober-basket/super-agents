@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildBrowserPreview, normalizeBrowserAddress } from "../../src/lib/browser-target";
+import { BROWSER_HOME_URL, buildBrowserPreview, normalizeBrowserAddress } from "../../src/lib/browser-target";
+
+test("browser home defaults to Bing", () => {
+  assert.equal(BROWSER_HOME_URL, "https://www.bing.com/");
+  assert.equal(normalizeBrowserAddress(""), "https://www.bing.com/");
+});
 
 test("normalizeBrowserAddress keeps absolute web URLs", () => {
   assert.equal(normalizeBrowserAddress("https://example.com/docs"), "https://example.com/docs");
@@ -16,7 +21,7 @@ test("normalizeBrowserAddress expands localhost targets", () => {
 test("normalizeBrowserAddress turns search text into a browser search", () => {
   assert.equal(
     normalizeBrowserAddress("electron webview automation"),
-    "https://duckduckgo.com/?q=electron%20webview%20automation",
+    "https://www.bing.com/search?q=electron%20webview%20automation",
   );
 });
 

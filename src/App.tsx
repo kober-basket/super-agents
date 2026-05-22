@@ -194,18 +194,22 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function readStoredWidth(key: string, fallback: number, legacyValues: number[] = []) {
+function readStoredWidth(key: string, fallback: number, legacyValues: number[] = [], legacyTolerance = 0) {
   if (typeof window === "undefined") {
     return fallback;
   }
 
   const rawValue = window.localStorage.getItem(key);
-  const parsedValue = rawValue ? Number.parseInt(rawValue, 10) : Number.NaN;
+  const parsedValue = rawValue ? Number.parseFloat(rawValue) : Number.NaN;
   if (!Number.isFinite(parsedValue)) {
     return fallback;
   }
 
-  return legacyValues.includes(parsedValue) ? fallback : parsedValue;
+  const isLegacyValue = legacyValues.some((legacyValue) =>
+    Math.abs(parsedValue - legacyValue) <= legacyTolerance,
+  );
+
+  return isLegacyValue ? fallback : parsedValue;
 }
 
 function LazyViewFallback() {
@@ -381,7 +385,7 @@ export default function App() {
     readStoredWidth(SETTINGS_SIDEBAR_WIDTH_STORAGE_KEY, SETTINGS_SIDEBAR_DEFAULT_WIDTH),
   );
   const [previewPaneWidth, setPreviewPaneWidth] = useState(() =>
-    readStoredWidth(PREVIEW_PANE_WIDTH_STORAGE_KEY, PREVIEW_PANE_DEFAULT_WIDTH, [380]),
+    readStoredWidth(PREVIEW_PANE_WIDTH_STORAGE_KEY, PREVIEW_PANE_DEFAULT_WIDTH, [380, 640], 8),
   );
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window === "undefined" ? 1440 : window.innerWidth,

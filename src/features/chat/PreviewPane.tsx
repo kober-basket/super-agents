@@ -66,6 +66,11 @@ function buildHtmlDataUrl(content: string) {
   return `data:text/html;charset=utf-8,${encodeURIComponent(content)}`;
 }
 
+function hasAbsoluteFileTarget(preview: FilePreviewPayload) {
+  const target = preview.url ?? preview.path ?? "";
+  return target.startsWith("file:") || /^[a-z]:[\\/]/i.test(target);
+}
+
 function browserSourceFromPreview(preview: FilePreviewPayload) {
   if (preview.kind === "web") {
     return normalizeBrowserAddress(preview.url ?? preview.path ?? BROWSER_HOME_URL);
@@ -77,6 +82,14 @@ function browserSourceFromPreview(preview: FilePreviewPayload) {
 
   if (preview.url) {
     return preview.url;
+  }
+
+  if (preview.path && hasAbsoluteFileTarget(preview)) {
+    return normalizeBrowserAddress(preview.path);
+  }
+
+  if (preview.content) {
+    return buildHtmlDataUrl(preview.content);
   }
 
   if (preview.path) {
@@ -365,7 +378,7 @@ export function PreviewPane({
           {browserLoading ? <div className="browser-loading-bar" /> : null}
           <webview
             ref={webviewRef}
-            allowpopups
+            allowpopups="true"
             className="preview-webview"
             partition={BROWSER_PARTITION}
             src={browserSource}

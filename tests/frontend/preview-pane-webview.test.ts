@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -6,6 +8,15 @@ import {
   resolveBrowserWindowOpenTarget,
   shouldActivateBrowserWindowOpenTarget,
 } from "../../src/lib/webview-navigation";
+
+function readPreviewPaneSource() {
+  const localPath = path.resolve(process.cwd(), "src/features/chat/PreviewPane.tsx");
+  const sourcePath = existsSync(localPath)
+    ? localPath
+    : path.resolve(process.cwd(), "..", "src/features/chat/PreviewPane.tsx");
+
+  return readFileSync(sourcePath, "utf8");
+}
 
 test("readBrowserWebviewNavigationState falls back before Electron webview is dom-ready", () => {
   const earlyWebview = {
@@ -46,6 +57,20 @@ test("shouldActivateBrowserWindowOpenTarget preserves Chrome foreground and back
     }),
     false,
   );
+});
+
+test("PreviewPane renders Electron webview popups as a string attribute", () => {
+  const source = readPreviewPaneSource();
+
+  assert.match(source, /allowpopups="true"/);
+});
+
+test("PreviewPane renders inline HTML content when no absolute file URL is available", () => {
+  const source = readPreviewPaneSource();
+
+  assert.match(source, /function hasAbsoluteFileTarget\(preview: FilePreviewPayload\)/);
+  assert.match(source, /if \(preview\.path && hasAbsoluteFileTarget\(preview\)\) \{\s*return normalizeBrowserAddress\(preview\.path\);/s);
+  assert.match(source, /if \(preview\.content\) \{\s*return buildHtmlDataUrl\(preview\.content\);/s);
 });
 
 test("resolveBrowserWindowOpenTarget only opens requests from the active webview", () => {

@@ -4,7 +4,7 @@ declare namespace JSX {
   interface IntrinsicElements {
     webview: React.DetailedHTMLProps<
       React.HTMLAttributes<HTMLElement> & {
-        allowpopups?: boolean;
+        allowpopups?: string;
         partition?: string;
         src?: string;
         webpreferences?: string;

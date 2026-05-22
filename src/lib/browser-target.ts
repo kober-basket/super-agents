@@ -1,6 +1,7 @@
 import type { FilePreviewPayload } from "../types";
 
-export const BROWSER_HOME_URL = "https://duckduckgo.com/";
+export const BROWSER_HOME_URL = "https://www.bing.com/";
+const BROWSER_SEARCH_URL = "https://www.bing.com/search";
 
 function hasUrlScheme(value: string) {
   return /^[a-z][a-z0-9+.-]*:/i.test(value);
@@ -45,7 +46,7 @@ export function normalizeBrowserAddress(value: string) {
     return `https://${input}`;
   }
 
-  return `${BROWSER_HOME_URL}?q=${encodeURIComponent(input)}`;
+  return `${BROWSER_SEARCH_URL}?q=${encodeURIComponent(input)}`;
 }
 
 export function buildBrowserPreview(target: string, title = "浏览器"): FilePreviewPayload {

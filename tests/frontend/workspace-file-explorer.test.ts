@@ -34,8 +34,29 @@ test("workspace file explorer uses a VS Code style tree-first split", () => {
   assert.match(css, /\.workspace-file-explorer\.has-preview\s+\.workspace-file-tree\s*{[^}]*border-right:/s);
   assert.match(css, /\.workspace-file-tree-toolbar\s*{[^}]*min-height:\s*42px/s);
   assert.match(css, /\.workspace-file-preview\s+\.preview-content-panel\s+\.preview-body\s*{[^}]*padding:\s*0/s);
-  assert.match(css, /\.preview-editor-line\s*{[^}]*grid-template-columns:\s*54px\s+max-content/s);
+  assert.match(css, /\.preview-editor-line\s*{[^}]*grid-template-columns:\s*58px\s+max-content/s);
   assert.match(appSource, /const PREVIEW_PANE_DEFAULT_WIDTH = 760/);
   assert.match(appSource, /const PREVIEW_PANE_MAX_WIDTH = 980/);
-  assert.match(appSource, /PREVIEW_PANE_WIDTH_STORAGE_KEY,\s*PREVIEW_PANE_DEFAULT_WIDTH,\s*\[380\]/s);
+  assert.match(appSource, /readStoredWidth\(key: string,\s*fallback: number,\s*legacyValues: number\[\] = \[\],\s*legacyTolerance = 0\)/s);
+  assert.match(appSource, /Math\.abs\(parsedValue - legacyValue\) <= legacyTolerance/s);
+  assert.match(appSource, /PREVIEW_PANE_WIDTH_STORAGE_KEY,\s*PREVIEW_PANE_DEFAULT_WIDTH,\s*\[380,\s*640\],\s*8/s);
+});
+
+test("workspace file explorer avoids a blocking loading placeholder for text files", () => {
+  const source = readSource("src/features/chat/WorkspaceFileExplorer.tsx");
+
+  assert.match(source, /createOptimisticFilePreview\(entry\)/);
+  assert.match(source, /setPreviewCache/);
+  assert.doesNotMatch(source, /content:\s*""[\s\S]{0,120}loading:\s*true/);
+});
+
+test("workspace file preview editor uses calm editor-like typography", () => {
+  const css = readSource("src/styles.css");
+
+  assert.match(css, /\.preview-editor-shell\s*{[^}]*background:\s*#f8f8f8/s);
+  assert.match(css, /\.preview-editor-lines\s*{[^}]*font-size:\s*13px/s);
+  assert.match(css, /\.preview-editor-line-number\s*{[^}]*border-right:\s*1px\s+solid\s+#eeeeee/s);
+  assert.match(css, /\.preview-editor-code\s*{[^}]*tab-size:\s*2/s);
+  assert.match(css, /\.preview-editor-code\s+\.hljs-comment\s*{[^}]*font-style:\s*italic/s);
+  assert.doesNotMatch(css, /\.preview-editor-lines\s*{[^}]*font-size:\s*14px/s);
 });

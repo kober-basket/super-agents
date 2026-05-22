@@ -49,6 +49,65 @@ function breadcrumbParts(filePath: string, rootPath: string) {
   return parts.length > 0 ? parts : [basename(filePath)];
 }
 
+const OPTIMISTIC_CODE_EXTENSIONS = new Set([
+  "c",
+  "cpp",
+  "cs",
+  "css",
+  "go",
+  "h",
+  "html",
+  "htm",
+  "java",
+  "js",
+  "json",
+  "jsx",
+  "ps1",
+  "py",
+  "rb",
+  "rs",
+  "sh",
+  "ts",
+  "tsx",
+  "vue",
+  "xml",
+  "yaml",
+  "yml",
+]);
+
+function fileExtension(fileName: string) {
+  const normalized = fileName.trim().toLowerCase();
+  const lastDot = normalized.lastIndexOf(".");
+  return lastDot > 0 ? normalized.slice(lastDot + 1) : "";
+}
+
+function inferOptimisticPreviewKind(entry: WorkspaceDirectoryEntry): FilePreviewPayload["kind"] {
+  const extension = fileExtension(entry.name);
+  const mimeType = entry.mimeType ?? "";
+
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType === "application/pdf" || extension === "pdf") return "pdf";
+  if (extension === "md" || extension === "mdx") return "markdown";
+  if (mimeType.includes("text/html") || extension === "html" || extension === "htm") return "html";
+  if (OPTIMISTIC_CODE_EXTENSIONS.has(extension)) return "code";
+  if (mimeType.startsWith("text/") || ["txt", "log", "out", "err"].includes(extension)) return "text";
+  return "binary";
+}
+
+function createOptimisticFilePreview(entry: WorkspaceDirectoryEntry): FilePreviewPayload {
+  const kind = inferOptimisticPreviewKind(entry);
+  const waitsForBinaryContent = kind === "image" || kind === "pdf" || kind === "binary";
+
+  return {
+    title: entry.name,
+    path: entry.path,
+    kind,
+    mimeType: entry.mimeType ?? (kind === "text" || kind === "code" ? "text/plain" : "application/octet-stream"),
+    content: "",
+    loading: waitsForBinaryContent,
+  };
+}
+
 function WorkspaceFileTypeIcon({ meta }: { meta: WorkspaceFileIconMeta }) {
   const className = `workspace-file-type-icon ${meta.kind}`;
   const iconProps = { size: 15, "aria-hidden": true } as const;
@@ -105,6 +164,7 @@ export function WorkspaceFileExplorer({
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedPreview, setSelectedPreview] = useState<FilePreviewPayload | null>(null);
+  const [previewCache, setPreviewCache] = useState<Record<string, FilePreviewPayload>>({});
   const [query, setQuery] = useState("");
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -131,6 +191,9 @@ export function WorkspaceFileExplorer({
   }
 
   useEffect(() => {
+    setSelectedPath(null);
+    setSelectedPreview(null);
+    setPreviewCache({});
     void loadDirectory();
   }, [workspaceRoot]);
 
@@ -150,27 +213,26 @@ export function WorkspaceFileExplorer({
   }
 
   async function openFile(entry: WorkspaceDirectoryEntry) {
+    const requestedPath = entry.path;
+    const cachedPreview = previewCache[requestedPath];
+
     setSelectedPath(entry.path);
-    setSelectedPreview({
-      title: entry.name,
-      path: entry.path,
-      kind: "text",
-      mimeType: entry.mimeType ?? "text/plain",
-      content: "",
-      loading: true,
-    });
+    setSelectedPreview(cachedPreview ?? createOptimisticFilePreview(entry));
 
     try {
       const preview = await onReadPreview({ path: entry.path, title: entry.name });
-      setSelectedPreview(preview);
+      setPreviewCache((current) => ({ ...current, [requestedPath]: preview }));
+      setSelectedPreview((currentPreview) => (currentPreview?.path === requestedPath ? preview : currentPreview));
     } catch {
-      setSelectedPreview({
+      const errorPreview: FilePreviewPayload = {
         title: entry.name,
         path: entry.path,
         kind: "text",
         mimeType: "text/plain",
         content: "打开文件失败。",
-      });
+      };
+      setPreviewCache((current) => ({ ...current, [requestedPath]: errorPreview }));
+      setSelectedPreview((currentPreview) => (currentPreview?.path === requestedPath ? errorPreview : currentPreview));
     }
   }
 

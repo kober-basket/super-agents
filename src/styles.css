@@ -8708,8 +8708,8 @@ body.pane-resizing * {
   min-height: 0;
   flex: 1;
   display: flex;
-  background: #ffffff;
-  color: #111827;
+  background: #f8f8f8;
+  color: #1f2328;
 }
 
 .preview-editor-lines {
@@ -8717,23 +8717,23 @@ body.pane-resizing * {
   min-height: 0;
   width: 100%;
   overflow: auto;
-  padding: 0 0 24px;
+  padding: 8px 0 28px;
   background: #ffffff;
-  font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
-  font-size: 14px;
-  line-height: 1.72;
+  font-family: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.62;
 }
 
 .preview-editor-line {
   min-width: max-content;
   display: grid;
-  grid-template-columns: 54px max-content;
+  grid-template-columns: 58px max-content;
   align-items: start;
   background: transparent;
 }
 
 .preview-editor-line:hover {
-  background: #f7f7f7;
+  background: #f6f8fa;
 }
 
 .preview-editor-line-number {
@@ -8741,34 +8741,56 @@ body.pane-resizing * {
   left: 0;
   z-index: 1;
   min-height: 100%;
-  padding: 0 14px 0 0;
-  background: inherit;
-  color: #666666;
+  padding: 0 12px 0 0;
+  border-right: 1px solid #eeeeee;
+  background: #ffffff;
+  color: #8c959f;
   text-align: right;
   user-select: none;
 }
 
 .preview-editor-code {
   min-width: max-content;
-  padding: 0 18px 0 0;
-  color: #111827;
+  padding: 0 22px 0 14px;
+  color: #1f2328;
   white-space: pre;
+  tab-size: 2;
 }
 
 .preview-editor-code .hljs-keyword,
-.preview-editor-code .hljs-selector-tag,
+.preview-editor-code .hljs-selector-tag {
+  color: #0969da;
+}
+
 .preview-editor-code .hljs-title.function_ {
-  color: #0a558c;
+  color: #8250df;
 }
 
 .preview-editor-code .hljs-string,
+.preview-editor-code .hljs-regexp {
+  color: #8250df;
+}
+
 .preview-editor-code .hljs-attr,
 .preview-editor-code .hljs-number {
-  color: #00875a;
+  color: #0550ae;
+}
+
+.preview-editor-code .hljs-built_in,
+.preview-editor-code .hljs-literal,
+.preview-editor-code .hljs-type {
+  color: #953800;
+}
+
+.preview-editor-code .hljs-variable,
+.preview-editor-code .hljs-template-variable,
+.preview-editor-code .hljs-params {
+  color: #0550ae;
 }
 
 .preview-editor-code .hljs-comment {
-  color: #6a737d;
+  color: #6e7781;
+  font-style: italic;
 }
 
 .preview-pdf-shell {
