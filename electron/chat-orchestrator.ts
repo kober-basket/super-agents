@@ -185,7 +185,11 @@ export class ChatOrchestrator {
     void completion.promise.catch(() => undefined);
 
     try {
-      const prepared = await this.preparePrompt(input, started.conversation.selectedKnowledgeBaseIds);
+      const prepared = await this.preparePrompt(
+        input,
+        started.conversation.selectedKnowledgeBaseIds,
+        started.conversation.workspaceRoot,
+      );
       const sessionId = started.conversation.agentSessionId?.trim() || randomUUID();
 
       await this.conversationService.setConversationAgentSession(started.conversation.id, {
@@ -310,11 +314,13 @@ export class ChatOrchestrator {
   private async preparePrompt(
     input: ChatSendInput,
     selectedKnowledgeBaseIds: string[],
+    workspaceRoot: string,
   ): Promise<PreparedPrompt> {
     return await prepareChatPrompt({
       chatInput: input,
       selectedKnowledgeBaseIds,
       workspaceService: this.workspaceService,
+      workspaceRoot,
     });
   }
 

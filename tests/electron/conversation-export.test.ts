@@ -21,6 +21,7 @@ function sampleConversation(): ChatConversation {
     lastMessageAt: Date.UTC(2026, 4, 17, 8, 2, 0),
     preview: "当然可以",
     messageCount: 2,
+    workspaceRoot: "/workspace/conversation-1",
     selectedKnowledgeBaseIds: [],
     messages: [
       {

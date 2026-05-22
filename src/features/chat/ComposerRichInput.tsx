@@ -17,6 +17,7 @@ interface ComposerRichInputProps {
   disabled?: boolean;
   onChange: (value: string) => void;
   onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  onPasteFiles?: (files: FileList) => void;
   placeholder: string;
   value: string;
 }
@@ -66,7 +67,7 @@ function serializeComposerElement(element: HTMLDivElement) {
 }
 
 export const ComposerRichInput = forwardRef<ComposerRichInputHandle, ComposerRichInputProps>(
-  function ComposerRichInput({ disabled = false, onChange, onKeyDown, placeholder, value }, ref) {
+  function ComposerRichInput({ disabled = false, onChange, onKeyDown, onPasteFiles, placeholder, value }, ref) {
     const editorRef = useRef<HTMLDivElement | null>(null);
 
     useImperativeHandle(ref, () => ({
@@ -132,6 +133,13 @@ export const ComposerRichInput = forwardRef<ComposerRichInputHandle, ComposerRic
         }}
         onKeyDown={onKeyDown}
         onPaste={(event) => {
+          const files = event.clipboardData.files;
+          if (files.length > 0 && onPasteFiles) {
+            event.preventDefault();
+            onPasteFiles(files);
+            return;
+          }
+
           event.preventDefault();
           const text = event.clipboardData.getData("text/plain");
           document.execCommand("insertText", false, text);

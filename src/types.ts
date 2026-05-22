@@ -438,6 +438,19 @@ export interface DesktopWindowState {
   maximized: boolean;
 }
 
+export type WebviewWindowOpenDisposition =
+  | "default"
+  | "foreground-tab"
+  | "background-tab"
+  | "new-window"
+  | "other";
+
+export interface WebviewWindowOpenPayload {
+  webContentsId: number;
+  url: string;
+  disposition: WebviewWindowOpenDisposition;
+}
+
 export interface FilePreviewPayload {
   title: string;
   path: string | null;
@@ -458,6 +471,34 @@ export interface FileDropEntry {
   url?: string;
   content?: string;
   dataUrl?: string;
+}
+
+export type WorkspaceDirectoryEntryKind = "file" | "directory";
+
+export interface WorkspaceDirectoryEntry {
+  name: string;
+  path: string;
+  relativePath: string;
+  kind: WorkspaceDirectoryEntryKind;
+  size?: number;
+  mimeType?: string;
+  modifiedAt?: number;
+}
+
+export interface WorkspaceDirectoryListing {
+  rootPath: string;
+  path: string;
+  relativePath: string;
+  entries: WorkspaceDirectoryEntry[];
+}
+
+export interface TerminalCommandResult {
+  command: string;
+  cwd: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
 }
 
 export type ChatMessageRole = "user" | "assistant";
@@ -652,6 +693,7 @@ export interface ChatConversationSummary {
   lastMessageAt: number;
   preview: string;
   messageCount: number;
+  workspaceRoot: string;
   selectedKnowledgeBaseIds: string[];
   agentCore?: string;
   agentSessionId?: string;

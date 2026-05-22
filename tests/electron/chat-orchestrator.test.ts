@@ -128,6 +128,54 @@ test("chat orchestrator forwards agent thoughts into runtime trace and thought e
   }
 });
 
+test("chat orchestrator runs native turns inside the conversation workspace", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
+  const globalWorkspaceRoot = path.join(tempDir, "global-workspace");
+  const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
+  await conversationService.initialize();
+
+  try {
+    const workspaceService = {
+      async getConfigSnapshot() {
+        return createConfig(globalWorkspaceRoot);
+      },
+      async getEnabledSkillPromptContext() {
+        return "";
+      },
+      async searchKnowledgeBases() {
+        return { query: "", total: 0, results: [], searchedBases: [], warnings: [] };
+      },
+    } as unknown as WorkspaceService;
+
+    const orchestrator = new ChatOrchestrator(conversationService, workspaceService, () => undefined);
+    let nativeWorkspaceRoot = "";
+    let nativeWorkspacePrompt = "";
+
+    (orchestrator as unknown as {
+      nativeCore: {
+        sendTurn(input: { workspaceRoot?: string; workspacePrompt?: string }): AsyncIterable<AgentEvent>;
+      };
+    }).nativeCore = {
+      async *sendTurn(input) {
+        nativeWorkspaceRoot = input.workspaceRoot ?? "";
+        nativeWorkspacePrompt = input.workspacePrompt ?? "";
+        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "Done." };
+        yield { type: "turn_finished", sessionId: "s", agentId: "a", stopReason: "end_turn" };
+      },
+    };
+
+    const execution = await orchestrator.startTurnWithCompletion({ content: "hello" });
+    await execution.completion;
+
+    assert.equal(nativeWorkspaceRoot, execution.result.conversation.workspaceRoot);
+    assert.notEqual(nativeWorkspaceRoot, globalWorkspaceRoot);
+    assert.match(nativeWorkspacePrompt, new RegExp(`Workspace root: ${execution.result.conversation.workspaceRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  } finally {
+    await conversationService.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("chat orchestrator updates a new conversation title from an AI summary after the first exchange", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
   const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));

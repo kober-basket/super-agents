@@ -1,5 +1,6 @@
 ﻿import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { access, cp, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -24,6 +25,7 @@ import {
   mergeWithDefaultModelProviders,
 } from "../src/lib/provider-presets";
 import { DEFAULT_REMOTE_CONTROL_CONFIG, normalizeRemoteControlConfig } from "../src/lib/remote-control-config";
+import { sortWorkspaceDirectoryEntries } from "../src/lib/workspace-directory";
 import { sanitizeMcpName } from "../src/features/shared/utils";
 import { buildSkillIndexPrompt } from "./chat/skill-invocation";
 import type {
@@ -51,6 +53,9 @@ import type {
   RuntimeSkill,
   SkillConfig,
   SkillImportResult,
+  TerminalCommandResult,
+  WorkspaceDirectoryEntry,
+  WorkspaceDirectoryListing,
   WorkspaceToolCatalog,
 } from "../src/types";
 import { KnowledgeService } from "./knowledge-service";
@@ -951,6 +956,43 @@ function filePathFromUrl(url: string) {
   }
 }
 
+function normalizeWorkspaceRoot(config: AppConfig, workspaceRoot?: string) {
+  return path.resolve(workspaceRoot?.trim() || config.workspaceRoot.trim() || process.cwd());
+}
+
+function isInsideDirectory(candidatePath: string, directoryPath: string) {
+  const relative = path.relative(path.resolve(directoryPath), path.resolve(candidatePath));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function normalizeRelativePath(rootPath: string, targetPath: string) {
+  return path.relative(rootPath, targetPath).replace(/\\/g, "/");
+}
+
+function runShellCommand(command: string, cwd: string): Promise<Omit<TerminalCommandResult, "command" | "cwd" | "durationMs">> {
+  const shell = process.platform === "win32" ? "powershell.exe" : "/bin/sh";
+  const args = process.platform === "win32" ? ["-NoProfile", "-Command", command] : ["-lc", command];
+
+  return new Promise((resolve) => {
+    execFile(shell, args, { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      const exitCode =
+        typeof (error as NodeJS.ErrnoException | null)?.errno === "number"
+          ? 1
+          : typeof (error as { code?: unknown } | null)?.code === "number"
+            ? Number((error as { code: number }).code)
+            : error
+              ? 1
+              : 0;
+
+      resolve({
+        exitCode,
+        stdout: String(stdout ?? ""),
+        stderr: String(stderr ?? ""),
+      });
+    });
+  });
+}
+
 function isInterpreterLikeCommand(command: string) {
   return [
     "",
@@ -1274,6 +1316,74 @@ export class WorkspaceService {
     return await Promise.all(filePaths.map((filePath) => this.readSelectedFile(filePath)));
   }
 
+  async listWorkspaceDirectory(payload: { path?: string; workspaceRoot?: string } = {}): Promise<WorkspaceDirectoryListing> {
+    const config = (await this.loadState()).config;
+    const rootPath = normalizeWorkspaceRoot(config, payload.workspaceRoot);
+    const targetPath = path.resolve(payload.path?.trim() || rootPath);
+
+    if (!isInsideDirectory(targetPath, rootPath)) {
+      throw new Error("Directory is outside the current workspace.");
+    }
+
+    const targetStats = await stat(targetPath);
+    if (!targetStats.isDirectory()) {
+      throw new Error("Target path is not a directory.");
+    }
+
+    const entries = await Promise.all(
+      (await readdir(targetPath, { withFileTypes: true })).map(async (entry): Promise<WorkspaceDirectoryEntry | null> => {
+        const fullPath = path.join(targetPath, entry.name);
+        const entryStats = await stat(fullPath).catch(() => null);
+        if (!entryStats) {
+          return null;
+        }
+
+        const kind = entry.isDirectory() ? "directory" : "file";
+        return {
+          name: entry.name,
+          path: fullPath,
+          relativePath: normalizeRelativePath(rootPath, fullPath),
+          kind,
+          size: kind === "file" ? entryStats.size : undefined,
+          mimeType: kind === "file" ? String(mime.lookup(fullPath) || "application/octet-stream") : undefined,
+          modifiedAt: entryStats.mtimeMs,
+        };
+      }),
+    );
+
+    return {
+      rootPath,
+      path: targetPath,
+      relativePath: normalizeRelativePath(rootPath, targetPath),
+      entries: sortWorkspaceDirectoryEntries(entries.filter((entry): entry is WorkspaceDirectoryEntry => Boolean(entry))),
+    };
+  }
+
+  async runTerminalCommand(payload: { command: string; cwd?: string; workspaceRoot?: string }): Promise<TerminalCommandResult> {
+    const command = payload.command.trim();
+    if (!command) {
+      throw new Error("Command is required.");
+    }
+
+    const config = (await this.loadState()).config;
+    const rootPath = normalizeWorkspaceRoot(config, payload.workspaceRoot);
+    const cwd = path.resolve(payload.cwd?.trim() || rootPath);
+    if (!isInsideDirectory(cwd, rootPath)) {
+      throw new Error("Terminal cwd is outside the current workspace.");
+    }
+
+    const startedAt = Date.now();
+    const result = await runShellCommand(command, cwd);
+    return {
+      command,
+      cwd,
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      durationMs: Date.now() - startedAt,
+    };
+  }
+
   async readPreview(payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }): Promise<FilePreviewPayload> {
     if (payload.content) {
       return {
@@ -1374,6 +1484,7 @@ export class WorkspaceService {
         kind: inline.kind,
         mimeType: inline.mimeType,
         content: inline.content,
+        url: inline.kind === "html" ? pathToFileURL(resolvedPath).href : undefined,
       };
     }
 

@@ -22,6 +22,8 @@ import type {
   KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
   FilePreviewPayload,
+  TerminalCommandResult,
+  WorkspaceDirectoryListing,
   McpInspectInput,
   McpServerToolsResult,
   McpToolDebugInput,
@@ -32,6 +34,7 @@ import type {
   SkillImportResult,
   WechatLoginStartResult,
   WechatLoginWaitResult,
+  WebviewWindowOpenPayload,
   WorkspaceToolCatalog,
 } from "./types";
 
@@ -73,7 +76,9 @@ declare global {
       selectFiles: () => Promise<FileDropEntry[]>;
       prepareAttachments: (filePaths: string[]) => Promise<FileDropEntry[]>;
       selectWorkspaceFolder: () => Promise<string>;
+      listWorkspaceDirectory: (payload?: { path?: string; workspaceRoot?: string }) => Promise<WorkspaceDirectoryListing>;
       readPreview: (payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) => Promise<FilePreviewPayload>;
+      runTerminalCommand: (payload: { command: string; cwd?: string; workspaceRoot?: string }) => Promise<TerminalCommandResult>;
       openPreviewTarget: (payload: { path?: string; url?: string }) => Promise<void>;
       openWorkspaceFolder: () => Promise<void>;
       openFolder: (targetPath: string) => Promise<void>;
@@ -84,6 +89,7 @@ declare global {
       onWorkspaceChanged: (listener: (payload: BootstrapPayload) => void) => () => void;
       onWindowStateChanged: (listener: (payload: DesktopWindowState) => void) => () => void;
       onChatEvent: (listener: (event: ChatEvent) => void) => () => void;
+      onBrowserWindowOpen: (listener: (payload: WebviewWindowOpenPayload) => void) => () => void;
     };
   }
 }

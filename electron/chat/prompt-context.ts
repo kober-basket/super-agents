@@ -185,9 +185,10 @@ export async function prepareChatPrompt(input: {
   chatInput: ChatSendInput;
   selectedKnowledgeBaseIds: string[];
   workspaceService: WorkspaceService;
+  workspaceRoot?: string;
 }): Promise<PreparedPrompt> {
   const config = await input.workspaceService.getConfigSnapshot();
-  const cwd = path.resolve(config.workspaceRoot.trim() || process.cwd());
+  const cwd = path.resolve(input.workspaceRoot?.trim() || config.workspaceRoot.trim() || process.cwd());
   const additionalDirectories = collectAdditionalDirectories(cwd, input.chatInput);
   const skillInvocations = parseSkillInvocations(input.chatInput.content);
   const invokedSkills = skillInvocations

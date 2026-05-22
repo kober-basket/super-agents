@@ -26,13 +26,61 @@ test("assistant markdown content uses uniform restrained transcript heading styl
   assert.match(css, /\.message-text\s+h2\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)/s);
   assert.match(css, /\.message-text\s+h3\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)/s);
   assert.match(css, /\.message-text\s+h4\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)/s);
+  assert.match(css, /\.message-text\s+h5\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)/s);
+  assert.match(css, /\.message-text\s+h6\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)/s);
   assert.match(css, /\.message-text\s+h1\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
   assert.match(css, /\.message-text\s+h2\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
   assert.match(css, /\.message-text\s+h3\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
   assert.match(css, /\.message-text\s+h4\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
-  assert.match(css, /\.message-text\s+strong\s*{[^}]*color:\s*var\(--text-strong\)[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.message-text\s+h5\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.message-text\s+h6\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.message-text\s+strong\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.doesNotMatch(css, /\.message-text\s+strong\s*{[^}]*color:/s);
   assert.doesNotMatch(css, /\.message-text\s+h1\s*{[^}]*font-size:\s*2em/s);
   assert.doesNotMatch(css, /\.message-text\s+h1\s*{[^}]*font-weight:\s*700/s);
+});
+
+test("thread composer input width matches the conversation content width", () => {
+  const css = readStyles();
+
+  assert.match(css, /--chat-thread-column-width:\s*820px/s);
+  assert.match(css, /--chat-thread-content-gutter:\s*42px/s);
+  assert.match(
+    css,
+    /\.workspace-main\.is-thread\s+\.message-list\s*{[^}]*width:\s*min\(100%,\s*var\(--chat-thread-column-width\)\)[^}]*padding:\s*10px\s+var\(--chat-thread-content-gutter\)\s+18px/s,
+  );
+  assert.match(
+    css,
+    /\.workspace-main\.is-thread\s+\.chat-composer-frame\s*{[^}]*width:\s*min\(100%,\s*var\(--chat-thread-column-width\)\)[^}]*padding:\s*0\s+var\(--chat-thread-content-gutter\)/s,
+  );
+  assert.match(css, /@media\s*\(max-width:\s*1080px\)\s*{[^}]*--chat-thread-content-gutter:\s*22px/s);
+});
+
+test("home composer input uses the same width rhythm as thread conversations", () => {
+  const css = readStyles();
+
+  assert.match(css, /\.chat-home-stage\s*{[^}]*padding:\s*0\s+0\s+18px/s);
+  assert.match(
+    css,
+    /\.workspace-main\.is-home\s+\.chat-composer-frame\s*{[^}]*width:\s*min\(100%,\s*var\(--chat-thread-column-width\)\)[^}]*padding:\s*0\s+var\(--chat-thread-content-gutter\)/s,
+  );
+  assert.match(
+    css,
+    /\.chat-home-composer-shell\s*{[^}]*width:\s*min\(100%,\s*var\(--chat-thread-column-width\)\)/s,
+  );
+});
+
+test("assistant standalone bold markdown lines keep body typography", () => {
+  const css = readStyles();
+
+  assert.doesNotMatch(
+    css,
+    /\.message-text\s+p:has\(\s*>\s*strong:only-child\s*\)\s*{[^}]*font-size:\s*var\(--font-size-ui\)/s,
+  );
+  assert.doesNotMatch(
+    css,
+    /\.message-text\s+p:has\(\s*>\s*strong:only-child\s*\)\s*{[^}]*color:\s*var\(--muted-strong\)/s,
+  );
 });
 
 test("runtime transcript typography uses the same restrained text colors", () => {
@@ -43,10 +91,12 @@ test("runtime transcript typography uses the same restrained text colors", () =>
   assert.match(css, /\.message-text\s*{[^}]*font-size:\s*var\(--chat-content-font-size\)[^}]*line-height:\s*var\(--chat-content-line-height\)/s);
   assert.match(css, /\.runtime-status-line\s*{[^}]*color:\s*var\(--text\)[^}]*font-size:\s*var\(--chat-content-font-size\)[^}]*line-height:\s*var\(--chat-content-line-height\)/s);
   assert.match(css, /\.activity-markdown\s*{[^}]*color:\s*var\(--text\)[^}]*font-size:\s*var\(--chat-content-font-size\)[^}]*line-height:\s*var\(--chat-content-line-height\)/s);
-  assert.match(css, /\.runtime-status-line\s+strong\s*{[^}]*color:\s*var\(--text-strong\)[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.runtime-status-line\s+strong\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.doesNotMatch(css, /\.runtime-status-line\s+strong\s*{[^}]*color:/s);
   assert.match(css, /\.activity-summary-title\s+strong\s*{[^}]*color:\s*var\(--text-strong\)[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
   assert.match(css, /\.activity-status-pill\s*{[^}]*color:\s*var\(--muted-strong\)[^}]*font-weight:\s*var\(--font-weight-medium\)/s);
-  assert.match(css, /\.preview-markdown\s+strong,\s*\.activity-markdown\s+strong\s*{[^}]*color:\s*var\(--text-strong\)[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.match(css, /\.preview-markdown\s+strong,\s*\.activity-markdown\s+strong\s*{[^}]*font-weight:\s*var\(--font-weight-semibold\)/s);
+  assert.doesNotMatch(css, /\.preview-markdown\s+strong,\s*\.activity-markdown\s+strong\s*{[^}]*color:/s);
   assert.match(css, /\.message-text\s+code,\s*\.preview-markdown\s+code,\s*\.activity-markdown\s+code\s*{[^}]*color:\s*var\(--text\)[^}]*font-weight:\s*var\(--font-weight-medium\)/s);
 });
 
@@ -57,6 +107,14 @@ test("chat transcript spacing keeps messages readable without becoming loose", (
   assert.match(css, /\.message-bubble\s*{[^}]*gap:\s*8px/s);
   assert.match(css, /\.message-runtime-stack\s*{[^}]*gap:\s*4px/s);
   assert.match(css, /\.activity-summary\s*{[^}]*padding:\s*5px 8px/s);
+});
+
+test("user text bubbles shrink to their own content beside attachments", () => {
+  const css = readStyles();
+
+  assert.match(css, /\.message-text\.user\s*{[^}]*width:\s*fit-content/s);
+  assert.match(css, /\.message-text\.user\s*{[^}]*max-width:\s*min\(100%,\s*760px\)/s);
+  assert.match(css, /\.message-text\.user\s*{[^}]*justify-self:\s*end/s);
 });
 
 test("runtime process summary has readable size and more breathing room", () => {
@@ -72,14 +130,22 @@ test("chat thread title sits on the left with a compact actions menu", () => {
   const workspaceSource = readSource("src/features/chat/ChatWorkspace.tsx");
 
   assert.match(css, /\.chat-thread-toolbar\s*{[^}]*justify-content:\s*flex-start/s);
-  assert.match(css, /\.chat-thread-toolbar\s*{[^}]*padding:\s*16px\s+18px\s+0/s);
+  assert.match(css, /\.chat-thread-toolbar\s*{[^}]*min-height:\s*50px/s);
+  assert.match(css, /\.chat-thread-toolbar\s*{[^}]*padding:\s*8px\s+18px\s+9px/s);
+  assert.match(css, /\.chat-thread-toolbar\s*{[^}]*border-bottom:\s*1px\s+solid\s+var\(--line-soft\)/s);
+  assert.match(css, /\.right-workspace-head\s*{[^}]*min-height:\s*50px/s);
   assert.match(css, /\.chat-thread-title\s*{[^}]*color:\s*#111827/s);
   assert.match(css, /\.chat-thread-title\s*{[^}]*font-size:\s*15px/s);
+  assert.match(css, /\.chat-thread-right-pane-control\s*{[^}]*margin-left:\s*auto/s);
   assert.match(css, /\.workspace-main\.is-thread\s+\.chat-column\s*{[^}]*width:\s*100%/s);
   assert.match(css, /\.workspace-main\.is-thread\s+\.chat-column\s*{[^}]*margin:\s*0/s);
-  assert.match(css, /\.workspace-main\.is-thread\s+\.message-list\s*{[^}]*width:\s*min\(100%,\s*820px\)/s);
+  assert.match(
+    css,
+    /\.workspace-main\.is-thread\s+\.message-list\s*{[^}]*width:\s*min\(100%,\s*var\(--chat-thread-column-width\)\)/s,
+  );
   assert.match(css, /\.workspace-main\.is-thread\s+\.message-list\s*{[^}]*margin:\s*0 auto/s);
   assert.match(css, /\.chat-thread-actions\s*{[^}]*display:\s*flex/s);
+  assert.match(workspaceSource, /rightPaneControl/);
   assert.match(workspaceSource, /MoreHorizontal/);
   assert.match(workspaceSource, /复制为 Markdown/);
   assert.doesNotMatch(workspaceSource, /<Download\b/);

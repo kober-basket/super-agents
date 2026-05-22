@@ -29,6 +29,7 @@ interface ConversationRow {
   last_message_at: number;
   preview: string | null;
   message_count: number;
+  workspace_root: string | null;
   selected_knowledge_base_ids_json: string | null;
   agent_core: string | null;
   agent_session_id: string | null;
@@ -233,6 +234,7 @@ function mapConversationSummary(row: ConversationRow): ChatConversationSummary {
     lastMessageAt: row.last_message_at,
     preview: buildAssistantPreview(parsedPreview.text, parsedPreview.visuals),
     messageCount: row.message_count,
+    workspaceRoot: row.workspace_root?.trim() || "",
     selectedKnowledgeBaseIds: parseKnowledgeBaseIds(row.selected_knowledge_base_ids_json),
     agentCore: row.agent_core?.trim() || undefined,
     agentSessionId: row.agent_session_id?.trim() || undefined,
@@ -264,8 +266,15 @@ function mapMessage(row: MessageRow): ChatMessage {
 
 export class ConversationService {
   private database: DatabaseSync | null = null;
+  private readonly workspacesRoot: string;
 
-  constructor(private readonly databasePath: string) {}
+  constructor(
+    private readonly databasePath: string,
+    options: { userDataPath?: string; workspacesRoot?: string } = {},
+  ) {
+    const userDataPath = options.userDataPath?.trim() || path.dirname(path.dirname(databasePath));
+    this.workspacesRoot = path.resolve(options.workspacesRoot?.trim() || path.join(userDataPath, "workspaces"));
+  }
 
   async initialize() {
     await mkdir(path.dirname(this.databasePath), { recursive: true });
@@ -315,6 +324,7 @@ export class ConversationService {
 
     this.ensureConversationColumn(database, "agent_core", "TEXT NOT NULL DEFAULT ''");
     this.ensureConversationColumn(database, "agent_session_id", "TEXT NOT NULL DEFAULT ''");
+    this.ensureConversationColumn(database, "workspace_root", "TEXT NOT NULL DEFAULT ''");
     this.ensureConversationColumn(database, "selected_knowledge_base_ids_json", "TEXT NOT NULL DEFAULT '[]'");
     this.ensureMessageColumn(database, "visuals_json", "TEXT NOT NULL DEFAULT '[]'");
     this.ensureMessageColumn(database, "runtime_trace_json", "TEXT NOT NULL DEFAULT ''");
@@ -337,6 +347,7 @@ export class ConversationService {
           conversations.updated_at,
           conversations.last_message_at,
           conversations.preview,
+          conversations.workspace_root,
           conversations.selected_knowledge_base_ids_json,
           conversations.agent_core,
           conversations.agent_session_id,
@@ -405,6 +416,7 @@ export class ConversationService {
     const now = Date.now();
     const conversationId = input.conversationId?.trim() || randomUUID();
     const createdConversation = !input.conversationId;
+    const workspaceRoot = createdConversation ? await this.createConversationWorkspaceRoot(conversationId) : "";
     const title = buildConversationTitle(content, attachments);
     const preview = buildConversationPreview(content, attachments);
       const attachmentsJson = JSON.stringify(attachments);
@@ -429,10 +441,11 @@ export class ConversationService {
               last_message_at,
               preview,
               selected_knowledge_base_ids_json,
+              workspace_root,
               agent_core,
               agent_session_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, '')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '')
           `)
           .run(
             conversationId,
@@ -442,6 +455,7 @@ export class ConversationService {
             now,
             preview,
             selectedKnowledgeBaseIdsJson,
+            workspaceRoot,
             options.agentCore,
           );
       } else {
@@ -651,6 +665,7 @@ export class ConversationService {
     const now = Date.now();
     const conversationId = input.conversationId?.trim() || randomUUID();
     const createdConversation = !input.conversationId;
+    const workspaceRoot = createdConversation ? await this.createConversationWorkspaceRoot(conversationId) : "";
     const title = buildConversationTitle(content, attachments);
     const assistantContent = buildAssistantReply(content, attachments);
     const preview = buildAssistantPreview(assistantContent, []);
@@ -673,11 +688,12 @@ export class ConversationService {
               updated_at,
               last_message_at,
               preview,
+              workspace_root,
               selected_knowledge_base_ids_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           `)
-          .run(conversationId, title, now, now, now, preview, selectedKnowledgeBaseIdsJson);
+          .run(conversationId, title, now, now, now, preview, workspaceRoot, selectedKnowledgeBaseIdsJson);
       } else {
         const existing = this.getConversationSummary(conversationId);
         if (!existing) {
@@ -754,6 +770,7 @@ export class ConversationService {
           conversations.updated_at,
           conversations.last_message_at,
           conversations.preview,
+          conversations.workspace_root,
           conversations.selected_knowledge_base_ids_json,
           conversations.agent_core,
           conversations.agent_session_id,
@@ -797,5 +814,11 @@ export class ConversationService {
       throw new Error("Conversation service has not been initialized");
     }
     return this.database;
+  }
+
+  private async createConversationWorkspaceRoot(conversationId: string) {
+    const workspaceRoot = path.join(this.workspacesRoot, conversationId);
+    await mkdir(workspaceRoot, { recursive: true });
+    return workspaceRoot;
   }
 }

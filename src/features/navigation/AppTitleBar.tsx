@@ -26,34 +26,36 @@ export function AppTitleBar({
   }
 
   return (
-    <div className="window-controls-overlay">
-      <button
-        type="button"
-        className="window-control"
-        onClick={() => void onMinimize()}
-        aria-label="最小化窗口"
-        title="最小化"
-      >
-        <Minus size={14} />
-      </button>
-      <button
-        type="button"
-        className="window-control"
-        onClick={() => void onToggleMaximize()}
-        aria-label={windowState?.maximized ? "还原窗口" : "最大化窗口"}
-        title={windowState?.maximized ? "还原" : "最大化"}
-      >
-        {windowState?.maximized ? <Copy size={13} /> : <Square size={12} />}
-      </button>
-      <button
-        type="button"
-        className="window-control danger"
-        onClick={() => void onClose()}
-        aria-label="关闭窗口"
-        title="关闭"
-      >
-        <X size={14} />
-      </button>
+    <div className="window-titlebar">
+      <div className="window-controls-overlay">
+        <button
+          type="button"
+          className="window-control"
+          onClick={() => void onMinimize()}
+          aria-label="最小化窗口"
+          title="最小化"
+        >
+          <Minus size={14} />
+        </button>
+        <button
+          type="button"
+          className="window-control"
+          onClick={() => void onToggleMaximize()}
+          aria-label={windowState?.maximized ? "还原窗口" : "最大化窗口"}
+          title={windowState?.maximized ? "还原" : "最大化"}
+        >
+          {windowState?.maximized ? <Copy size={13} /> : <Square size={12} />}
+        </button>
+        <button
+          type="button"
+          className="window-control danger"
+          onClick={() => void onClose()}
+          aria-label="关闭窗口"
+          title="关闭"
+        >
+          <X size={14} />
+        </button>
+      </div>
     </div>
   );
 }

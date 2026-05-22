@@ -73,6 +73,7 @@ test("conversation copy markdown includes title metadata and messages", () => {
     lastMessageAt: Date.UTC(2026, 4, 20, 8, 2, 0),
     preview: "",
     messageCount: 2,
+    workspaceRoot: "/tmp/super-agents-chat",
     selectedKnowledgeBaseIds: [],
     messages: [
       {

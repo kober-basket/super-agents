@@ -15,6 +15,7 @@ import { isTrustedDesktopOrigin } from "./media-permissions";
 import { McpInspector } from "./mcp-inspector";
 import { RemoteControlService } from "./remote-control-service";
 import { buildWorkspaceToolCatalog } from "./tool-catalog";
+import { createWebviewWindowOpenPayload } from "./webview-window-open";
 import { WorkspaceService } from "./workspace-service";
 import type {
   AppConfig,
@@ -245,6 +246,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webviewTag: true,
     },
   });
 
@@ -265,6 +267,16 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  mainWindow.webContents.on("did-attach-webview", (_event, webContents) => {
+    webContents.setWindowOpenHandler((details) => {
+      const payload = createWebviewWindowOpenPayload(webContents.id, details);
+      if (payload && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("desktop:browser-window-open", payload);
+      }
+      return { action: "deny" };
+    });
   });
 
   mainWindow.webContents.on("before-input-event", (event, input) => {
@@ -340,7 +352,9 @@ app.whenReady().then(async () => {
   const statePath = path.join(app.getPath("userData"), "workspace.json");
   const conversationDatabasePath = path.join(app.getPath("userData"), "data", "app.db");
   service = new WorkspaceService(statePath);
-  conversationService = new ConversationService(conversationDatabasePath);
+  conversationService = new ConversationService(conversationDatabasePath, {
+    userDataPath: app.getPath("userData"),
+  });
   await conversationService.initialize();
   configureMediaPermissions();
   const emitChatEvent = (event: ChatEvent) => {
@@ -407,12 +421,12 @@ app.whenReady().then(async () => {
 
     const format = normalizeConversationExportFormat(payload?.format);
     const config = await service!.getConfigSnapshot();
-    const workspaceRoot = config.workspaceRoot.trim();
+    const conversation = await conversationService!.getConversation(conversationId);
+    const workspaceRoot = conversation.workspaceRoot || config.workspaceRoot.trim();
     if (!workspaceRoot) {
       throw new Error("请先选择工作区后再导出会话");
     }
 
-    const conversation = await conversationService!.getConversation(conversationId);
     return await exportConversationToFile({
       workspaceRoot,
       conversation,
@@ -631,6 +645,14 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("desktop:read-preview", async (_event, payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) => {
     return await service!.readPreview(payload);
+  });
+
+  ipcMain.handle("desktop:list-workspace-directory", async (_event, payload: { path?: string; workspaceRoot?: string }) => {
+    return await service!.listWorkspaceDirectory(payload);
+  });
+
+  ipcMain.handle("desktop:run-terminal-command", async (_event, payload: { command: string; cwd?: string; workspaceRoot?: string }) => {
+    return await service!.runTerminalCommand(payload);
   });
 
   ipcMain.handle("desktop:open-preview-target", async (_event, payload: { path?: string; url?: string }) => {

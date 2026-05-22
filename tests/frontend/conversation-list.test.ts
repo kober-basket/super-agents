@@ -17,6 +17,7 @@ function summary(
     lastMessageAt,
     preview: title,
     messageCount: 2,
+    workspaceRoot: "/tmp/super-agents-chat",
     selectedKnowledgeBaseIds: [],
   };
 }

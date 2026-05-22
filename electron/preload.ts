@@ -32,8 +32,11 @@ import type {
   ModelProviderFetchResult,
   RemoteControlStatus,
   SkillImportResult,
+  TerminalCommandResult,
+  WebviewWindowOpenPayload,
   WechatLoginStartResult,
   WechatLoginWaitResult,
+  WorkspaceDirectoryListing,
   WorkspaceToolCatalog,
 } from "../src/types";
 
@@ -106,8 +109,12 @@ const desktopAgent = {
   prepareAttachments: (filePaths: string[]) =>
     ipcRenderer.invoke("desktop:prepare-attachments", filePaths) as Promise<FileDropEntry[]>,
   selectWorkspaceFolder: () => ipcRenderer.invoke("desktop:select-workspace-folder") as Promise<string>,
+  listWorkspaceDirectory: (payload?: { path?: string; workspaceRoot?: string }) =>
+    ipcRenderer.invoke("desktop:list-workspace-directory", payload ?? {}) as Promise<WorkspaceDirectoryListing>,
   readPreview: (payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) =>
     ipcRenderer.invoke("desktop:read-preview", payload) as Promise<FilePreviewPayload>,
+  runTerminalCommand: (payload: { command: string; cwd?: string; workspaceRoot?: string }) =>
+    ipcRenderer.invoke("desktop:run-terminal-command", payload) as Promise<TerminalCommandResult>,
   openPreviewTarget: (payload: { path?: string; url?: string }) =>
     ipcRenderer.invoke("desktop:open-preview-target", payload) as Promise<void>,
   openWorkspaceFolder: () => ipcRenderer.invoke("desktop:open-workspace-folder") as Promise<void>,
@@ -130,6 +137,11 @@ const desktopAgent = {
     const wrapped = (_event: unknown, event: ChatEvent) => listener(event);
     ipcRenderer.on("desktop:chat-event", wrapped);
     return () => ipcRenderer.removeListener("desktop:chat-event", wrapped);
+  },
+  onBrowserWindowOpen: (listener: (payload: WebviewWindowOpenPayload) => void) => {
+    const wrapped = (_event: unknown, payload: WebviewWindowOpenPayload) => listener(payload);
+    ipcRenderer.on("desktop:browser-window-open", wrapped);
+    return () => ipcRenderer.removeListener("desktop:browser-window-open", wrapped);
   },
 };
 

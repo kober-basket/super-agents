@@ -32,8 +32,10 @@ import type {
   RemoteControlStatus,
   RuntimeSkill,
   SkillImportResult,
+  TerminalCommandResult,
   WechatLoginStartResult,
   WechatLoginWaitResult,
+  WorkspaceDirectoryListing,
   WorkspaceToolCatalog,
 } from "../types";
 
@@ -164,6 +166,7 @@ function toConversationSummary(conversation: ChatConversation): ChatConversation
     lastMessageAt: conversation.lastMessageAt,
     preview: conversation.preview,
     messageCount: conversation.messageCount,
+    workspaceRoot: conversation.workspaceRoot,
     selectedKnowledgeBaseIds: conversation.selectedKnowledgeBaseIds,
     agentCore: conversation.agentCore,
     agentSessionId: conversation.agentSessionId,
@@ -184,6 +187,7 @@ function createMockConversation(): ChatConversation {
     lastMessageAt: timestamp,
     preview: intro.content,
     messageCount: 1,
+    workspaceRoot: "F:\\work\\github\\super-agents",
     selectedKnowledgeBaseIds: [],
     messages: [intro],
   };
@@ -254,6 +258,7 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
         lastMessageAt: userMessage.createdAt,
         preview: "",
         messageCount: 0,
+        workspaceRoot: config.workspaceRoot || "F:\\work\\github\\super-agents",
         selectedKnowledgeBaseIds,
         messages: [],
       };
@@ -373,6 +378,26 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
         mimeType: "application/octet-stream",
       })),
     selectWorkspaceFolder: async () => unsupported("目录选择"),
+    listWorkspaceDirectory: async (): Promise<WorkspaceDirectoryListing> => ({
+      rootPath: config.workspaceRoot || "F:\\work\\github\\super-agents",
+      path: config.workspaceRoot || "F:\\work\\github\\super-agents",
+      relativePath: "",
+      entries: [
+        {
+          name: "src",
+          path: "F:\\work\\github\\super-agents\\src",
+          relativePath: "src",
+          kind: "directory",
+        },
+        {
+          name: "package.json",
+          path: "F:\\work\\github\\super-agents\\package.json",
+          relativePath: "package.json",
+          kind: "file",
+          mimeType: "application/json",
+        },
+      ],
+    }),
     readPreview: async (payload): Promise<FilePreviewPayload> => ({
       title: payload.title?.trim() || payload.path?.split(/[\\/]/).pop() || payload.url || "浏览器预览",
       path: payload.path ?? null,
@@ -393,6 +418,14 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
     },
     openWorkspaceFolder: async () => unsupported("工作区打开"),
     openFolder: async (_targetPath: string) => unsupported("目录打开"),
+    runTerminalCommand: async (payload): Promise<TerminalCommandResult> => ({
+      command: payload.command,
+      cwd: payload.cwd ?? config.workspaceRoot,
+      exitCode: 0,
+      stdout: `mock$ ${payload.command}`,
+      stderr: "",
+      durationMs: 0,
+    }),
     getWindowState: async (): Promise<DesktopWindowState> => ({
       platform: "win32",
       maximized: false,
@@ -422,6 +455,7 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
       chatListeners.add(listener);
       return () => chatListeners.delete(listener);
     },
+    onBrowserWindowOpen: () => () => undefined,
   };
 
   return api;

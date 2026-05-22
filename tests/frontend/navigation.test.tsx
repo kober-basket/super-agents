@@ -64,7 +64,24 @@ test("conversation rows swap time for delete in the same action slot on hover", 
   );
 });
 
-test("window chrome does not reserve a top title area", () => {
+test("primary sidebar leaves browser out of the left navigation", () => {
+  const html = renderToStaticMarkup(
+    <PrimarySidebar
+      view="chat"
+      conversations={[]}
+      activeConversationId={null}
+      onCreateConversation={() => undefined}
+      onDeleteConversation={() => undefined}
+      onOpenConversation={() => undefined}
+      onSetView={() => undefined}
+    />,
+  );
+
+  assert.doesNotMatch(html, /打开右侧浏览器/);
+  assert.doesNotMatch(html, />浏览器</);
+});
+
+test("window chrome keeps controls in a dedicated top bar", () => {
   const html = renderToStaticMarkup(
     <AppTitleBar
       view="chat"
@@ -78,9 +95,16 @@ test("window chrome does not reserve a top title area", () => {
 
   assert.doesNotMatch(html, /window-titlebar-copy/);
   assert.doesNotMatch(html, /super-agents/);
+  assert.match(html, /window-titlebar/);
   assert.match(html, /window-controls-overlay/);
 
   const css = readFileSync(path.resolve(process.cwd(), "..", "src/styles.css"), "utf8");
-  assert.match(css, /\.window-frame\s*{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)/s);
-  assert.match(css, /\.window-controls-overlay\s*{[^}]*position:\s*absolute/s);
+  assert.match(css, /--window-chrome-height:\s*38px/);
+  assert.match(
+    css,
+    /\.window-frame\s*{[^}]*grid-template-rows:\s*var\(--window-chrome-height\)\s+minmax\(0,\s*1fr\)/s,
+  );
+  assert.match(css, /\.window-titlebar\s*{[^}]*grid-row:\s*1/s);
+  assert.match(css, /\.app-shell\s*{[^}]*grid-row:\s*2/s);
+  assert.doesNotMatch(css, /\.window-controls-overlay\s*{[^}]*position:\s*absolute/s);
 });

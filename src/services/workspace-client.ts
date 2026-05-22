@@ -54,8 +54,12 @@ export const workspaceClient = {
   selectFiles: () => desktopAgent.selectFiles(),
   prepareAttachments: (filePaths: string[]) => desktopAgent.prepareAttachments(filePaths),
   selectWorkspaceFolder: () => desktopAgent.selectWorkspaceFolder(),
+  listWorkspaceDirectory: (payload?: Parameters<typeof desktopAgent.listWorkspaceDirectory>[0]) =>
+    desktopAgent.listWorkspaceDirectory(payload),
   readPreview: (payload: Parameters<typeof desktopAgent.readPreview>[0]) =>
     desktopAgent.readPreview(payload),
+  runTerminalCommand: (payload: Parameters<typeof desktopAgent.runTerminalCommand>[0]) =>
+    desktopAgent.runTerminalCommand(payload),
   openPreviewTarget: (payload: Parameters<typeof desktopAgent.openPreviewTarget>[0]) =>
     desktopAgent.openPreviewTarget(payload),
   openWorkspaceFolder: () => desktopAgent.openWorkspaceFolder(),
@@ -70,4 +74,6 @@ export const workspaceClient = {
     desktopAgent.onWindowStateChanged(listener),
   onChatEvent: (listener: Parameters<typeof desktopAgent.onChatEvent>[0]) =>
     desktopAgent.onChatEvent(listener),
+  onBrowserWindowOpen: (listener: Parameters<typeof desktopAgent.onBrowserWindowOpen>[0]) =>
+    desktopAgent.onBrowserWindowOpen(listener),
 };

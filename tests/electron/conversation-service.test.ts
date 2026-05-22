@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -94,6 +94,45 @@ test("conversation service keeps knowledge base selection per conversation", asy
 
     const loaded = await service.getConversation(started.conversation.id);
     assert.deepEqual(loaded.selectedKnowledgeBaseIds, ["kb-release-notes"]);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("conversation service creates a persisted workspace directory for new conversations", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-conversations-"));
+  const service = new ConversationService(path.join(tempDir, "data", "app.db"));
+
+  await service.initialize();
+
+  try {
+    const started = await service.startTurn(
+      {
+        content: "Start a workspace-backed conversation",
+      },
+      { agentCore: "native" },
+    );
+    const workspaceRoot = started.conversation.workspaceRoot;
+
+    assert.equal(path.dirname(workspaceRoot), path.join(tempDir, "workspaces"));
+    assert.match(path.basename(workspaceRoot), /^[a-f0-9-]{36}$/);
+    assert.equal((await stat(workspaceRoot)).isDirectory(), true);
+
+    const continued = await service.startTurn(
+      {
+        conversationId: started.conversation.id,
+        content: "Keep using the same workspace",
+      },
+      { agentCore: "native" },
+    );
+    assert.equal(continued.conversation.workspaceRoot, workspaceRoot);
+
+    const listed = await service.listConversations();
+    assert.equal(listed.conversations[0]?.workspaceRoot, workspaceRoot);
+
+    const loaded = await service.getConversation(started.conversation.id);
+    assert.equal(loaded.workspaceRoot, workspaceRoot);
   } finally {
     await service.shutdown();
     await rm(tempDir, { recursive: true, force: true });

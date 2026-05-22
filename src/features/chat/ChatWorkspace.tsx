@@ -9,7 +9,7 @@
   LoaderCircle,
   MoreHorizontal,
   Mic,
-  Paperclip,
+  Plus,
   Square,
   TerminalSquare,
   Wrench,
@@ -23,6 +23,7 @@ import {
   useState,
   type KeyboardEvent,
   type MouseEvent,
+  type ReactNode,
   type UIEvent,
   type WheelEvent,
 } from "react";
@@ -61,6 +62,7 @@ import {
   shouldAutoScrollMessageList,
 } from "../../lib/chat-scroll";
 import { copyTextToClipboard } from "./clipboard";
+import { createComposerAttachmentsFromFiles } from "./attachment-files";
 import { buildConversationCopyMarkdown } from "./conversation-markdown";
 import { ComposerRichInput, type ComposerRichInputHandle } from "./ComposerRichInput";
 import { RichMarkdown } from "../shared/RichMarkdown";
@@ -93,12 +95,14 @@ interface ChatWorkspaceProps {
   knowledgeEnabled: boolean;
   knowledgeRefreshing: boolean;
   runtimeState?: ChatConversationRuntimeState | null;
+  rightPaneControl?: ReactNode;
   selectableModels: RuntimeModelOption[];
   selectedKnowledgeBaseIds: string[];
   skills: SkillConfig[];
   onDraftMessageChange: (value: string) => void;
   onClearKnowledgeBases: () => void;
   onManageKnowledgeBases: () => void;
+  onAddAttachments: (files: FileDropEntry[]) => void | Promise<void>;
   onModelChange: (modelId: string) => void;
   onOpenAttachment: (file: FileDropEntry) => void;
   onOpenPreviewLink: (url: string) => void;
@@ -379,12 +383,14 @@ export function ChatWorkspace({
   knowledgeEnabled,
   knowledgeRefreshing,
   runtimeState,
+  rightPaneControl,
   selectableModels,
   selectedKnowledgeBaseIds,
   skills,
   onDraftMessageChange,
   onClearKnowledgeBases,
   onManageKnowledgeBases,
+  onAddAttachments,
   onModelChange,
   onOpenAttachment,
   onOpenPreviewLink,
@@ -420,6 +426,10 @@ export function ChatWorkspace({
   const [threadActionMenuOpen, setThreadActionMenuOpen] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [activeSkillSuggestionIndex, setActiveSkillSuggestionIndex] = useState(0);
+  const [messageListEdgeState, setMessageListEdgeState] = useState({
+    hasBottomFade: false,
+    hasTopFade: false,
+  });
   const composerSkillTrigger = getComposerSkillTrigger(draftMessage);
   const skillSuggestions = useMemo(() => {
     if (!composerSkillTrigger || busy) {
@@ -553,6 +563,18 @@ export function ChatWorkspace({
       scrollHeight: messageList.scrollHeight,
       scrollTop: messageList.scrollTop,
     };
+    const bottomDistance = metrics.scrollHeight - metrics.clientHeight - metrics.scrollTop;
+
+    setMessageListEdgeState((current) => {
+      const next = {
+        hasBottomFade: bottomDistance > 2,
+        hasTopFade: metrics.scrollTop > 2,
+      };
+
+      return current.hasBottomFade === next.hasBottomFade && current.hasTopFade === next.hasTopFade
+        ? current
+        : next;
+    });
 
     if (autoScrollManuallyDetachedRef.current) {
       const isAtBottom = isScrollAtBottom(metrics);
@@ -603,6 +625,7 @@ export function ChatWorkspace({
         top: messageList.scrollHeight,
         behavior,
       });
+      updateMessageListPinnedState(messageList);
     };
 
     scrollToBottom();
@@ -807,6 +830,20 @@ export function ChatWorkspace({
     }
   }
 
+  async function pasteAttachmentFiles(files: FileList) {
+    try {
+      const normalizedFiles = await createComposerAttachmentsFromFiles(files);
+      if (normalizedFiles.length === 0) {
+        return;
+      }
+
+      await onAddAttachments(normalizedFiles);
+      onToast(`已添加 ${normalizedFiles.length} 个附件`);
+    } catch {
+      onToast("粘贴附件失败");
+    }
+  }
+
   function renderThreadActions() {
     return (
       <div ref={threadActionMenuRef} className="chat-thread-actions">
@@ -1005,56 +1042,138 @@ export function ChatWorkspace({
     );
   }
 
+  function attachmentCardMeta(file: FileDropEntry) {
+    const kind = fileKind(file);
+    const extension = getFileExtension(file.name || file.path);
+    const badge = extension ? extension.toUpperCase().slice(0, 4) : "FILE";
+    const office = isOfficeDocument(file.name || file.path, file.mimeType);
+    const isHtml = kind === "html" || extension === "html" || extension === "htm";
+    const isSpreadsheet = ["csv", "xls", "xlsx"].includes(extension);
+    const isPresentation = ["pps", "ppsx", "ppt", "pptx"].includes(extension);
+    const categoryLabel =
+      kind === "pdf"
+        ? "PDF 文档"
+        : office
+          ? "办公文档"
+          : kind === "text"
+            ? "文本文件"
+            : kind === "markdown"
+              ? "Markdown 笔记"
+              : kind === "code"
+                ? "代码文件"
+                : kind === "image"
+                  ? "图片文件"
+                  : "文件";
+    const toneClass =
+      kind === "pdf"
+        ? "tone-pdf"
+        : office
+          ? "tone-office"
+          : kind === "text" || kind === "markdown" || kind === "code"
+            ? "tone-text"
+            : kind === "image"
+              ? "tone-image"
+              : "tone-file";
+    const iconClass =
+      kind === "pdf"
+        ? "format-pdf"
+        : isSpreadsheet
+          ? "format-spreadsheet"
+          : isPresentation
+            ? "format-presentation"
+            : office
+              ? "format-office"
+              : isHtml
+                ? "format-html"
+                : kind === "markdown"
+                  ? "format-markdown"
+                  : kind === "code"
+                    ? "format-code"
+                    : kind === "image"
+                      ? "format-image"
+                      : kind === "text"
+                        ? "format-text"
+                        : "format-file";
+    const iconText =
+      isHtml || kind === "code"
+        ? "</>"
+        : kind === "pdf"
+          ? "PDF"
+          : kind === "markdown"
+            ? "MD"
+            : office && extension
+              ? extension.toUpperCase().slice(0, 4)
+              : kind === "text"
+                ? "TXT"
+                : badge;
+
+    return {
+      badge,
+      categoryLabel,
+      extensionLabel: extension ? extension.toUpperCase() : categoryLabel,
+      iconClass,
+      iconText,
+      kind,
+      toneClass,
+    };
+  }
+
   function renderAttachmentList(files: FileDropEntry[], removable = false) {
     if (files.length === 0) return null;
 
-    if (!removable) {
+    if (removable) {
       return (
-        <div className="chat-attachment-card-list">
+        <div className="chat-attachment-card-list composer-attachment-card-list">
           {files.map((file) => {
-            const kind = fileKind(file);
-            const extension = getFileExtension(file.name || file.path);
-            const badge = extension ? extension.toUpperCase().slice(0, 4) : "FILE";
-            const office = isOfficeDocument(file.name || file.path, file.mimeType);
-            const categoryLabel =
-              kind === "pdf"
-                ? "PDF 文档"
-                : office
-                  ? "办公文档"
-                  : kind === "text"
-                    ? "文本文件"
-                    : kind === "markdown"
-                      ? "Markdown 笔记"
-                      : kind === "code"
-                        ? "代码文件"
-                        : kind === "image"
-                          ? "图片文件"
-                          : "文件";
-            const toneClass =
-              kind === "pdf"
-                ? "tone-pdf"
-                : office
-                  ? "tone-office"
-                  : kind === "text"
-                    ? "tone-text"
-                    : kind === "image"
-                      ? "tone-image"
-                      : "tone-file";
+            const meta = attachmentCardMeta(file);
+            const imageSource = meta.kind === "image" ? file.dataUrl || file.url : "";
+
+            if (imageSource) {
+              return (
+                <div key={file.id} className="composer-image-attachment-card">
+                  <button
+                    aria-label={`预览图片 ${file.name}`}
+                    className="composer-image-attachment-main"
+                    onClick={() => onOpenAttachment(file)}
+                    type="button"
+                  >
+                    <img className="composer-image-attachment-thumb" src={imageSource} alt="" />
+                  </button>
+                  <button
+                    aria-label={`移除附件 ${file.name}`}
+                    className="chat-attachment-remove composer-attachment-remove"
+                    onClick={() => onRemoveAttachment(file.id)}
+                    type="button"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              );
+            }
 
             return (
-              <button
+              <div
                 key={file.id}
-                className={`chat-attachment-card ${toneClass}`}
-                onClick={() => onOpenAttachment(file)}
-                type="button"
+                className={`chat-attachment-card composer-attachment-card ${meta.toneClass}`}
               >
-                <div className="chat-attachment-card-badge">{badge}</div>
-                <div className="chat-attachment-card-copy">
-                  <strong title={file.name}>{file.name}</strong>
-                  <span>{formatBytes(file.size)}</span>
-                </div>
-                <div className="chat-attachment-card-tag">{categoryLabel}</div>
-              </button>
+                <button className="composer-attachment-card-main" onClick={() => onOpenAttachment(file)} type="button">
+                  <div className={`chat-attachment-card-badge composer-file-icon ${meta.iconClass}`}>
+                    <span>{meta.iconText}</span>
+                  </div>
+                  <div className="chat-attachment-card-copy">
+                    <strong title={file.name}>{file.name}</strong>
+                    <span>{meta.extensionLabel}</span>
+                  </div>
+                </button>
+                <button
+                  aria-label={`移除附件 ${file.name}`}
+                  className="chat-attachment-remove composer-attachment-remove"
+                  onClick={() => onRemoveAttachment(file.id)}
+                  type="button"
+                >
+                  <X size={13} />
+                </button>
+              </div>
             );
           })}
         </div>
@@ -1062,23 +1181,26 @@ export function ChatWorkspace({
     }
 
     return (
-      <div className="chat-attachment-list">
-        {files.map((file) => (
-          <div key={file.id} className="chat-attachment-chip">
-            <button className="chat-attachment-trigger" onClick={() => onOpenAttachment(file)} type="button">
-              <Paperclip size={14} />
-              <span title={file.name}>{file.name}</span>
-            </button>
+      <div className="chat-attachment-card-list">
+        {files.map((file) => {
+          const meta = attachmentCardMeta(file);
+
+          return (
             <button
-              aria-label={`移除附件 ${file.name}`}
-              className="chat-attachment-remove"
-              onClick={() => onRemoveAttachment(file.id)}
+              key={file.id}
+              className={`chat-attachment-card ${meta.toneClass}`}
+              onClick={() => onOpenAttachment(file)}
               type="button"
             >
-              <X size={12} />
+              <div className="chat-attachment-card-badge">{meta.badge}</div>
+              <div className="chat-attachment-card-copy">
+                <strong title={file.name}>{file.name}</strong>
+                <span>{formatBytes(file.size)}</span>
+              </div>
+              <div className="chat-attachment-card-tag">{meta.categoryLabel}</div>
             </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   }
@@ -1702,12 +1824,13 @@ export function ChatWorkspace({
               onKeyDown={handleKeyDown}
               placeholder={composerPlaceholder}
               value={draftMessage}
+              onPasteFiles={(files) => void pasteAttachmentFiles(files)}
             />
           </div>
           <div className="chat-composer-actions">
             <div className="chat-composer-left">
               <button className="chat-composer-icon" onClick={onPickFiles} title="添加附件" type="button">
-                <Paperclip size={16} />
+                <Plus size={17} />
               </button>
               {renderKnowledgePicker()}
             </div>
@@ -1803,6 +1926,13 @@ export function ChatWorkspace({
       runtimeInProgress &&
       !hasRuntimeActivity &&
       (!lastMessage || lastMessage.role !== "assistant" || !lastMessage.content);
+    const messageListShellClassName = [
+      "message-list-shell",
+      messageListEdgeState.hasTopFade ? "has-top-fade" : "",
+      messageListEdgeState.hasBottomFade ? "has-bottom-fade" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     return (
       <div className="chat-thread-layout">
@@ -1811,32 +1941,35 @@ export function ChatWorkspace({
             {activeConversation.title}
           </div>
           {renderThreadActions()}
+          {rightPaneControl ? <div className="chat-thread-right-pane-control">{rightPaneControl}</div> : null}
         </div>
-        <div
-          ref={messageListRef}
-          className="message-list"
-          data-native-wheel-scroll="true"
-          onScroll={handleMessageListScroll}
-          onWheel={handleMessageListWheel}
-        >
-          {leadingMessages.map(renderMessage)}
+        <div className={messageListShellClassName}>
+          <div
+            ref={messageListRef}
+            className="message-list"
+            data-native-wheel-scroll="true"
+            onScroll={handleMessageListScroll}
+            onWheel={handleMessageListWheel}
+          >
+            {leadingMessages.map(renderMessage)}
 
-          {showLoadingBubble ? (
-            <div className="message-row">
-              <div className="message-loading">
-                <LoaderCircle size={14} className="spin" />
-                <span>{cancelInFlight ? "正在停止..." : "正在思考"}</span>
+            {showLoadingBubble ? (
+              <div className="message-row">
+                <div className="message-loading">
+                  <LoaderCircle size={14} className="spin" />
+                  <span>{cancelInFlight ? "正在停止..." : "正在思考"}</span>
+                </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
 
-          {renderRuntimeActivity(runtimeBlocks, {
-            endedAt: streamingAssistantMessage?.updatedAt,
-            hasAssistantText: hasStreamingAssistantText,
-            hasError: runtimeState?.status === "failed",
-            isStreaming: runtimeInProgress,
-            startedAt: streamingAssistantMessage?.createdAt,
-          })}
+            {renderRuntimeActivity(runtimeBlocks, {
+              endedAt: streamingAssistantMessage?.updatedAt,
+              hasAssistantText: hasStreamingAssistantText,
+              hasError: runtimeState?.status === "failed",
+              isStreaming: runtimeInProgress,
+              startedAt: streamingAssistantMessage?.createdAt,
+            })}
+          </div>
         </div>
 
         {renderComposer(false)}

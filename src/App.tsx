@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Suspense, lazy } from "react";
 import clsx from "clsx";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import {
   createRuntimeModelId,
   ensureActiveModelId,
@@ -36,6 +37,10 @@ import type { SettingsSection } from "./features/settings/types";
 import { useWorkspaceController } from "./features/workspace/useWorkspaceController";
 import { fileKind } from "./features/shared/utils";
 import { ChatWorkspace } from "./features/chat/ChatWorkspace";
+import { BrowserWorkspacePane } from "./features/chat/BrowserWorkspacePane";
+import { PreviewPane } from "./features/chat/PreviewPane";
+import { TerminalPane } from "./features/chat/TerminalPane";
+import { WorkspaceFileExplorer } from "./features/chat/WorkspaceFileExplorer";
 import {
   upsertConversationSummaryList,
   type UpsertConversationSummaryOptions,
@@ -53,10 +58,25 @@ import {
   upsertTimelineToolItem,
 } from "./lib/runtime-timeline";
 import { stripComposerSkillMentions } from "./lib/composer-skills";
+import { BROWSER_HOME_URL, buildBrowserPreview } from "./lib/browser-target";
+import {
+  closeRightPaneTab,
+  createBrowserRightPaneTab,
+  createFileSystemRightPaneTab,
+  createPreviewRightPaneTab,
+  createTerminalRightPaneTab,
+  hasBrowserRightPaneTab,
+  replaceRightPaneTabByTarget,
+  rightPaneTabTargetKey,
+  RIGHT_BROWSER_TAB_ID,
+  RIGHT_FILES_TAB_ID,
+  upsertRightPaneTab,
+  type RightPaneTab,
+} from "./lib/right-pane-tabs";
 
-const PreviewPane = lazy(async () => {
-  const module = await import("./features/chat/PreviewPane");
-  return { default: module.PreviewPane };
+const RightWorkspacePane = lazy(async () => {
+  const module = await import("./features/chat/RightWorkspacePane");
+  return { default: module.RightWorkspacePane };
 });
 const SkillsView = lazy(async () => {
   const module = await import("./features/skills/SkillsView");
@@ -159,13 +179,13 @@ const SETTINGS_SIDEBAR_WIDTH_STORAGE_KEY = "super-agents:settings-sidebar-width"
 const PREVIEW_PANE_WIDTH_STORAGE_KEY = "super-agents:preview-pane-width";
 const SIDEBAR_DEFAULT_WIDTH = 208;
 const SETTINGS_SIDEBAR_DEFAULT_WIDTH = 344;
-const PREVIEW_PANE_DEFAULT_WIDTH = 380;
+const PREVIEW_PANE_DEFAULT_WIDTH = 760;
 const SIDEBAR_MIN_WIDTH = 172;
 const SIDEBAR_MAX_WIDTH = 360;
 const SETTINGS_SIDEBAR_MIN_WIDTH = 260;
 const SETTINGS_SIDEBAR_MAX_WIDTH = 460;
-const PREVIEW_PANE_MIN_WIDTH = 300;
-const PREVIEW_PANE_MAX_WIDTH = 640;
+const PREVIEW_PANE_MIN_WIDTH = 420;
+const PREVIEW_PANE_MAX_WIDTH = 980;
 
 type ResizeTarget = "sidebar" | "settings-sidebar" | "preview";
 type RemoteControlChannelKey = keyof AppConfig["remoteControl"];
@@ -332,8 +352,9 @@ export default function App() {
   const [draftKnowledgeBaseIds, setDraftKnowledgeBaseIds] = useState<string[]>([]);
   const [messageScrollRequest, setMessageScrollRequest] = useState(0);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("assistant");
-  const [preview, setPreview] = useState<FilePreviewPayload | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [rightTabs, setRightTabs] = useState<RightPaneTab[]>(() => [createFileSystemRightPaneTab()]);
+  const [rightPaneOpen, setRightPaneOpen] = useState(false);
+  const [activeRightTabId, setActiveRightTabId] = useState<string | null>(RIGHT_FILES_TAB_ID);
   const [toast, setToast] = useState<string | null>(null);
   const [skillQuery, setSkillQuery] = useState("");
   const [skillsRefreshing, setSkillsRefreshing] = useState(false);
@@ -360,7 +381,7 @@ export default function App() {
     readStoredWidth(SETTINGS_SIDEBAR_WIDTH_STORAGE_KEY, SETTINGS_SIDEBAR_DEFAULT_WIDTH),
   );
   const [previewPaneWidth, setPreviewPaneWidth] = useState(() =>
-    readStoredWidth(PREVIEW_PANE_WIDTH_STORAGE_KEY, PREVIEW_PANE_DEFAULT_WIDTH),
+    readStoredWidth(PREVIEW_PANE_WIDTH_STORAGE_KEY, PREVIEW_PANE_DEFAULT_WIDTH, [380]),
   );
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window === "undefined" ? 1440 : window.innerWidth,
@@ -666,6 +687,7 @@ export default function App() {
       lastMessageAt: conversation.lastMessageAt,
       preview: lastMessage?.role === "assistant" ? describeMessagePreview(lastMessage) : conversation.preview,
       messageCount: conversation.messageCount,
+      workspaceRoot: conversation.workspaceRoot,
       selectedKnowledgeBaseIds: conversation.selectedKnowledgeBaseIds,
       agentCore: conversation.agentCore,
       agentSessionId: conversation.agentSessionId,
@@ -1126,16 +1148,101 @@ export default function App() {
     void commitConfig({ ...cloneConfig(config), skills });
   }
 
+  function openRightTab(previewPayload: FilePreviewPayload, options: { forceNew?: boolean; id?: string } = {}) {
+    const nextTab: RightPaneTab = createPreviewRightPaneTab(options.id ?? `right-tab-${uid()}`, previewPayload);
+
+    setRightPaneOpen(true);
+    setRightTabs((currentTabs) => {
+      if (options.forceNew) {
+        setActiveRightTabId(nextTab.id);
+        return [...currentTabs, nextTab];
+      }
+
+      const result = upsertRightPaneTab(currentTabs, nextTab);
+      setActiveRightTabId(result.activeTabId);
+      return result.tabs;
+    });
+  }
+
+  function updateRightTabByTarget(targetKey: string | null, previewPayload: FilePreviewPayload) {
+    setRightTabs((currentTabs) => replaceRightPaneTabByTarget(currentTabs, targetKey, previewPayload));
+  }
+
+  function closeRightTab(tabId: string) {
+    setRightTabs((currentTabs) => {
+      const result = closeRightPaneTab(currentTabs, activeRightTabId, tabId);
+      setActiveRightTabId(result.activeTabId);
+      return result.tabs;
+    });
+  }
+
+  function createBrowserPage(target = BROWSER_HOME_URL) {
+    return {
+      id: `browser-page-${uid()}`,
+      preview: buildBrowserPreview(target, target === BROWSER_HOME_URL ? "新标签页" : target),
+    };
+  }
+
+  function openBrowserTab(target = BROWSER_HOME_URL) {
+    setRightPaneOpen(true);
+    setRightTabs((currentTabs) => {
+      const browserTab = currentTabs.find((tab) => tab.kind === "browser");
+      if (!browserTab) {
+        const nextTab = createBrowserRightPaneTab(RIGHT_BROWSER_TAB_ID, target);
+        setActiveRightTabId(nextTab.id);
+        return [...currentTabs, nextTab];
+      }
+
+      const nextPage = createBrowserPage(target);
+      setActiveRightTabId(browserTab.id);
+      return currentTabs.map((tab) =>
+        tab.id === browserTab.id && tab.kind === "browser"
+          ? {
+              ...tab,
+              browserTabs: target === BROWSER_HOME_URL ? tab.browserTabs : [...tab.browserTabs, nextPage],
+              activeBrowserTabId: target === BROWSER_HOME_URL ? tab.activeBrowserTabId : nextPage.id,
+            }
+          : tab,
+      );
+    });
+  }
+
+  function createBrowserTab() {
+    openBrowserTab();
+  }
+
+  function createTerminalTab() {
+    const nextTab = createTerminalRightPaneTab(`right-terminal-${uid()}`);
+    setRightPaneOpen(true);
+    setActiveRightTabId(nextTab.id);
+    setRightTabs((currentTabs) => [...currentTabs, nextTab]);
+  }
+
+  function updateBrowserTabState(
+    tabId: string,
+    browserTabs: Extract<RightPaneTab, { kind: "browser" }>["browserTabs"],
+    activeBrowserTabId: string,
+  ) {
+    setRightTabs((currentTabs) =>
+      currentTabs.map((tab) =>
+        tab.id === tabId && tab.kind === "browser"
+          ? { ...tab, browserTabs, activeBrowserTabId }
+          : tab,
+      ),
+    );
+  }
+
   async function openPreview(file: FileDropEntry) {
-    setPreviewOpen(true);
-    setPreview({
+    const loadingPreview: FilePreviewPayload = {
       title: file.name,
       path: file.path,
       kind: fileKind(file),
       mimeType: file.mimeType,
       content: file.content ?? file.dataUrl ?? "",
       loading: !file.content && !file.dataUrl,
-    });
+    };
+    const targetKey = rightPaneTabTargetKey(loadingPreview);
+    openRightTab(loadingPreview);
 
     if (!file.content && !file.dataUrl) {
       try {
@@ -1145,35 +1252,15 @@ export default function App() {
           title: file.name,
           kind: fileKind(file),
         });
-        setPreview(payload);
+        updateRightTabByTarget(targetKey, payload);
       } catch {
-      setToast("打开预览失败");
+        setToast("打开预览失败");
       }
     }
   }
 
   async function openPreviewLink(url: string) {
-    setPreviewOpen(true);
-    setPreview({
-      title: url,
-      path: url,
-      kind: "web",
-      mimeType: "text/html",
-      content: "",
-      url,
-      loading: true,
-    });
-
-    try {
-      const payload = await workspaceClient.readPreview({
-        url,
-        title: url,
-        kind: "web",
-      });
-      setPreview(payload);
-    } catch {
-      setToast("打开页面预览失败");
-    }
+    openBrowserTab(url);
   }
 
   async function openPreviewExternally(payload: { path?: string; url?: string }) {
@@ -2031,6 +2118,7 @@ export default function App() {
           lastMessageAt: now + 1,
           preview: optimisticPreview,
           messageCount: 2,
+          workspaceRoot: config.workspaceRoot,
           selectedKnowledgeBaseIds,
           messages: [optimisticUserMessage, optimisticAssistantMessage],
         };
@@ -2285,18 +2373,34 @@ export default function App() {
     }
   }
 
-  const showPreviewPane = preview && previewOpen;
+  const showRightPane = rightPaneOpen;
   const canResizePanels = viewportWidth > 840;
-  const showInlinePreviewPane = Boolean(showPreviewPane) && viewportWidth > 1400;
+  const showInlineRightPane = showRightPane && viewportWidth > 1400;
   const activeSidebarWidth = view === "settings" ? settingsSidebarWidth : sidebarWidth;
   const appShellStyle =
     canResizePanels
       ? {
-          gridTemplateColumns: showInlinePreviewPane
+          gridTemplateColumns: showInlineRightPane
             ? `${activeSidebarWidth}px minmax(0, 1fr) ${previewPaneWidth}px`
             : `${activeSidebarWidth}px minmax(0, 1fr)`,
         }
       : undefined;
+  const rightPaneInstanceCount = rightTabs.filter((tab) => tab.closable).length;
+  const canCreateBrowserTab = !hasBrowserRightPaneTab(rightTabs);
+
+  function renderRightPaneToggleButton(extraClassName?: string) {
+    return (
+      <button
+        aria-label={showRightPane ? "收起右侧栏" : "展开右侧栏"}
+        className={clsx("right-pane-toggle", extraClassName, showRightPane && "is-open", rightPaneInstanceCount > 0 && "has-tabs")}
+        onClick={() => setRightPaneOpen((open) => !open)}
+        type="button"
+      >
+        {showRightPane ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
+        {!showRightPane && rightPaneInstanceCount > 0 ? <span>{rightPaneInstanceCount}</span> : null}
+      </button>
+    );
+  }
   const hasSkillResults = filteredInstalledSkills.length > 0;
   const activeConversationRuntimeState =
     (activeConversationId ? conversationRuntimeStates[activeConversationId] : null) ?? null;
@@ -2329,6 +2433,7 @@ export default function App() {
     );
   const activeConversationBusy =
     startingChatTurn || isConversationTurnActive(activeConversationRuntimeState?.status);
+  const activeConversationWorkspaceRoot = activeConversation?.workspaceRoot || config.workspaceRoot;
 
   const beginResize =
     (target: ResizeTarget, width: number) => (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -2452,6 +2557,7 @@ export default function App() {
           onDraftMessageChange={setDraftMessage}
           onClearKnowledgeBases={clearKnowledgeBaseSelection}
           onManageKnowledgeBases={() => setView("knowledge")}
+          onAddAttachments={(files) => void appendAttachments(files)}
           onModelChange={(value) => updateConfigField("activeModelId", value)}
           onOpenAttachment={openPreview}
           onOpenPreviewLink={openPreviewLink}
@@ -2461,6 +2567,7 @@ export default function App() {
           onSendMessage={sendChatMessage}
           onToggleKnowledgeBase={toggleKnowledgeBaseSelection}
           runtimeState={activeConversationRuntimeState}
+          rightPaneControl={renderRightPaneToggleButton("in-thread")}
           onVoiceInput={toggleVoiceInput}
           voiceInputState={voiceInputState}
           voiceInputSupported={voiceInputSupported}
@@ -2577,7 +2684,7 @@ export default function App() {
       />
 
       <div
-        className={clsx("app-shell", showPreviewPane && "with-preview", view === "settings" && "settings-mode")}
+        className={clsx("app-shell", showRightPane && "with-preview", view === "settings" && "settings-mode")}
         style={appShellStyle}
       >
         {view === "settings" ? (
@@ -2624,9 +2731,11 @@ export default function App() {
           {renderMainView()}
         </main>
 
-        {showInlinePreviewPane ? (
+        {view !== "chat" ? renderRightPaneToggleButton("floating") : null}
+
+        {showInlineRightPane ? (
           <button
-            aria-label="调整预览栏宽度"
+            aria-label="调整右侧栏宽度"
             className={clsx("pane-resizer", "pane-resizer-right", resizeTarget === "preview" && "active")}
             onDoubleClick={() => resetWidth("preview")}
             onPointerDown={beginResize("preview", previewPaneWidth)}
@@ -2637,14 +2746,63 @@ export default function App() {
           </button>
         ) : null}
 
-        {showPreviewPane && preview ? (
+        {showRightPane ? (
           <Suspense fallback={<LazyViewFallback />}>
-            <PreviewPane
-              preview={preview}
-              onClearPreview={() => setPreview(null)}
-              onClosePane={() => setPreviewOpen(false)}
-              onOpenLink={openPreviewLink}
-              onOpenExternal={openPreviewExternally}
+            <RightWorkspacePane
+              activeTabId={activeRightTabId}
+              canCreateBrowserTab={canCreateBrowserTab}
+              tabs={rightTabs}
+              onCloseTab={closeRightTab}
+              onCreateBrowserTab={createBrowserTab}
+              onCreateTerminalTab={createTerminalTab}
+              onSelectTab={setActiveRightTabId}
+              renderTabContent={(tab) => {
+                if (tab.kind === "files") {
+                  return (
+                    <WorkspaceFileExplorer
+                      workspaceRoot={activeConversationWorkspaceRoot}
+                      onListDirectory={workspaceClient.listWorkspaceDirectory}
+                      onReadPreview={workspaceClient.readPreview}
+                      onOpenExternal={openPreviewExternally}
+                      onOpenLink={openPreviewLink}
+                    />
+                  );
+                }
+
+                if (tab.kind === "browser") {
+                  return (
+                    <BrowserWorkspacePane
+                      activePageId={tab.activeBrowserTabId}
+                      initialPages={tab.browserTabs}
+                      onClosePane={() => setRightPaneOpen(false)}
+                      onOpenExternal={openPreviewExternally}
+                      onPagesChange={(pages, activePageId) => updateBrowserTabState(tab.id, pages, activePageId)}
+                      onBrowserWindowOpen={workspaceClient.onBrowserWindowOpen}
+                    />
+                  );
+                }
+
+                if (tab.kind === "terminal") {
+                  return (
+                    <TerminalPane
+                      cwd={activeConversationWorkspaceRoot}
+                      onRunCommand={workspaceClient.runTerminalCommand}
+                    />
+                  );
+                }
+
+                return (
+                  <PreviewPane
+                    embedded
+                    preview={tab.preview}
+                    onClearPreview={() => closeRightTab(tab.id)}
+                    onClosePane={() => setRightPaneOpen(false)}
+                    onOpenExternal={openPreviewExternally}
+                    onOpenLink={openPreviewLink}
+                    onBrowserWindowOpen={workspaceClient.onBrowserWindowOpen}
+                  />
+                );
+              }}
             />
           </Suspense>
         ) : null}
