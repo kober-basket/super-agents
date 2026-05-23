@@ -41,7 +41,7 @@ import { AppTitleBar } from "./features/navigation/AppTitleBar";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
 import { useWorkspaceController } from "./features/workspace/useWorkspaceController";
-import { conversationWorkspaceLabel, workspaceLabel } from "./features/workspace/labels";
+import { workspaceLabel } from "./features/workspace/labels";
 import { fileKind } from "./features/shared/utils";
 import { ChatWorkspace } from "./features/chat/ChatWorkspace";
 import { BrowserWorkspacePane } from "./features/chat/BrowserWorkspacePane";
@@ -2765,7 +2765,7 @@ export default function App() {
 
   function renderWorkspaceFolderButton() {
     const workspaceRoot = resolveActiveConversationWorkspaceRoot();
-    const workspaceName = conversationWorkspaceLabel(workspaceRoot, activeConversation?.id ?? activeConversationId);
+    const workspaceName = workspaceLabel(workspaceRoot);
 
     return (
       <div className="conversation-workspace-control" title={workspaceRoot || "未选择工作区"}>

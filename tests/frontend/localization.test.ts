@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { describePreviewItem, formatMcpStatusLabel } from "../../src/features/shared/utils";
 import {
-  conversationWorkspaceLabel,
   DEFAULT_WORKSPACE_TITLE,
   NO_WORKSPACE_SELECTED_LABEL,
   workspaceLabel,
@@ -24,16 +23,8 @@ test("workspace labels default to Chinese copy", () => {
   assert.equal(workspaceLabel(""), "\u672a\u9009\u62e9\u5de5\u4f5c\u533a");
   assert.equal(workspaceLabel("F:/work/github/super-agents"), "super-agents");
   assert.equal(
-    conversationWorkspaceLabel(
-      "/Users/kober/Library/Application Support/Super Agents/workspaces/22f5eaca-beae-4395-a090-41a99bf690bc",
-      "22f5eaca-beae-4395-a090-41a99bf690bc",
-      "\u6dfb\u52a0\u8bb0\u5fc6\u8bf7\u6c42",
-    ),
-    "\u4f1a\u8bdd\u5de5\u4f5c\u533a · \u6dfb\u52a0\u8bb0\u5fc6\u8bf7\u6c42",
-  );
-  assert.equal(
-    conversationWorkspaceLabel("F:/work/github/super-agents", "22f5eaca-beae-4395-a090-41a99bf690bc", "\u6dfb\u52a0\u8bb0\u5fc6\u8bf7\u6c42"),
-    "super-agents",
+    workspaceLabel("/Users/kober/Library/Application Support/Super Agents/workspaces/22f5eaca-beae-4395-a090-41a99bf690bc"),
+    "22f5eaca-beae-4395-a090-41a99bf690bc",
   );
 });
 

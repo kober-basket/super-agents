@@ -42,6 +42,8 @@ test("workspace folder follows chat area while top controls stay on one row", ()
   assert.match(appSource, /FolderOpen/);
   assert.match(appSource, /workspaceClient\.openFolder\(activeConversationWorkspaceRoot\)/);
   assert.match(appSource, /workspaceFolderControl=\{renderWorkspaceFolderButton\(\)\}/);
+  assert.match(appSource, /const workspaceName = workspaceLabel\(workspaceRoot\)/);
+  assert.doesNotMatch(appSource, /conversationWorkspaceLabel/);
   assert.match(
     chatWorkspaceSource,
     /<div className="chat-thread-folder-control">\s*\{workspaceFolderControl\}\s*<\/div>/s,

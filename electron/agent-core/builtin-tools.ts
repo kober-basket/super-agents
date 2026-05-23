@@ -729,7 +729,8 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     {
       name: "read",
       aliases: ["workspace_read_file"],
-      description: "读取 UTF-8 文本文件。项目内文件使用相对路径；只有当用户明确给出本机文件或文件夹时才使用绝对路径。",
+      description:
+        "读取 UTF-8 文本文件。项目内文件使用相对路径；只有当用户明确给出本机文件或文件夹时才使用绝对路径（absolute path）。",
       risk: "read",
       isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {
@@ -763,7 +764,8 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     {
       name: "list",
       aliases: ["workspace_list_directory"],
-      description: "列出文件和文件夹。项目目录使用相对路径；只有当用户明确给出本机文件夹时才使用绝对路径。",
+      description:
+        "列出文件和文件夹。项目目录使用相对路径；只有当用户明确给出本机文件夹时才使用绝对路径（absolute path）。",
       risk: "read",
       isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {
@@ -796,7 +798,8 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     {
       name: "grep",
       aliases: ["workspace_search_text"],
-      description: "搜索文本内容。优先使用 ripgrep，不可用时回退到内置搜索；项目内搜索用相对路径，用户明确指定本机目录时可用绝对路径。",
+      description:
+        "搜索文本内容。优先使用 ripgrep，不可用时回退到内置搜索；项目内搜索用相对路径，用户明确指定本机目录时可用绝对路径（absolute path）。",
       risk: "read",
       isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {
@@ -858,7 +861,8 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     },
     {
       name: "glob",
-      description: "按 glob 模式查找文件。项目内搜索用相对路径；用户明确指定本机目录时可用绝对路径。",
+      description:
+        "按 glob 模式查找文件。项目内搜索用相对路径；用户明确指定本机目录时可用绝对路径（absolute path）。",
       risk: "read",
       isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {

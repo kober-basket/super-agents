@@ -57,13 +57,13 @@
     "@types/markdown-it": "^14.1.2",
     "@types/markdown-it-footnote": "^3.0.4",
     "@types/mime-types": "^2.1.4",
-    "@types/node": "^22.13.14",
+    "@types/node": "^24.12.4",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.4.1",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
-    "electron": "^35.1.5",
+    "electron": "^42.2.0",
     "electron-builder": "^25.1.8",
     "tsup": "^8.4.0",
     "typescript": "^5.8.2",
@@ -89,6 +89,7 @@
     "asarUnpack": [
       "node_modules/node-pty/**"
     ],
+    "npmRebuild": false,
     "win": {
       "target": [
         "nsis"
