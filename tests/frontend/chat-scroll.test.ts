@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   isScrollAtBottom,
   isScrollNearBottom,
+  scrollMessageListToBottom,
   shouldReleaseAutoScrollOnWheel,
   shouldAutoScrollMessageList,
 } from "../../src/lib/chat-scroll";
@@ -63,6 +64,23 @@ test("message list auto-scroll respects explicit requests and pinned state", () 
     }),
     false,
   );
+});
+
+test("message list pins to the bottom synchronously during streaming", () => {
+  let scrollToCalls = 0;
+  const target = {
+    clientHeight: 500,
+    scrollHeight: 1_200,
+    scrollTop: 700,
+    scrollTo() {
+      scrollToCalls += 1;
+    },
+  };
+
+  scrollMessageListToBottom(target);
+
+  assert.equal(target.scrollTop, 1_200);
+  assert.equal(scrollToCalls, 0);
 });
 
 test("message list releases auto-scroll as soon as the user wheels upward", () => {

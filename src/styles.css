@@ -6868,7 +6868,7 @@ textarea {
 
 .knowledge-sidebar-head {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .knowledge-sidebar-kicker,
@@ -6899,40 +6899,6 @@ textarea {
   background: var(--primary-action-bg);
   color: #fff;
   box-shadow: 0 12px 22px color-mix(in srgb, var(--send-gradient-end) 24%, transparent);
-}
-
-.knowledge-sidebar-overview {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.knowledge-sidebar-overview span {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-  padding: 10px;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  background: color-mix(in srgb, var(--panel) 72%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 72%, transparent);
-}
-
-.knowledge-sidebar-overview strong {
-  color: var(--text);
-  font-size: 15px;
-  font-weight: var(--font-weight-semibold);
-  line-height: 1.1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.knowledge-sidebar-overview em {
-  color: var(--muted);
-  font-size: 11px;
-  font-style: normal;
-  line-height: 1.1;
 }
 
 .knowledge-sidebar-head p {
@@ -7143,7 +7109,7 @@ textarea {
 
 .knowledge-hero-head {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto;
+  grid-template-columns: minmax(220px, 1fr) auto;
   align-items: center;
   gap: 14px;
 }
@@ -7159,19 +7125,6 @@ textarea {
   display: grid;
   gap: 5px;
   min-width: 0;
-}
-
-.knowledge-kicker {
-  display: inline-flex;
-  width: fit-content;
-  align-items: center;
-  padding: 3px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--primary-action-solid) 9%, transparent);
-  color: var(--muted-strong);
-  font-size: 11px;
-  font-weight: var(--font-weight-semibold);
-  line-height: 1.2;
 }
 
 .knowledge-hero-copy h3 {
@@ -7201,40 +7154,6 @@ textarea {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
-}
-
-.knowledge-hero-metrics {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-
-.knowledge-stat-card {
-  min-width: 74px;
-  display: grid;
-  gap: 3px;
-  padding: 9px 11px;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
-  background: color-mix(in srgb, var(--panel) 78%, transparent);
-}
-
-.knowledge-stat-card strong {
-  max-width: 92px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
-  font-size: 15px;
-  font-weight: var(--font-weight-semibold);
-  line-height: 1.15;
-}
-
-.knowledge-stat-card em {
-  color: var(--muted);
-  font-size: 11px;
-  font-style: normal;
-  line-height: 1.1;
 }
 
 .knowledge-settings-strip {
@@ -12475,9 +12394,6 @@ textarea:focus,
     grid-template-columns: 1fr;
   }
 
-  .knowledge-hero-metrics {
-    flex-wrap: wrap;
-  }
 }
 
 @media (max-width: 1080px) {
@@ -12691,16 +12607,10 @@ textarea:focus,
   }
 
   .knowledge-hero-main,
-  .knowledge-stat-grid,
   .knowledge-composer-card,
   .knowledge-composer-card.compact {
     width: 100%;
     grid-template-columns: 1fr;
-  }
-
-  .knowledge-hero-metrics {
-    width: 100%;
-    flex-wrap: wrap;
   }
 
   .knowledge-setting-card,
@@ -14086,8 +13996,6 @@ textarea:focus,
 }
 
 :root[data-theme="graphite"] .knowledge-base-icon,
-:root[data-theme="graphite"] .knowledge-sidebar-overview span,
-:root[data-theme="graphite"] .knowledge-stat-card,
 :root[data-theme="graphite"] .knowledge-composer-icon,
 :root[data-theme="graphite"] .knowledge-upload-illustration,
 :root[data-theme="graphite"] .skill-icon-shell,
@@ -14105,8 +14013,6 @@ textarea:focus,
 :root[data-theme="graphite"] .knowledge-base-icon,
 :root[data-theme="graphite"] .wechat-login-panel,
 :root[data-theme="dusk"] .knowledge-base-icon,
-:root[data-theme="dusk"] .knowledge-sidebar-overview span,
-:root[data-theme="dusk"] .knowledge-stat-card,
 :root[data-theme="dusk"] .knowledge-composer-icon,
 :root[data-theme="dusk"] .knowledge-upload-illustration,
 :root[data-theme="dusk"] .skill-icon-shell,
@@ -14124,8 +14030,6 @@ textarea:focus,
 :root[data-theme="dusk"] .knowledge-base-icon,
 :root[data-theme="dusk"] .wechat-login-panel,
 :root[data-theme="midnight"] .knowledge-base-icon,
-:root[data-theme="midnight"] .knowledge-sidebar-overview span,
-:root[data-theme="midnight"] .knowledge-stat-card,
 :root[data-theme="midnight"] .knowledge-composer-icon,
 :root[data-theme="midnight"] .knowledge-upload-illustration,
 :root[data-theme="midnight"] .skill-icon-shell,
@@ -14143,8 +14047,6 @@ textarea:focus,
 :root[data-theme="midnight"] .knowledge-base-icon,
 :root[data-theme="midnight"] .wechat-login-panel,
 :root[data-theme="ember"] .knowledge-base-icon,
-:root[data-theme="ember"] .knowledge-sidebar-overview span,
-:root[data-theme="ember"] .knowledge-stat-card,
 :root[data-theme="ember"] .knowledge-composer-icon,
 :root[data-theme="ember"] .knowledge-upload-illustration,
 :root[data-theme="ember"] .skill-icon-shell,

@@ -4,6 +4,11 @@ export interface ScrollMetrics {
   scrollTop: number;
 }
 
+export interface MessageListScrollTarget {
+  scrollHeight: number;
+  scrollTop: number;
+}
+
 const DEFAULT_BOTTOM_THRESHOLD_PX = 16;
 const DEFAULT_BOTTOM_RESUME_THRESHOLD_PX = 4;
 
@@ -35,6 +40,10 @@ export function shouldAutoScrollMessageList(options: {
     options.requestedManualScroll ||
     options.wasPinnedToBottom
   );
+}
+
+export function scrollMessageListToBottom(target: MessageListScrollTarget) {
+  target.scrollTop = target.scrollHeight;
 }
 
 export function shouldReleaseAutoScrollOnWheel(deltaY: number) {

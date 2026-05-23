@@ -70,6 +70,7 @@ import {
 import {
   isScrollAtBottom,
   isScrollNearBottom,
+  scrollMessageListToBottom,
   shouldReleaseAutoScrollOnWheel,
   shouldAutoScrollMessageList,
 } from "../../lib/chat-scroll";
@@ -814,8 +815,6 @@ export function ChatWorkspace({
       requestedManualScroll,
       wasPinnedToBottom: autoScrollPinnedToBottomRef.current,
     });
-    const behavior: ScrollBehavior = "auto";
-
     autoScrollStateRef.current = {
       activeConversationId,
       messageCount,
@@ -830,10 +829,7 @@ export function ChatWorkspace({
     const scrollToBottom = () => {
       autoScrollManuallyDetachedRef.current = false;
       autoScrollPinnedToBottomRef.current = true;
-      messageList.scrollTo({
-        top: messageList.scrollHeight,
-        behavior,
-      });
+      scrollMessageListToBottom(messageList);
       updateMessageListPinnedState(messageList);
     };
 

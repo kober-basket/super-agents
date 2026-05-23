@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { KnowledgeView } from "../../src/features/knowledge/KnowledgeView";
+import { buildEmbeddingModelOptions, KnowledgeView } from "../../src/features/knowledge/KnowledgeView";
 import type { KnowledgeBaseSummary, ModelProviderConfig } from "../../src/types";
 
 function readSource(relativePath: string) {
@@ -27,6 +27,34 @@ const provider: ModelProviderConfig = {
       label: "Text Embedding 3 Small",
       enabled: true,
       capabilities: { embedding: true },
+    },
+    {
+      id: "gpt-5-mini",
+      label: "GPT-5 Mini",
+      enabled: true,
+    },
+  ],
+};
+
+const customProvider: ModelProviderConfig = {
+  id: "custom",
+  name: "Custom",
+  kind: "openai-compatible",
+  baseUrl: "https://example.com/v1",
+  apiKey: "",
+  temperature: 0.7,
+  maxTokens: 4096,
+  enabled: true,
+  models: [
+    {
+      id: "bge-m3",
+      label: "BGE M3",
+      enabled: true,
+    },
+    {
+      id: "chat-only",
+      label: "Chat Only",
+      enabled: true,
     },
   ],
 };
@@ -56,14 +84,13 @@ function renderKnowledgeView() {
       }}
       knowledgeBases={[knowledgeBase]}
       knowledgeRefreshing={false}
-      modelProviders={[provider]}
+      modelProviders={[provider, customProvider]}
       onAddKnowledgeDirectory={async () => undefined}
       onAddKnowledgeFiles={async () => undefined}
       onAddKnowledgeNote={async () => undefined}
       onAddKnowledgeUrl={async () => undefined}
       onAddKnowledgeWebsite={async () => undefined}
-      onChangeEmbeddingModel={() => undefined}
-      onChangeEmbeddingProvider={() => undefined}
+      onChangeEmbeddingSelection={() => undefined}
       onCreateKnowledgeBase={async () => "kb-2"}
       onDeleteKnowledgeBase={async () => undefined}
       onDeleteKnowledgeItem={async () => undefined}
@@ -73,13 +100,35 @@ function renderKnowledgeView() {
   );
 }
 
-test("knowledge view keeps sidebar copy compact and centers the empty file action", () => {
+test("knowledge view builds one combined embedding model picker from provider models", () => {
+  const options = buildEmbeddingModelOptions([provider, customProvider]);
+
+  assert.deepEqual(
+    options.map((option) => ({
+      modelId: option.modelId,
+      providerId: option.providerId,
+      providerName: option.providerName,
+    })),
+    [
+      { modelId: "text-embedding-3-small", providerId: "openai", providerName: "OpenAI" },
+      { modelId: "bge-m3", providerId: "custom", providerName: "Custom" },
+    ],
+  );
+});
+
+test("knowledge view keeps the knowledge page free of duplicate stat chrome", () => {
   const html = renderKnowledgeView();
 
   assert.doesNotMatch(html, /集中管理文件、笔记、目录和网页资料。/);
   assert.match(html, /class="knowledge-empty-upload/);
   assert.match(html, />还没有文件</);
-  assert.match(html, /class="knowledge-sidebar-overview"/);
+  assert.doesNotMatch(html, /class="knowledge-sidebar-overview"/);
+  assert.doesNotMatch(html, /class="knowledge-hero-metrics"/);
+  assert.doesNotMatch(html, /class="knowledge-stat-card"/);
+  assert.doesNotMatch(html, /class="knowledge-kicker"/);
+  assert.doesNotMatch(html, /knowledge-settings-strip/);
+  assert.match(html, /class="chat-model-picker knowledge-embedding-picker"/);
+  assert.match(html, /当前 Embedding 模型 Text Embedding 3 Small/);
   assert.match(html, /class="primary-button knowledge-upload-button"/);
 });
 

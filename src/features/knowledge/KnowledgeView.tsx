@@ -160,15 +160,6 @@ export function KnowledgeView({
   const [composerModal, setComposerModal] = useState<KnowledgeComposerModal>(null);
 
   const selectedBase = knowledgeBases.find((base) => base.id === selectedBaseId) ?? knowledgeBases[0] ?? null;
-  const knowledgeBaseCount = knowledgeBases.length;
-  const totalItemCount = useMemo(
-    () => knowledgeBases.reduce((sum, base) => sum + base.itemCount, 0),
-    [knowledgeBases],
-  );
-  const totalChunkCount = useMemo(
-    () => knowledgeBases.reduce((sum, base) => sum + base.chunkCount, 0),
-    [knowledgeBases],
-  );
 
   useEffect(() => {
     if (!selectedBaseId && knowledgeBases[0]?.id) {
@@ -595,20 +586,6 @@ export function KnowledgeView({
               </span>
               知识库
             </h2>
-            <div className="knowledge-sidebar-overview" aria-label="知识库概览">
-              <span>
-                <strong>{knowledgeBaseCount}</strong>
-                <em>库</em>
-              </span>
-              <span>
-                <strong>{totalItemCount}</strong>
-                <em>资料</em>
-              </span>
-              <span>
-                <strong>{totalChunkCount}</strong>
-                <em>切片</em>
-              </span>
-            </div>
           </header>
 
           <div className="knowledge-base-list">
@@ -667,23 +644,8 @@ export function KnowledgeView({
                 <section className="knowledge-hero simple">
                   <div className="knowledge-hero-head">
                     <div className="knowledge-hero-copy">
-                      <span className="knowledge-kicker">当前知识库</span>
                       <h3>{selectedBase.name}</h3>
-                      <p>{selectedBase.description?.trim() || `${selectedBase.itemCount} 条资料`}</p>
-                    </div>
-                    <div className="knowledge-hero-metrics" aria-label="当前知识库统计">
-                      <span className="knowledge-stat-card">
-                        <strong>{selectedBase.itemCount}</strong>
-                        <em>资料</em>
-                      </span>
-                      <span className="knowledge-stat-card">
-                        <strong>{selectedBase.chunkCount}</strong>
-                        <em>切片</em>
-                      </span>
-                      <span className="knowledge-stat-card">
-                        <strong>{formatRelativeTime(selectedBase.updatedAt)}</strong>
-                        <em>更新</em>
-                      </span>
+                      {selectedBase.description?.trim() ? <p>{selectedBase.description.trim()}</p> : null}
                     </div>
                     <div className="knowledge-hero-actions">
                       <button
