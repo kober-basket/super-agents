@@ -23,10 +23,16 @@ vendor/runtime/
       python*.zip
       DLLs/...
   darwin-arm64/
+    bin/
+      uv
+      uvx
     node/bin/node
     node/bin/npm
     node/bin/npx
   darwin-x64/
+    bin/
+      uv
+      uvx
     node/bin/node
     node/bin/npm
     node/bin/npx

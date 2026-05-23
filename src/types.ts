@@ -447,6 +447,95 @@ export interface SecurityConfig {
   fullFileSystemAccess: boolean;
 }
 
+export type MailAuthType = "oauth" | "password";
+export type MailOAuthProvider = "google" | "microsoft";
+export type MailAccountStatus = "needs_auth" | "connected" | "error";
+
+export interface MailServerConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+}
+
+export interface MailProviderSetup {
+  email: string;
+  domain: string;
+  providerId: string;
+  providerName: string;
+  authType: MailAuthType;
+  oauthProvider?: MailOAuthProvider;
+  incoming: MailServerConfig;
+  outgoing: MailServerConfig;
+  advancedRequired: boolean;
+  helpText?: string;
+}
+
+export interface MailAccountSummary {
+  id: string;
+  email: string;
+  displayName: string;
+  providerId: string;
+  providerName: string;
+  authType: MailAuthType;
+  oauthProvider?: MailOAuthProvider;
+  incoming: MailServerConfig;
+  outgoing: MailServerConfig;
+  username: string;
+  status: MailAccountStatus;
+  createdAt: number;
+  updatedAt: number;
+  connectedAt?: number;
+  lastError?: string;
+}
+
+export interface MailAccountCreateInput {
+  email: string;
+  displayName?: string;
+  authType?: MailAuthType;
+  incoming?: Partial<MailServerConfig>;
+  outgoing?: Partial<MailServerConfig>;
+  username?: string;
+}
+
+export interface MailPasswordCredentialsInput {
+  accountId: string;
+  username?: string;
+  password: string;
+}
+
+export interface MailOAuthCredentialsInput {
+  accountId: string;
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  tokenType?: string;
+  scope?: string;
+  clientId?: string;
+  clientSecret?: string;
+}
+
+export interface MailOAuthAuthorizationInput {
+  accountId: string;
+  clientId: string;
+  clientSecret?: string;
+  redirectUri: string;
+  state?: string;
+  codeChallenge?: string;
+  codeChallengeMethod?: "plain" | "S256";
+}
+
+export interface MailOAuthAuthorization {
+  accountId: string;
+  provider: MailOAuthProvider;
+  authorizationUrl: string;
+  redirectUri: string;
+  scopes: string[];
+}
+
+export interface MailOAuthCodeExchangeInput extends MailOAuthAuthorizationInput {
+  code: string;
+}
+
 export interface AppConfig {
   workspaceRoot: string;
   bridgeUrl: string;

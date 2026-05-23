@@ -314,3 +314,35 @@ test("web_search returns query results with URLs and snippets", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("mail tools are registered with conservative risk boundaries", async () => {
+  const tools = createBuiltinToolDefinitions({
+    mailStore: {
+      inferSetup: async (email: string) => ({ providerId: "custom", email }),
+      listAccounts: async () => [],
+      searchMessages: async () => [],
+      readMessage: async () => ({
+        id: "message-1",
+        accountId: "account-1",
+        subject: "Hello",
+        from: "a@example.com",
+        to: [],
+        snippet: "Body",
+        body: "Body",
+      }),
+      createDraft: async (input: any) => ({ id: "draft-1", preview: input.body, ...input }),
+      sendDraft: async (input: any) => ({ sent: true, draftId: input.draftId, accountId: "account-1", providerId: "custom" }),
+    },
+  });
+
+  const mail = tools.find((item) => item.name === "mail");
+  const mailDraft = tools.find((item) => item.name === "mail_draft");
+  const mailSend = tools.find((item) => item.name === "mail_send");
+
+  assert.equal(mail?.risk, "network");
+  assert.equal(mailDraft?.risk, "write");
+  assert.equal(mailSend?.risk, "write");
+
+  const result = await mail?.execute({ action: "list_accounts" }, createContext(os.tmpdir()));
+  assert.match(result?.content ?? "", /No mail accounts/);
+});

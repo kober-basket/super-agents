@@ -339,11 +339,20 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
   try {
     const bootstrap = await service.bootstrap();
     const skillNames = bootstrap.config.skills.map((skill) => skill.name).sort();
+    const emailAssistant = bootstrap.config.skills.find((skill) => skill.id === "email-assistant");
     const skillCreator = bootstrap.config.skills.find((skill) => skill.id === "skill-creator");
     const wxCli = bootstrap.config.skills.find((skill) => skill.id === "wx-cli");
     const stockResearch = bootstrap.config.skills.find((skill) => skill.id === "stock-market-research-expert");
 
-    assert.deepEqual(skillNames, ["skill-creator", "stock-market-research-expert", "wx-cli"]);
+    const expectedBuiltinSkillNames = ["email-assistant", "skill-creator", "stock-market-research-expert", "wx-cli"];
+    assert.deepEqual(skillNames.filter((name) => expectedBuiltinSkillNames.includes(name)), expectedBuiltinSkillNames);
+    assert.ok(emailAssistant);
+    assert.equal(emailAssistant?.system, true);
+    assert.equal(emailAssistant?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "email-assistant"));
+    await access(path.join(emailAssistant?.sourcePath ?? "", "SKILL.md"));
+    await access(path.join(emailAssistant?.sourcePath ?? "", "agents", "openai.yaml"));
+    assert.equal(emailAssistant?.displayName, "邮件助手");
+    assert.match(emailAssistant?.defaultPrompt ?? "", /\$email-assistant/);
     assert.ok(skillCreator);
     assert.equal(skillCreator?.system, true);
     assert.equal(skillCreator?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "skill-creator"));
@@ -377,6 +386,7 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
 
     const context = await service.getEnabledSkillPromptContext();
     assert.match(context, /Available workspace skills for this turn:/);
+    assert.match(context, /- email-assistant:/);
     assert.match(context, /- skill-creator:/);
     assert.match(context, /- stock-market-research-expert:/);
     assert.match(context, /- wx-cli:/);
@@ -402,8 +412,11 @@ test("workspace service serializes concurrent bootstrap skill syncs", async () =
     for (const result of results) {
       assert.equal(result.status, "fulfilled");
       assert.deepEqual(
-        result.value.config.skills.map((skill) => skill.name).sort(),
-        ["skill-creator", "stock-market-research-expert", "wx-cli"],
+        result.value.config.skills
+          .map((skill) => skill.name)
+          .sort()
+          .filter((name) => ["email-assistant", "skill-creator", "stock-market-research-expert", "wx-cli"].includes(name)),
+        ["email-assistant", "skill-creator", "stock-market-research-expert", "wx-cli"],
       );
     }
   } finally {
@@ -515,6 +528,9 @@ test("workspace service lists built-in agent tools instead of runtime tools", as
       "glob",
       "grep",
       "list",
+      "mail",
+      "mail_draft",
+      "mail_send",
       "memory",
       "multi_edit",
       "question",

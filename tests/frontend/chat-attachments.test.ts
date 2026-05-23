@@ -56,10 +56,10 @@ test("composer attachments render as removable file cards", () => {
   assert.match(css, /\.composer-image-attachment-card\s*{[^}]*width:\s*92px[^}]*height:\s*76px/s);
   assert.match(css, /\.composer-image-attachment-thumb\s*{[^}]*object-fit:\s*cover/s);
   assert.match(css, /\.composer-attachment-remove\s*{[^}]*position:\s*absolute/s);
-  assert.match(css, /\.composer-attachment-remove\s*{[^}]*width:\s*18px[^}]*height:\s*18px[^}]*background:\s*#111827[^}]*opacity:\s*0[^}]*visibility:\s*hidden/s);
-  assert.match(css, /\.composer-attachment-card:hover \.composer-attachment-remove[\s\S]*\.composer-image-attachment-card:focus-within \.composer-attachment-remove\s*{[^}]*opacity:\s*1[^}]*visibility:\s*visible[^}]*background:\s*#111827/s);
+  assert.match(css, /\.composer-attachment-remove\s*{[^}]*width:\s*18px[^}]*height:\s*18px[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.96\)[^}]*color:\s*#be123c[^}]*opacity:\s*0[^}]*visibility:\s*hidden/s);
+  assert.match(css, /\.composer-attachment-card:hover \.composer-attachment-remove[\s\S]*\.composer-image-attachment-card:focus-within \.composer-attachment-remove\s*{[^}]*opacity:\s*1[^}]*visibility:\s*visible[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.98\)/s);
   assert.match(css, /\.chat-attachment-remove\.composer-attachment-remove\s*{[^}]*width:\s*18px[^}]*height:\s*18px[^}]*place-items:\s*center[^}]*padding:\s*0/s);
-  assert.match(css, /\.chat-attachment-remove\.composer-attachment-remove:hover\s*{[^}]*background:\s*#111827[^}]*color:\s*#fff/s);
+  assert.match(css, /\.chat-attachment-remove\.composer-attachment-remove:hover\s*{[^}]*background:\s*#fff1f2[^}]*color:\s*#9f1239/s);
   assert.match(css, /\.chat-attachment-remove\.composer-attachment-remove svg\s*{[^}]*display:\s*block/s);
   assert.match(css, /:root\[data-theme="graphite"\] \.composer-attachment-card[\s\S]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.06\)/);
   assert.match(css, /:root\[data-theme="graphite"\] \.composer-attachment-card \.chat-attachment-card-copy strong[\s\S]*color:\s*var\(--text\)/);

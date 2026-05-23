@@ -122,6 +122,10 @@ const PermissionsSettings = lazy(async () => {
   const module = await import("./features/settings/PermissionsSettings");
   return { default: module.PermissionsSettings };
 });
+const MailSettings = lazy(async () => {
+  const module = await import("./features/settings/MailSettings");
+  return { default: module.MailSettings };
+});
 
 function uid() {
   return Math.random().toString(36).slice(2);
@@ -2682,6 +2686,14 @@ export default function App() {
               })
             }
           />
+        </Suspense>
+      );
+    }
+
+    if (settingsSection === "mail") {
+      return (
+        <Suspense fallback={<LazyViewFallback />}>
+          <MailSettings />
         </Suspense>
       );
     }

@@ -21,6 +21,14 @@ import type {
   KnowledgeBaseCreateInput,
   KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
+  MailAccountCreateInput,
+  MailAccountSummary,
+  MailOAuthAuthorization,
+  MailOAuthAuthorizationInput,
+  MailOAuthCodeExchangeInput,
+  MailOAuthCredentialsInput,
+  MailPasswordCredentialsInput,
+  MailProviderSetup,
   MemoryCatalogPayload,
   MemoryCreateInput,
   MemorySearchInput,
@@ -70,6 +78,15 @@ declare global {
       updateMemory: (payload: MemoryUpdateInput) => Promise<MemoryCatalogPayload>;
       deleteMemory: (memoryId: string) => Promise<MemoryCatalogPayload>;
       searchMemories: (payload: MemorySearchInput) => Promise<MemorySearchPayload>;
+      inferMailSetup: (email: string) => Promise<MailProviderSetup>;
+      listMailAccounts: () => Promise<MailAccountSummary[]>;
+      createMailAccount: (payload: MailAccountCreateInput) => Promise<MailAccountSummary>;
+      saveMailPasswordCredentials: (payload: MailPasswordCredentialsInput) => Promise<MailAccountSummary>;
+      saveMailOAuthCredentials: (payload: MailOAuthCredentialsInput) => Promise<MailAccountSummary>;
+      createMailOAuthAuthorization: (payload: MailOAuthAuthorizationInput) => Promise<MailOAuthAuthorization>;
+      exchangeMailOAuthCode: (payload: MailOAuthCodeExchangeInput) => Promise<MailAccountSummary>;
+      disconnectMailAccount: (accountId: string) => Promise<MailAccountSummary[]>;
+      removeMailAccount: (accountId: string) => Promise<MailAccountSummary[]>;
       selectSkillFolder: () => Promise<string>;
       importLocalSkill: (sourcePath: string) => Promise<SkillImportResult>;
       uninstallSkill: (skillId: string) => Promise<BootstrapPayload>;

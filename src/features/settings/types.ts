@@ -1,1 +1,1 @@
-export type SettingsSection = "appearance" | "assistant" | "permissions" | "remote-control";
+export type SettingsSection = "appearance" | "assistant" | "permissions" | "mail" | "remote-control";

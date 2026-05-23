@@ -24,6 +24,14 @@ import type {
   KnowledgeBaseCreateInput,
   KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
+  MailAccountCreateInput,
+  MailAccountSummary,
+  MailOAuthAuthorization,
+  MailOAuthAuthorizationInput,
+  MailOAuthCodeExchangeInput,
+  MailOAuthCredentialsInput,
+  MailPasswordCredentialsInput,
+  MailProviderSetup,
   MemoryCatalogPayload,
   MemoryCreateInput,
   MemorySearchInput,
@@ -95,6 +103,24 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:delete-memory", memoryId) as Promise<MemoryCatalogPayload>,
   searchMemories: (payload: MemorySearchInput) =>
     ipcRenderer.invoke("desktop:search-memories", payload) as Promise<MemorySearchPayload>,
+  inferMailSetup: (email: string) =>
+    ipcRenderer.invoke("desktop:infer-mail-setup", email) as Promise<MailProviderSetup>,
+  listMailAccounts: () =>
+    ipcRenderer.invoke("desktop:list-mail-accounts") as Promise<MailAccountSummary[]>,
+  createMailAccount: (payload: MailAccountCreateInput) =>
+    ipcRenderer.invoke("desktop:create-mail-account", payload) as Promise<MailAccountSummary>,
+  saveMailPasswordCredentials: (payload: MailPasswordCredentialsInput) =>
+    ipcRenderer.invoke("desktop:save-mail-password-credentials", payload) as Promise<MailAccountSummary>,
+  saveMailOAuthCredentials: (payload: MailOAuthCredentialsInput) =>
+    ipcRenderer.invoke("desktop:save-mail-oauth-credentials", payload) as Promise<MailAccountSummary>,
+  createMailOAuthAuthorization: (payload: MailOAuthAuthorizationInput) =>
+    ipcRenderer.invoke("desktop:create-mail-oauth-authorization", payload) as Promise<MailOAuthAuthorization>,
+  exchangeMailOAuthCode: (payload: MailOAuthCodeExchangeInput) =>
+    ipcRenderer.invoke("desktop:exchange-mail-oauth-code", payload) as Promise<MailAccountSummary>,
+  disconnectMailAccount: (accountId: string) =>
+    ipcRenderer.invoke("desktop:disconnect-mail-account", accountId) as Promise<MailAccountSummary[]>,
+  removeMailAccount: (accountId: string) =>
+    ipcRenderer.invoke("desktop:remove-mail-account", accountId) as Promise<MailAccountSummary[]>,
   selectSkillFolder: () => ipcRenderer.invoke("desktop:select-skill-folder") as Promise<string>,
   importLocalSkill: (sourcePath: string) =>
     ipcRenderer.invoke("desktop:import-local-skill", sourcePath) as Promise<SkillImportResult>,

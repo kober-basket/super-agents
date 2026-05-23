@@ -82,6 +82,24 @@ test("tools page keeps tool rows simple without source chips", () => {
   assert.doesNotMatch(html, /<span class="tool-chip">内置<\/span>/);
 });
 
+test("tools list icons reuse the skills premium icon implementation", () => {
+  const html = renderToolsView([
+    {
+      id: "builtin:grep",
+      name: "grep",
+      source: "builtin",
+      origin: "鍐呯疆宸ュ叿",
+      observed: false,
+      description: "Search text.",
+    },
+  ]);
+
+  assert.match(html, /class="skill-icon-shell skill-icon-premium skill-accent-sky"/);
+  assert.match(html, /class="skill-icon-orbit"/);
+  assert.doesNotMatch(html, /tool-icon-shell/);
+  assert.doesNotMatch(html, /tool-icon-spark/);
+});
+
 test("tools page keeps tool descriptions compact and visually grouped", () => {
   const css = readSource("src/styles.css");
   const html = renderToolsView([

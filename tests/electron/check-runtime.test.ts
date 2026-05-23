@@ -39,3 +39,33 @@ test("runtime check requires uv command shims on Windows", { skip: process.platf
     await rm(runtimeRoot, { recursive: true, force: true });
   }
 });
+
+test("runtime check requires uv commands on macOS runtimes", async () => {
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "super-agents-runtime-check-"));
+  const platformRoot = path.join(runtimeRoot, "darwin-arm64");
+
+  try {
+    await touch(path.join(platformRoot, "node", "bin", "node"));
+    await touch(path.join(platformRoot, "node", "bin", "npm"));
+    await touch(path.join(platformRoot, "node", "bin", "npx"));
+
+    const result = spawnSync(process.execPath, [path.join(repoRoot(), "scripts", "check-runtime.mjs")], {
+      cwd: repoRoot(),
+      env: {
+        ...process.env,
+        SUPER_AGENTS_RUNTIME_ROOT: runtimeRoot,
+        SUPER_AGENTS_RUNTIME_PLATFORM: "darwin",
+        SUPER_AGENTS_RUNTIME_ARCH: "arm64",
+      },
+      encoding: "utf8",
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /vendor[\\/]runtime[\\/]darwin-arm64[\\/]bin[\\/]uv/);
+    assert.match(result.stderr, /vendor[\\/]runtime[\\/]darwin-arm64[\\/]bin[\\/]uvx/);
+    assert.doesNotMatch(result.stderr, /uvw/);
+    assert.doesNotMatch(result.stderr, /python/);
+  } finally {
+    await rm(runtimeRoot, { recursive: true, force: true });
+  }
+});

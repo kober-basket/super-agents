@@ -199,16 +199,19 @@ function formatModelUsageTitle(usage: ChatModelTokenUsage) {
   const modelName = usage.modelLabel || usage.modelId || usage.providerName || usage.providerId || "未知模型";
   const cost = estimateModelUsageCostCny(usage);
   const unitPrice = formatModelUnitPrice(usage);
-  const suffix = cost === null ? "价格未知" : `估算 ${formatCnyAmount(cost)}`;
+  const suffix = cost === null ? "价格未知" : `估算：${formatCnyAmount(cost)}`;
 
   return [
-    `${modelName}：输入 ${formatCompactTokenCount(usage.inputTokens)}`,
-    `缓存 ${formatCompactTokenCount(usage.cachedInputTokens ?? 0)}`,
-    `输出 ${formatCompactTokenCount(usage.outputTokens)}`,
-    `推理 ${formatCompactTokenCount(usage.reasoningOutputTokens ?? 0)}`,
-    `单价 ${unitPrice}`,
+    modelName,
+    [
+      `用量：输入 ${formatCompactTokenCount(usage.inputTokens)}`,
+      `缓存 ${formatCompactTokenCount(usage.cachedInputTokens ?? 0)}`,
+      `输出 ${formatCompactTokenCount(usage.outputTokens)}`,
+      `推理 ${formatCompactTokenCount(usage.reasoningOutputTokens ?? 0)}`,
+    ].join("，"),
+    `单价：${unitPrice}`,
     suffix,
-  ].join("，");
+  ].join("\n");
 }
 
 export function formatChatTokenUsageBadge(usage: ChatTokenUsageSummary | undefined) {
@@ -223,6 +226,6 @@ export function formatChatTokenUsageBadge(usage: ChatTokenUsageSummary | undefin
 
   return {
     label: `${formatCompactTokenCount(usage.totalTokens)} tokens${costLabel}`,
-    title: usage.modelUsages.map(formatModelUsageTitle).join("；"),
+    title: usage.modelUsages.map(formatModelUsageTitle).join("\n\n"),
   };
 }

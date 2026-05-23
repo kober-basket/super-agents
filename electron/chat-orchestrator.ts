@@ -143,7 +143,7 @@ export class ChatOrchestrator {
     const agents = createDefaultAgentRegistry();
     const skills = new SkillRegistry();
     const tools = new ToolRegistry();
-    for (const tool of createBuiltinToolDefinitions({ memoryStore: this.workspaceService })) {
+    for (const tool of createBuiltinToolDefinitions({ memoryStore: this.workspaceService, mailStore: this.workspaceService })) {
       tools.register(tool);
     }
     tools.register(createSkillToolDefinition(this.workspaceService));

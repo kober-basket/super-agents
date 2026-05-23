@@ -16,6 +16,9 @@ export const DEFAULT_BUILTIN_TOOL_IDS = [
   "todo_read",
   "todo_write",
   "skill",
+  "mail",
+  "mail_draft",
+  "mail_send",
   "web_search",
   "web_fetch",
   "write",
@@ -24,7 +27,7 @@ export const DEFAULT_BUILTIN_TOOL_IDS = [
   "apply_patch",
   "bash",
 ];
-const DEFAULT_APPROVAL_TOOL_IDS = ["write", "edit", "multi_edit", "apply_patch", "bash"];
+const DEFAULT_APPROVAL_TOOL_IDS = ["write", "edit", "multi_edit", "apply_patch", "bash", "mail_draft", "mail_send"];
 
 export function createDefaultAgentDefinitions(): AgentDefinition[] {
   return [

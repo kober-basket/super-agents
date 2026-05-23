@@ -1,0 +1,7 @@
+interface:
+  display_name: "邮件助手"
+  short_description: "连接邮箱、检索邮件、起草回复，并在确认后发送邮件。"
+  default_prompt: "Use $email-assistant for safe email search, drafting, and approved sending with the built-in mail tools."
+
+policy:
+  allow_implicit_invocation: true

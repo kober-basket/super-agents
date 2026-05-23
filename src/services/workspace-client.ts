@@ -40,6 +40,20 @@ export const workspaceClient = {
   deleteMemory: (memoryId: string) => desktopAgent.deleteMemory(memoryId),
   searchMemories: (payload: Parameters<typeof desktopAgent.searchMemories>[0]) =>
     desktopAgent.searchMemories(payload),
+  inferMailSetup: (email: string) => desktopAgent.inferMailSetup(email),
+  listMailAccounts: () => desktopAgent.listMailAccounts(),
+  createMailAccount: (payload: Parameters<typeof desktopAgent.createMailAccount>[0]) =>
+    desktopAgent.createMailAccount(payload),
+  saveMailPasswordCredentials: (payload: Parameters<typeof desktopAgent.saveMailPasswordCredentials>[0]) =>
+    desktopAgent.saveMailPasswordCredentials(payload),
+  saveMailOAuthCredentials: (payload: Parameters<typeof desktopAgent.saveMailOAuthCredentials>[0]) =>
+    desktopAgent.saveMailOAuthCredentials(payload),
+  createMailOAuthAuthorization: (payload: Parameters<typeof desktopAgent.createMailOAuthAuthorization>[0]) =>
+    desktopAgent.createMailOAuthAuthorization(payload),
+  exchangeMailOAuthCode: (payload: Parameters<typeof desktopAgent.exchangeMailOAuthCode>[0]) =>
+    desktopAgent.exchangeMailOAuthCode(payload),
+  disconnectMailAccount: (accountId: string) => desktopAgent.disconnectMailAccount(accountId),
+  removeMailAccount: (accountId: string) => desktopAgent.removeMailAccount(accountId),
   selectSkillFolder: () => desktopAgent.selectSkillFolder(),
   importLocalSkill: (sourcePath: string) => desktopAgent.importLocalSkill(sourcePath),
   uninstallSkill: (skillId: string) => desktopAgent.uninstallSkill(skillId),

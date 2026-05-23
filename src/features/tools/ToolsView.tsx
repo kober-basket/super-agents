@@ -48,31 +48,31 @@ interface ToolsViewProps {
 }
 
 const TOOL_ICON_TONES = [
-  "tool-accent-slate",
-  "tool-accent-sky",
-  "tool-accent-emerald",
-  "tool-accent-amber",
-  "tool-accent-rose",
-  "tool-accent-violet",
+  "skill-accent-indigo",
+  "skill-accent-sky",
+  "skill-accent-mint",
+  "skill-accent-amber",
+  "skill-accent-rose",
+  "skill-accent-violet",
 ] as const;
 
 type ToolIconTone = (typeof TOOL_ICON_TONES)[number];
 
 const BUILTIN_TOOL_VISUALS: Partial<Record<string, { icon: LucideIcon; tone: ToolIconTone }>> = {
-  apply_patch: { icon: GitPullRequest, tone: "tool-accent-violet" },
-  bash: { icon: TerminalSquare, tone: "tool-accent-slate" },
-  edit: { icon: PencilLine, tone: "tool-accent-amber" },
-  glob: { icon: Radar, tone: "tool-accent-sky" },
-  grep: { icon: Search, tone: "tool-accent-sky" },
-  list: { icon: FolderTree, tone: "tool-accent-emerald" },
-  multi_edit: { icon: Layers, tone: "tool-accent-amber" },
-  question: { icon: MessageCircleQuestion, tone: "tool-accent-violet" },
-  read: { icon: FileSearch, tone: "tool-accent-emerald" },
-  todo_read: { icon: ClipboardList, tone: "tool-accent-slate" },
-  todo_write: { icon: ListChecks, tone: "tool-accent-emerald" },
-  web_fetch: { icon: CloudDownload, tone: "tool-accent-rose" },
-  web_search: { icon: Globe, tone: "tool-accent-sky" },
-  write: { icon: FilePlus2, tone: "tool-accent-amber" },
+  apply_patch: { icon: GitPullRequest, tone: "skill-accent-violet" },
+  bash: { icon: TerminalSquare, tone: "skill-accent-indigo" },
+  edit: { icon: PencilLine, tone: "skill-accent-amber" },
+  glob: { icon: Radar, tone: "skill-accent-sky" },
+  grep: { icon: Search, tone: "skill-accent-sky" },
+  list: { icon: FolderTree, tone: "skill-accent-mint" },
+  multi_edit: { icon: Layers, tone: "skill-accent-amber" },
+  question: { icon: MessageCircleQuestion, tone: "skill-accent-violet" },
+  read: { icon: FileSearch, tone: "skill-accent-mint" },
+  todo_read: { icon: ClipboardList, tone: "skill-accent-indigo" },
+  todo_write: { icon: ListChecks, tone: "skill-accent-mint" },
+  web_fetch: { icon: CloudDownload, tone: "skill-accent-rose" },
+  web_search: { icon: Globe, tone: "skill-accent-sky" },
+  write: { icon: FilePlus2, tone: "skill-accent-amber" },
 };
 
 export function ToolsView({
@@ -222,9 +222,9 @@ export function ToolsView({
 
 function ToolIcon({ icon: Icon, label, tone }: { icon: LucideIcon; label: string; tone: ToolIconTone }) {
   return (
-    <div className={clsx("skill-icon-shell", "tool-icon-shell", tone)} title={label}>
+    <div className={clsx("skill-icon-shell", "skill-icon-premium", tone)} title={label}>
       <Icon size={20} strokeWidth={2.1} />
-      <span aria-hidden="true" className="tool-icon-spark" />
+      <span aria-hidden="true" className="skill-icon-orbit" />
     </div>
   );
 }
@@ -243,9 +243,9 @@ function formatMcpTransport(server: McpServerConfig) {
 }
 
 function resolveMcpTone(status: McpConnectionStatus | "connecting"): ToolIconTone {
-  if (status === "connected") return "tool-accent-emerald";
-  if (status === "disabled") return "tool-accent-slate";
-  return "tool-accent-amber";
+  if (status === "connected") return "skill-accent-mint";
+  if (status === "disabled") return "skill-accent-indigo";
+  return "skill-accent-amber";
 }
 
 function getMcpStatusClass(status: McpConnectionStatus | "connecting") {

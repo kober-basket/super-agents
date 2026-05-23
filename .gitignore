@@ -17,6 +17,18 @@ vendor/runtime/win32-x64/bin/*
 !vendor/runtime/win32-x64/bin/uv.exe
 !vendor/runtime/win32-x64/bin/uvx.exe
 !vendor/runtime/win32-x64/bin/uvw.exe
+!vendor/runtime/darwin-arm64/
+vendor/runtime/darwin-arm64/*
+!vendor/runtime/darwin-arm64/bin/
+vendor/runtime/darwin-arm64/bin/*
+!vendor/runtime/darwin-arm64/bin/uv
+!vendor/runtime/darwin-arm64/bin/uvx
+!vendor/runtime/darwin-x64/
+vendor/runtime/darwin-x64/*
+!vendor/runtime/darwin-x64/bin/
+vendor/runtime/darwin-x64/bin/*
+!vendor/runtime/darwin-x64/bin/uv
+!vendor/runtime/darwin-x64/bin/uvx
 
 *.log
 *.zip

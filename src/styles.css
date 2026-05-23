@@ -45,6 +45,17 @@
   --danger-text: #be123c;
   --link: #2457d1;
   --link-hover: #163fa6;
+  --primary-action-bg: linear-gradient(135deg, var(--send-gradient-start) 0%, var(--send-gradient-end) 100%);
+  --primary-action-bg-hover: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--send-gradient-start) 88%, #111827) 0%,
+    color-mix(in srgb, var(--send-gradient-end) 92%, #111827) 100%
+  );
+  --primary-action-solid: var(--send-gradient-end);
+  --primary-action-soft: color-mix(in srgb, var(--send-gradient-start) 13%, #ffffff);
+  --primary-action-border: color-mix(in srgb, var(--send-gradient-start) 26%, var(--line));
+  --primary-action-shadow: var(--send-shadow);
+  --primary-action-shadow-hover: 0 16px 32px color-mix(in srgb, var(--send-gradient-end) 26%, transparent);
   --send-gradient-start: #4f7c69;
   --send-gradient-end: #3f6555;
   --send-shadow: 0 10px 24px rgba(63, 101, 85, 0.26);
@@ -2343,10 +2354,10 @@ textarea {
   right: 6px;
   width: 18px;
   height: 18px;
-  border: 2px solid rgba(255, 255, 255, 0.92);
-  background: #111827;
-  color: #fff;
-  box-shadow: 0 6px 12px rgba(17, 24, 39, 0.16);
+  border: 1px solid rgba(254, 205, 211, 0.9);
+  background: rgba(255, 255, 255, 0.96);
+  color: #be123c;
+  box-shadow: 0 8px 16px rgba(190, 18, 60, 0.12);
   opacity: 0;
   visibility: hidden;
   transform: translate(2px, -2px) scale(0.94);
@@ -2366,13 +2377,13 @@ textarea {
   visibility: visible;
   transform: translate(0, 0) scale(1);
   pointer-events: auto;
-  background: #111827;
-  color: #fff;
+  background: rgba(255, 255, 255, 0.98);
+  color: #be123c;
 }
 
 .composer-attachment-remove:hover {
-  background: #111827;
-  color: #fff;
+  background: #fff1f2;
+  color: #9f1239;
 }
 
 .chat-attachment-card-badge {
@@ -2505,8 +2516,8 @@ textarea {
 }
 
 .chat-attachment-remove.composer-attachment-remove:hover {
-  background: #111827;
-  color: #fff;
+  background: #fff1f2;
+  color: #9f1239;
 }
 
 .chat-attachment-remove.composer-attachment-remove svg {
@@ -5160,7 +5171,7 @@ textarea {
 .skill-state-button,
 .server-row-action,
 .mini-action-card {
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
 }
 
 .settings-back-link {
@@ -5471,23 +5482,34 @@ textarea {
   min-height: 40px;
   padding: 0 16px;
   border-radius: 16px;
-  background: #171717;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: var(--primary-action-bg);
   color: #fff;
+  font-weight: var(--font-weight-semibold);
+  box-shadow: var(--primary-action-shadow);
 }
 
 .primary-button:hover {
-  background: #0f0f0f;
+  background: var(--primary-action-bg-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--primary-action-shadow-hover);
 }
 
 .primary-button:disabled,
 .secondary-button:disabled {
   opacity: 0.58;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .primary-button:disabled:hover,
 .secondary-button:disabled:hover {
   transform: none;
+}
+
+.primary-button:disabled:hover {
+  background: var(--primary-action-bg);
+  box-shadow: none;
 }
 
 .skills-section + .skills-section,
@@ -6709,31 +6731,31 @@ textarea {
 
 .knowledge-shell {
   display: grid;
-  grid-template-columns: 296px minmax(0, 1fr);
+  grid-template-columns: 300px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
   background:
-    linear-gradient(180deg, rgba(250, 248, 244, 0.42), transparent 18%),
+    linear-gradient(135deg, rgba(241, 245, 242, 0.88) 0%, rgba(249, 249, 246, 0.68) 38%, rgba(255, 255, 255, 0.96) 100%),
     var(--panel);
 }
 
 .knowledge-sidebar {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 14px;
+  gap: 16px;
   min-height: 0;
   overflow: hidden;
-  padding: 26px 18px 18px;
-  border-right: 1px solid var(--line-soft);
+  padding: 28px 20px 20px;
+  border-right: 1px solid rgba(211, 222, 239, 0.74);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0)),
-    #faf9f7;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.16)),
+    rgba(247, 250, 255, 0.82);
 }
 
 .knowledge-sidebar-head {
   display: grid;
-  gap: 4px;
+  gap: 8px;
 }
 
 .knowledge-sidebar-kicker,
@@ -6750,14 +6772,28 @@ textarea {
 
 .knowledge-sidebar-head h2 {
   margin: 0;
-  font-size: 19px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
   font-weight: var(--font-weight-semibold);
   letter-spacing: 0;
 }
 
+.knowledge-sidebar-title-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--primary-action-bg);
+  color: #fff;
+  box-shadow: 0 12px 22px color-mix(in srgb, var(--send-gradient-end) 24%, transparent);
+}
+
 .knowledge-sidebar-head p {
   margin: 0;
-  color: var(--muted);
+  color: #53627a;
   font-size: 13px;
   line-height: 1.6;
 }
@@ -6777,10 +6813,10 @@ textarea {
   height: 36px;
   display: grid;
   place-items: center;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(20, 20, 18, 0.05);
-  color: var(--muted-strong);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(99, 102, 241, 0.08);
+  color: #50607a;
 }
 
 .knowledge-base-row {
@@ -6791,17 +6827,17 @@ textarea {
   width: 100%;
   min-height: 72px;
   padding: 14px;
-  border-radius: 18px;
-  border: 1px solid rgba(20, 20, 18, 0.04);
-  background: rgba(255, 255, 255, 0.48);
+  border-radius: 12px;
+  border: 1px solid rgba(198, 211, 232, 0.62);
+  background: rgba(255, 255, 255, 0.58);
   text-align: left;
-  color: var(--muted-strong);
+  color: #45546c;
   transition: background 140ms ease, border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
 }
 
 .knowledge-base-row:hover {
-  background: rgba(255, 255, 255, 0.9);
-  border-color: rgba(219, 214, 206, 0.8);
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(99, 102, 241, 0.2);
   transform: translateY(-1px);
 }
 
@@ -6811,10 +6847,15 @@ textarea {
 }
 
 .knowledge-base-row.active {
-  background: #ffffff;
-  border-color: rgba(223, 216, 205, 0.92);
-  color: var(--text);
-  box-shadow: 0 12px 28px rgba(17, 24, 39, 0.05);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), var(--primary-action-soft));
+  border-color: var(--primary-action-border);
+  color: #102044;
+  box-shadow: 0 14px 30px color-mix(in srgb, var(--send-gradient-end) 10%, transparent);
+}
+
+.knowledge-base-row.active .knowledge-base-icon {
+  background: var(--primary-action-soft);
+  color: var(--primary-action-solid);
 }
 
 .knowledge-base-copy {
@@ -6833,12 +6874,12 @@ textarea {
 .knowledge-base-copy strong {
   font-size: 16px;
   font-weight: var(--font-weight-semibold);
-  color: var(--text);
+  color: #111827;
 }
 
 .knowledge-base-copy span,
 .knowledge-base-row em {
-  color: var(--muted);
+  color: #5b6a82;
   font-size: 13px;
   font-weight: var(--font-weight-normal);
 }
@@ -6853,11 +6894,11 @@ textarea {
 .knowledge-sidebar-create {
   display: grid;
   gap: 12px;
-  padding: 16px;
-  border-radius: 20px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 12px 24px rgba(17, 24, 39, 0.04);
+  padding: 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(205, 218, 239, 0.78);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 34px rgba(31, 48, 92, 0.08);
 }
 
 .knowledge-sidebar-create-head strong {
@@ -6876,7 +6917,7 @@ textarea {
 .knowledge-sidebar-create textarea::placeholder,
 .knowledge-modal-body input::placeholder,
 .knowledge-modal-body textarea::placeholder {
-  color: var(--muted);
+  color: #748298;
 }
 
 .knowledge-sidebar-create textarea {
@@ -6902,8 +6943,12 @@ textarea {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  padding: 14px 18px 18px;
-  background: #fff;
+  margin: 10px 12px 12px;
+  padding: 0;
+  border: 1px solid rgba(205, 218, 239, 0.74);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 60px rgba(31, 48, 92, 0.08);
 }
 
 .knowledge-detail {
@@ -6926,9 +6971,9 @@ textarea {
 .knowledge-hero {
   display: grid;
   gap: 8px;
-  margin-bottom: 10px;
-  padding: 0 0 10px;
-  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 0;
+  padding: 28px 24px;
+  border-bottom: 1px solid rgba(205, 218, 239, 0.78);
 }
 
 .knowledge-hero.simple {
@@ -7003,8 +7048,8 @@ textarea {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 12px;
+  color: #526179;
+  font-size: 14px;
   font-weight: var(--font-weight-medium);
   letter-spacing: 0;
   white-space: nowrap;
@@ -7016,11 +7061,12 @@ textarea {
 }
 
 .knowledge-setting-select .surface-select-trigger {
-  min-height: 36px;
-  padding: 0 12px;
-  border-radius: 14px;
+  min-height: 52px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border-color: rgba(196, 211, 235, 0.78);
   background: #fff;
-  box-shadow: none;
+  box-shadow: 0 10px 24px rgba(31, 48, 92, 0.04);
 }
 
 .knowledge-setting-select .surface-select-trigger-value {
@@ -7064,11 +7110,13 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 0;
+  padding: 0 24px;
+  border-bottom: 1px solid rgba(205, 218, 239, 0.7);
 }
 
 .knowledge-content-toolbar.compact {
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 
 .knowledge-toolbar-actions {
@@ -7116,19 +7164,20 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 36px;
-  padding: 0 12px;
-  color: var(--muted-strong);
-  border: 1px solid transparent;
-  border-radius: 999px;
+  min-height: 56px;
+  padding: 0 20px;
+  color: #45546c;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 620;
 }
 
 .knowledge-tab:hover {
-  background: #f7f5f1;
-  color: var(--text);
+  background: rgba(244, 247, 255, 0.72);
+  color: #17315f;
 }
 
 .knowledge-tab em {
@@ -7139,17 +7188,17 @@ textarea {
   min-height: 20px;
   padding: 0 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 7%, var(--panel-soft));
-  color: var(--muted);
+  background: var(--primary-action-soft);
+  color: var(--primary-action-solid);
   font-style: normal;
   font-size: 11px;
   font-weight: var(--font-weight-medium);
 }
 
 .knowledge-tab.active {
-  color: var(--text);
-  border-color: #e5e3dd;
-  background: #f3f1ec;
+  color: var(--primary-action-solid);
+  border-bottom-color: var(--primary-action-solid);
+  background: transparent;
 }
 
 .knowledge-composer-card {
@@ -7207,8 +7256,52 @@ textarea {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 0;
   overflow: hidden;
+  padding: 26px 24px 24px;
+}
+
+.knowledge-empty-upload {
+  min-height: clamp(320px, 45vh, 500px);
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 18px;
+  padding: 42px 24px;
+  border-radius: 14px;
+  border: 1px dashed rgba(120, 146, 186, 0.36);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.96));
+  text-align: center;
+}
+
+.knowledge-empty-upload.busy {
+  opacity: 0.82;
+}
+
+.knowledge-upload-illustration {
+  width: 78px;
+  height: 78px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #f3f6f1 0%, var(--primary-action-soft) 100%);
+  color: var(--primary-action-solid);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.86),
+    0 18px 34px color-mix(in srgb, var(--send-gradient-end) 12%, transparent);
+}
+
+.knowledge-empty-upload strong {
+  color: #111827;
+  font-size: 21px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.knowledge-upload-button {
+  min-width: 154px;
+  justify-content: center;
+  min-height: 48px;
+  border-radius: 12px;
 }
 
 .knowledge-dropzone {
@@ -12220,6 +12313,214 @@ textarea:focus,
 
   .model-picker-tags {
     justify-content: flex-start;
+  }
+}
+
+.mail-settings-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.4fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.mail-account-list,
+.mail-auth-card {
+  gap: 16px;
+}
+
+.mail-account-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.mail-account-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fcfcfb;
+}
+
+.mail-account-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.mail-account-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.mail-account-copy strong,
+.mail-account-copy span,
+.mail-account-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail-account-copy span,
+.mail-account-copy small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mail-status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--muted-strong);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mail-status-pill.tone-connected {
+  background: rgba(18, 183, 106, 0.12);
+  color: #087443;
+}
+
+.mail-status-pill.tone-error {
+  background: rgba(240, 68, 56, 0.12);
+  color: #b42318;
+}
+
+.mail-account-actions,
+.mail-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.mail-account-actions {
+  grid-column: 2 / -1;
+  justify-content: flex-end;
+}
+
+.secondary-button.danger {
+  color: #b42318;
+}
+
+.mail-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mail-form-grid label:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.mail-setup-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: var(--panel-soft);
+  color: var(--muted-strong);
+}
+
+.mail-setup-summary div {
+  display: grid;
+  gap: 2px;
+}
+
+.mail-setup-summary strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.mail-setup-summary span {
+  font-size: 12px;
+}
+
+.mail-auth-section {
+  display: grid;
+  gap: 12px;
+}
+
+.mail-advanced-toggle {
+  justify-self: start;
+  margin-left: 0;
+}
+
+.mail-server-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: #fcfcfb;
+}
+
+.mail-checkbox-label {
+  display: inline-flex !important;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 8px !important;
+  min-height: 40px;
+  color: var(--muted-strong) !important;
+}
+
+.mail-checkbox-label input {
+  width: auto;
+}
+
+.mail-oauth-callback {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: #fcfcfb;
+}
+
+.mail-oauth-callback code {
+  font-family: "SF Mono", "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+}
+
+.mail-inline-success {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(18, 183, 106, 0.16);
+  background: rgba(18, 183, 106, 0.08);
+  color: #087443;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 980px) {
+  .mail-settings-layout,
+  .mail-form-grid,
+  .mail-server-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mail-account-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .mail-status-pill {
+    grid-column: 2;
+    justify-self: start;
   }
 }
 

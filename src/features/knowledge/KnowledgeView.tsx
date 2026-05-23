@@ -13,6 +13,7 @@ import {
   Search,
   Settings2,
   Trash2,
+  UploadCloud,
   X,
 } from "lucide-react";
 
@@ -396,15 +397,21 @@ export function KnowledgeView({
 
     if (activeTab === "file") {
       return (
-        <button
-          className={clsx("knowledge-dropzone", busyAction === "add-file" && "busy")}
-          onClick={() => void handleAddFiles()}
-          disabled={controlsDisabled}
-          aria-busy={busyAction === "add-file"}
-        >
-          {busyAction === "add-file" ? <LoaderCircle size={18} className="spin" /> : <FileText size={18} />}
-          <strong>{busyAction === "add-file" ? "正在导入文件…" : "添加文件"}</strong>
-        </button>
+        <div className={clsx("knowledge-empty-upload", busyAction === "add-file" && "busy")} aria-busy={busyAction === "add-file"}>
+          <span className="knowledge-upload-illustration" aria-hidden="true">
+            {busyAction === "add-file" ? <LoaderCircle size={30} className="spin" /> : <UploadCloud size={34} />}
+          </span>
+          <strong>{busyAction === "add-file" ? "正在导入文件…" : "还没有添加任何文件"}</strong>
+          <button
+            className="primary-button knowledge-upload-button"
+            onClick={() => void handleAddFiles()}
+            disabled={controlsDisabled}
+            type="button"
+          >
+            {busyAction === "add-file" ? <LoaderCircle size={15} className="spin" /> : <Plus size={15} />}
+            {busyAction === "add-file" ? "导入中…" : "添加文件"}
+          </button>
+        </div>
       );
     }
 
@@ -534,8 +541,12 @@ export function KnowledgeView({
       <section className="knowledge-shell">
         <aside className="knowledge-sidebar">
           <header className="knowledge-sidebar-head">
-            <h2>知识库</h2>
-            <p>集中管理文件、笔记、目录和网页资料。</p>
+            <h2>
+              <span className="knowledge-sidebar-title-icon">
+                <BookOpen size={18} />
+              </span>
+              知识库
+            </h2>
           </header>
 
           <div className="knowledge-base-list">
@@ -566,13 +577,6 @@ export function KnowledgeView({
               value={draftBaseName}
               onChange={(event) => setDraftBaseName(event.target.value)}
               placeholder="例如：产品文档"
-              disabled={controlsDisabled}
-            />
-            <textarea
-              value={draftBaseDescription}
-              onChange={(event) => setDraftBaseDescription(event.target.value)}
-              rows={3}
-              placeholder="用途说明（可选）"
               disabled={controlsDisabled}
             />
             <button
@@ -803,7 +807,6 @@ export function KnowledgeView({
             ) : (
               <div className="knowledge-empty wide knowledge-empty-stage simple">
                 <strong>还没有知识库</strong>
-                <span>先创建一个知识库，再把文件、网页或笔记放进来。</span>
               </div>
             )}
           </div>

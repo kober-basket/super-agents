@@ -64,6 +64,25 @@ import type {
   WorkspaceToolCatalog,
 } from "../src/types";
 import { KnowledgeService } from "./knowledge-service";
+import { MailService } from "./mail/mail-service";
+import type {
+  MailAccountCreateInput,
+  MailAccountSummary,
+  MailDraft,
+  MailDraftCreateInput,
+  MailMessage,
+  MailMessageSummary,
+  MailOAuthAuthorization,
+  MailOAuthAuthorizationInput,
+  MailOAuthCodeExchangeInput,
+  MailOAuthCredentialsInput,
+  MailPasswordCredentialsInput,
+  MailProviderSetup,
+  MailReadInput,
+  MailSearchInput,
+  MailSendDraftInput,
+  MailSendResult,
+} from "./mail/types";
 import { MemoryService } from "./memory-service";
 import { createRuntimeProcessEnv } from "./runtime-support";
 import { readJsonFile, writeJsonFile } from "./store";
@@ -1194,11 +1213,13 @@ function getMcpStatuses(config: AppConfig): McpServerStatus[] {
 export class WorkspaceService {
   private readonly knowledge: KnowledgeService;
   private readonly memory: MemoryService;
+  private readonly mail: MailService;
 
   constructor(private readonly statePath: string) {
     const dataRoot = path.dirname(statePath);
     this.knowledge = new KnowledgeService(path.join(dataRoot, "knowledge"));
     this.memory = new MemoryService(path.join(dataRoot, "memory"));
+    this.mail = new MailService(path.join(dataRoot, "mail"));
   }
 
   async bootstrap(): Promise<BootstrapPayload> {
@@ -1476,6 +1497,58 @@ export class WorkspaceService {
 
   async buildMemoryPromptContext(input: MemorySearchInput): Promise<string> {
     return await this.memory.buildPromptContext(input);
+  }
+
+  inferSetup(email: string): MailProviderSetup {
+    return this.mail.inferSetup(email);
+  }
+
+  async listAccounts(): Promise<MailAccountSummary[]> {
+    return await this.mail.listAccounts();
+  }
+
+  async createMailAccount(input: MailAccountCreateInput): Promise<MailAccountSummary> {
+    return await this.mail.createAccount(input);
+  }
+
+  async saveMailPasswordCredentials(input: MailPasswordCredentialsInput): Promise<MailAccountSummary> {
+    return await this.mail.savePasswordCredentials(input);
+  }
+
+  async saveMailOAuthCredentials(input: MailOAuthCredentialsInput): Promise<MailAccountSummary> {
+    return await this.mail.saveOAuthCredentials(input);
+  }
+
+  async createMailOAuthAuthorization(input: MailOAuthAuthorizationInput): Promise<MailOAuthAuthorization> {
+    return await this.mail.createOAuthAuthorization(input);
+  }
+
+  async exchangeMailOAuthCode(input: MailOAuthCodeExchangeInput): Promise<MailAccountSummary> {
+    return await this.mail.exchangeOAuthCode(input);
+  }
+
+  async disconnectMailAccount(accountId: string): Promise<MailAccountSummary[]> {
+    return await this.mail.disconnectAccount(accountId);
+  }
+
+  async removeMailAccount(accountId: string): Promise<MailAccountSummary[]> {
+    return await this.mail.removeAccount(accountId);
+  }
+
+  async searchMessages(input: MailSearchInput): Promise<MailMessageSummary[]> {
+    return await this.mail.searchMessages(input);
+  }
+
+  async readMessage(input: MailReadInput): Promise<MailMessage> {
+    return await this.mail.readMessage(input);
+  }
+
+  async createDraft(input: MailDraftCreateInput): Promise<MailDraft> {
+    return await this.mail.createDraft(input);
+  }
+
+  async sendDraft(input: MailSendDraftInput): Promise<MailSendResult> {
+    return await this.mail.sendDraft(input);
   }
 
   async selectFiles(filePaths: string[]) {

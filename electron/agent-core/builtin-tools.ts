@@ -6,6 +6,7 @@ import { TextDecoder } from "node:util";
 import { ToolPermissionDeniedError } from "./types";
 import type { ToolContext, ToolDefinition } from "./types";
 import { createInteractionToolDefinitions } from "./builtin-tools/interaction-tools";
+import { createMailToolDefinitions, type MailToolStore } from "./builtin-tools/mail-tools";
 import { createMemoryToolDefinition, type MemoryToolStore } from "./builtin-tools/memory-tool";
 import { createTodoToolDefinitions } from "./builtin-tools/todo-tools";
 import { createRuntimeProcessEnv } from "../runtime-support";
@@ -718,6 +719,7 @@ async function runShellCommand(command: string, cwd: string, timeoutMs: number, 
 
 export interface BuiltinToolDefinitionOptions {
   memoryStore?: MemoryToolStore | null;
+  mailStore?: MailToolStore | null;
 }
 
 export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptions = {}): ToolDefinition[] {
@@ -1142,6 +1144,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     ...createInteractionToolDefinitions(),
     createMemoryToolDefinition(options.memoryStore),
     ...createTodoToolDefinitions(),
+    ...createMailToolDefinitions(options.mailStore),
     {
       name: "web_search",
       description:

@@ -22,6 +22,11 @@ import type {
   ChatConversationExportFormat,
   ChatEvent,
   DesktopWindowState,
+  MailAccountCreateInput,
+  MailOAuthAuthorizationInput,
+  MailOAuthCodeExchangeInput,
+  MailOAuthCredentialsInput,
+  MailPasswordCredentialsInput,
   MemoryCreateInput,
   MemorySearchInput,
   MemoryUpdateInput,
@@ -505,6 +510,42 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("desktop:search-memories", async (_event, payload: MemorySearchInput) => {
     return await service!.searchMemories(payload);
+  });
+
+  ipcMain.handle("desktop:infer-mail-setup", async (_event, email: string) => {
+    return service!.inferSetup(String(email ?? ""));
+  });
+
+  ipcMain.handle("desktop:list-mail-accounts", async () => {
+    return await service!.listAccounts();
+  });
+
+  ipcMain.handle("desktop:create-mail-account", async (_event, payload: MailAccountCreateInput) => {
+    return await service!.createMailAccount(payload);
+  });
+
+  ipcMain.handle("desktop:save-mail-password-credentials", async (_event, payload: MailPasswordCredentialsInput) => {
+    return await service!.saveMailPasswordCredentials(payload);
+  });
+
+  ipcMain.handle("desktop:save-mail-oauth-credentials", async (_event, payload: MailOAuthCredentialsInput) => {
+    return await service!.saveMailOAuthCredentials(payload);
+  });
+
+  ipcMain.handle("desktop:create-mail-oauth-authorization", async (_event, payload: MailOAuthAuthorizationInput) => {
+    return await service!.createMailOAuthAuthorization(payload);
+  });
+
+  ipcMain.handle("desktop:exchange-mail-oauth-code", async (_event, payload: MailOAuthCodeExchangeInput) => {
+    return await service!.exchangeMailOAuthCode(payload);
+  });
+
+  ipcMain.handle("desktop:disconnect-mail-account", async (_event, accountId: string) => {
+    return await service!.disconnectMailAccount(String(accountId ?? ""));
+  });
+
+  ipcMain.handle("desktop:remove-mail-account", async (_event, accountId: string) => {
+    return await service!.removeMailAccount(String(accountId ?? ""));
   });
 
   ipcMain.handle("desktop:select-skill-folder", async () => {
