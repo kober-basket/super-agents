@@ -85,6 +85,29 @@ test("primary sidebar leaves browser out of the left navigation", () => {
   assert.doesNotMatch(html, />浏览器</);
 });
 
+test("primary sidebar places memory between tools and knowledge", () => {
+  const html = renderToStaticMarkup(
+    <PrimarySidebar
+      view="memory"
+      conversations={[]}
+      activeConversationId={null}
+      onCreateConversation={() => undefined}
+      onDeleteConversation={() => undefined}
+      onOpenConversation={() => undefined}
+      onSetView={() => undefined}
+    />,
+  );
+
+  const toolsIndex = html.indexOf(">工具<");
+  const memoryIndex = html.indexOf(">记忆<");
+  const knowledgeIndex = html.indexOf(">知识库<");
+
+  assert.ok(toolsIndex >= 0);
+  assert.ok(memoryIndex > toolsIndex);
+  assert.ok(knowledgeIndex > memoryIndex);
+  assert.match(html, /class="sidebar-link active"/);
+});
+
 test("window chrome keeps controls in a dedicated top bar", () => {
   const html = renderToStaticMarkup(
     <AppTitleBar

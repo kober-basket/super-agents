@@ -31,6 +31,7 @@ type SendTurnInput = {
   agentId: string;
   content: string;
   overrideSystemPrompt?: string;
+  memoryPrompt?: string;
   workspacePrompt?: string;
   workspaceRoot?: string;
   fullFileSystemAccess?: boolean;
@@ -564,6 +565,7 @@ export class AgentCore {
         agent,
         skills,
         overrideSystemPrompt: input.overrideSystemPrompt,
+        memoryPrompt: input.memoryPrompt,
         workspacePrompt: input.workspacePrompt,
         appendSystemPrompt: sawToolResultThisTurn ? TOOL_COMPLETION_PROTOCOL : undefined,
       });
@@ -608,6 +610,16 @@ export class AgentCore {
             sessionId: input.sessionId,
             agentId: agent.id,
             text: event.text,
+          };
+          continue;
+        }
+
+        if (event.type === "usage") {
+          yield {
+            type: "token_usage",
+            sessionId: input.sessionId,
+            agentId: agent.id,
+            usage: event.usage,
           };
           continue;
         }

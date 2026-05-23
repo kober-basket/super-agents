@@ -6,6 +6,7 @@ import { TextDecoder } from "node:util";
 import { ToolPermissionDeniedError } from "./types";
 import type { ToolContext, ToolDefinition } from "./types";
 import { createInteractionToolDefinitions } from "./builtin-tools/interaction-tools";
+import { createMemoryToolDefinition, type MemoryToolStore } from "./builtin-tools/memory-tool";
 import { createTodoToolDefinitions } from "./builtin-tools/todo-tools";
 import { createRuntimeProcessEnv } from "../runtime-support";
 
@@ -355,7 +356,7 @@ async function resolveWorkspacePath(
 
     return { root, resolved, relative: resolved, external: true };
   }
-  return { root, resolved, relative: relative || ".", external: false };
+  return { root, resolved, relative: relative ? toPosixPath(relative) : ".", external: false };
 }
 
 function trimOutput(value: string, maxLength = 30_000) {
@@ -715,7 +716,11 @@ async function runShellCommand(command: string, cwd: string, timeoutMs: number, 
   });
 }
 
-export function createBuiltinToolDefinitions(): ToolDefinition[] {
+export interface BuiltinToolDefinitionOptions {
+  memoryStore?: MemoryToolStore | null;
+}
+
+export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptions = {}): ToolDefinition[] {
   return [
     {
       name: "read",
@@ -1135,6 +1140,7 @@ export function createBuiltinToolDefinitions(): ToolDefinition[] {
       },
     },
     ...createInteractionToolDefinitions(),
+    createMemoryToolDefinition(options.memoryStore),
     ...createTodoToolDefinitions(),
     {
       name: "web_search",

@@ -515,6 +515,7 @@ test("workspace service lists built-in agent tools instead of runtime tools", as
       "glob",
       "grep",
       "list",
+      "memory",
       "multi_edit",
       "question",
       "read",

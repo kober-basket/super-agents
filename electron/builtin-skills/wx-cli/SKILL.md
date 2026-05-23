@@ -23,6 +23,26 @@ Check availability:
 wx --version
 ```
 
+## Setup When Missing
+
+If `wx --version` fails and the user asks to set it up, install the real package directly. Use the scoped npm package name exactly; do not guess or install the unscoped `wx-cli` package.
+
+```bash
+npm install -g @jackwener/wx-cli
+```
+
+If npm is unavailable, mention the official install scripts:
+
+```powershell
+irm https://raw.githubusercontent.com/jackwener/wx-cli/main/install.ps1 | iex
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jackwener/wx-cli/main/install.sh | bash
+```
+
+After installation, verify with `wx --version`. Treat initialization as a separate sensitive step: WeChat must be running and logged in, and `wx init` reads local WeChat database key material. Run `wx init` or `wx init --force` only after the user explicitly confirms that risk.
+
 Use JSON for agent consumption:
 
 ```bash

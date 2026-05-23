@@ -11,6 +11,7 @@ import type {
   ChatVisual,
 } from "../src/types";
 import { parseChatMessageContent } from "../src/lib/chat-visuals";
+import { addChatTokenUsage } from "../src/lib/token-usage";
 import {
   AgentCore,
   DEFAULT_AGENT_ID,
@@ -142,7 +143,7 @@ export class ChatOrchestrator {
     const agents = createDefaultAgentRegistry();
     const skills = new SkillRegistry();
     const tools = new ToolRegistry();
-    for (const tool of createBuiltinToolDefinitions()) {
+    for (const tool of createBuiltinToolDefinitions({ memoryStore: this.workspaceService })) {
       tools.register(tool);
     }
     tools.register(createSkillToolDefinition(this.workspaceService));
@@ -331,6 +332,7 @@ export class ChatOrchestrator {
         sessionId: activeTurn.sessionId,
         agentId: this.defaultAgentId,
         content: prepared.content,
+        memoryPrompt: prepared.memoryPrompt,
         workspacePrompt: prepared.workspacePrompt,
         workspaceRoot: prepared.workspaceRoot,
         fullFileSystemAccess: prepared.fullFileSystemAccess,
@@ -597,6 +599,11 @@ export class ChatOrchestrator {
 
   private async handleAgentEvent(activeTurn: ActiveTurn, event: AgentEvent) {
     if (activeTurn.closed) {
+      return;
+    }
+
+    if (event.type === "token_usage") {
+      activeTurn.runtimeTrace.usage = addChatTokenUsage(activeTurn.runtimeTrace.usage, event.usage);
       return;
     }
 

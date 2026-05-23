@@ -24,6 +24,9 @@ import type {
   FileDropEntry,
   FilePreviewPayload,
   KnowledgeBaseSummary,
+  MemoryCreateInput,
+  MemoryEntry,
+  MemoryUpdateInput,
   McpServerConfig,
   ModelProviderConfig,
   RemoteControlStatus,
@@ -42,6 +45,7 @@ import { BrowserWorkspacePane } from "./features/chat/BrowserWorkspacePane";
 import { PreviewPane } from "./features/chat/PreviewPane";
 import { TerminalPane } from "./features/chat/TerminalPane";
 import { WorkspaceFileExplorer } from "./features/chat/WorkspaceFileExplorer";
+import { HoverTooltipLayer } from "./features/shared/HoverTooltipLayer";
 import {
   upsertConversationSummaryList,
   type UpsertConversationSummaryOptions,
@@ -93,6 +97,10 @@ const SkillsView = lazy(async () => {
 const ToolsView = lazy(async () => {
   const module = await import("./features/tools/ToolsView");
   return { default: module.ToolsView };
+});
+const MemoryView = lazy(async () => {
+  const module = await import("./features/memory/MemoryView");
+  return { default: module.MemoryView };
 });
 const KnowledgeView = lazy(async () => {
   const module = await import("./features/knowledge/KnowledgeView");
@@ -397,6 +405,8 @@ export default function App() {
   const [skillsRefreshing, setSkillsRefreshing] = useState(false);
   const [tools, setTools] = useState<WorkspaceTool[]>([]);
   const [toolsRefreshing, setToolsRefreshing] = useState(false);
+  const [memoryEntries, setMemoryEntries] = useState<MemoryEntry[]>([]);
+  const [memoryRefreshing, setMemoryRefreshing] = useState(false);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseSummary[]>([]);
   const [conversationKnowledgeBaseIds, setConversationKnowledgeBaseIds] = useState<
     Record<string, string[]>
@@ -459,6 +469,7 @@ export default function App() {
     onToast: (message) => setToast(message),
   });
   const toolsLoadedRef = useRef(false);
+  const memoryLoadedRef = useRef(false);
   const knowledgeLoadedRef = useRef(false);
   const wechatLoginCancelledRef = useRef(false);
   const voiceInputSupported =
@@ -649,6 +660,14 @@ export default function App() {
 
     void refreshToolsView({ silent: true });
   }, [toolsRefreshing, view]);
+
+  useEffect(() => {
+    if (view !== "memory" || memoryRefreshing || memoryLoadedRef.current) {
+      return;
+    }
+
+    void refreshMemoryView({ silent: true });
+  }, [memoryRefreshing, view]);
 
   useEffect(() => {
     if ((view !== "knowledge" && view !== "chat") || knowledgeRefreshing || knowledgeLoadedRef.current) {
@@ -1588,6 +1607,60 @@ export default function App() {
       setToast("刷新工具列表失败");
     } finally {
       setToolsRefreshing(false);
+    }
+  }
+
+  async function refreshMemoryView(options?: { silent?: boolean }) {
+    memoryLoadedRef.current = true;
+    setMemoryRefreshing(true);
+    try {
+      const payload = await workspaceClient.listMemories();
+      setMemoryEntries(payload.entries);
+    } catch (error) {
+      if (!options?.silent) {
+        setToast(error instanceof Error ? error.message : "刷新记忆失败");
+      }
+    } finally {
+      setMemoryRefreshing(false);
+    }
+  }
+
+  async function createMemory(input: MemoryCreateInput) {
+    memoryLoadedRef.current = true;
+    setMemoryRefreshing(true);
+    try {
+      const payload = await workspaceClient.createMemory(input);
+      setMemoryEntries(payload.entries);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "创建记忆失败");
+    } finally {
+      setMemoryRefreshing(false);
+    }
+  }
+
+  async function updateMemory(input: MemoryUpdateInput) {
+    memoryLoadedRef.current = true;
+    setMemoryRefreshing(true);
+    try {
+      const payload = await workspaceClient.updateMemory(input);
+      setMemoryEntries(payload.entries);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "更新记忆失败");
+    } finally {
+      setMemoryRefreshing(false);
+    }
+  }
+
+  async function deleteMemory(memoryId: string) {
+    memoryLoadedRef.current = true;
+    setMemoryRefreshing(true);
+    try {
+      const payload = await workspaceClient.deleteMemory(memoryId);
+      setMemoryEntries(payload.entries);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "删除记忆失败");
+    } finally {
+      setMemoryRefreshing(false);
     }
   }
 
@@ -2729,6 +2802,23 @@ export default function App() {
       );
     }
 
+    if (view === "memory") {
+      return (
+        <Suspense fallback={<LazyViewFallback />}>
+          <MemoryView
+            entries={memoryEntries}
+            refreshing={memoryRefreshing}
+            workspaceRoot={config.workspaceRoot}
+            onCreateMemory={createMemory}
+            onDeleteMemory={deleteMemory}
+            onRefresh={refreshMemoryView}
+            onToast={(message) => setToast(message)}
+            onUpdateMemory={updateMemory}
+          />
+        </Suspense>
+      );
+    }
+
     if (view === "knowledge") {
       return (
         <Suspense fallback={<LazyViewFallback />}>
@@ -2928,6 +3018,8 @@ export default function App() {
       {toastFeedback ? (
         <div className={`toast ${toastFeedback.tone}`}>{toastFeedback.message}</div>
       ) : null}
+
+      <HoverTooltipLayer />
     </div>
   );
 }

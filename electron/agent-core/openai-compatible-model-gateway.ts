@@ -22,6 +22,30 @@ interface ChatCompletionChunk {
     };
     finish_reason?: string | null;
   }>;
+  usage?: ChatCompletionUsage | null;
+}
+
+interface ChatCompletionUsage {
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  prompt_cache_hit_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  reasoning_tokens?: number | null;
+  prompt_tokens_details?: {
+    cached_tokens?: number | null;
+  } | null;
+  completion_tokens_details?: {
+    reasoning_tokens?: number | null;
+  } | null;
+  input_tokens_details?: {
+    cached_tokens?: number | null;
+  } | null;
+  output_tokens_details?: {
+    reasoning_tokens?: number | null;
+  } | null;
 }
 
 interface PendingToolCall {
@@ -109,6 +133,57 @@ function parseToolInput(value: string) {
   } catch {
     return { raw: value };
   }
+}
+
+function readUsageTokenCount(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.round(value)
+    : undefined;
+}
+
+function normalizeCompletionUsage(
+  usage: ChatCompletionUsage | null | undefined,
+  activeModel: NonNullable<ReturnType<typeof getActiveModelOption>>,
+  provider: AppConfig["modelProviders"][number],
+) {
+  if (!usage) {
+    return null;
+  }
+
+  const inputTokens = readUsageTokenCount(usage.prompt_tokens ?? usage.input_tokens) ?? 0;
+  const outputTokens = readUsageTokenCount(usage.completion_tokens ?? usage.output_tokens) ?? 0;
+  const totalTokens = readUsageTokenCount(usage.total_tokens) ?? inputTokens + outputTokens;
+  const cachedInputTokens = readUsageTokenCount(
+    usage.prompt_tokens_details?.cached_tokens ??
+      usage.input_tokens_details?.cached_tokens ??
+      usage.prompt_cache_hit_tokens ??
+      usage.cache_read_input_tokens,
+  );
+  const reasoningOutputTokens = readUsageTokenCount(
+    usage.completion_tokens_details?.reasoning_tokens ??
+      usage.output_tokens_details?.reasoning_tokens ??
+      usage.reasoning_tokens,
+  );
+
+  if (inputTokens <= 0 && outputTokens <= 0 && totalTokens <= 0) {
+    return null;
+  }
+
+  return {
+    providerId: activeModel.providerId,
+    providerName: activeModel.providerName || provider.name,
+    modelId: activeModel.modelId,
+    modelLabel: activeModel.modelLabel,
+    inputTokens,
+    ...(cachedInputTokens ? { cachedInputTokens } : {}),
+    outputTokens,
+    ...(reasoningOutputTokens ? { reasoningOutputTokens } : {}),
+    totalTokens,
+  };
+}
+
+function shouldRetryWithoutStreamingUsage(status: number, errorText: string) {
+  return (status === 400 || status === 422) && /\b(?:stream_options|include_usage)\b/i.test(errorText);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -780,14 +855,28 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
       tool_choice: input.tools.length > 0 ? (input.toolChoice ?? "auto") : undefined,
     };
 
-    const response = await fetch(joinUrl(provider.baseUrl, "/chat/completions"), {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${provider.apiKey}`,
-      },
-      body: JSON.stringify(body),
+    const requestChatCompletion = (requestBody: Record<string, unknown>) =>
+      fetch(joinUrl(provider.baseUrl, "/chat/completions"), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${provider.apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+    let response = await requestChatCompletion({
+      ...body,
+      stream_options: { include_usage: true },
     });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      if (shouldRetryWithoutStreamingUsage(response.status, errorText)) {
+        response = await requestChatCompletion(body);
+      } else {
+        throw new Error(`Model request failed (${response.status}): ${errorText || response.statusText}`);
+      }
+    }
 
     if (!response.ok || !response.body) {
       const errorText = await response.text().catch(() => "");
@@ -818,6 +907,11 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
         }
 
         const chunk = JSON.parse(eventData) as ChatCompletionChunk;
+        const usage = normalizeCompletionUsage(chunk.usage, activeModel, provider);
+        if (usage) {
+          yield { type: "usage", usage };
+        }
+
         for (const choice of chunk.choices ?? []) {
           const reasoningContent = choice.delta?.reasoning_content;
           if (reasoningContent) {

@@ -711,6 +711,7 @@ export class RemoteControlService {
       this.wechatMonitorPromise = null;
     }
     this.runtimes.wechat.running = false;
+    this.runtimes.wechat.lastError = "";
   }
 
   private async stopWecomMonitor() {

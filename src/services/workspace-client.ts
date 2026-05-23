@@ -32,6 +32,14 @@ export const workspaceClient = {
     desktopAgent.deleteKnowledgeItem(payload),
   searchKnowledgeBases: (payload: Parameters<typeof desktopAgent.searchKnowledgeBases>[0]) =>
     desktopAgent.searchKnowledgeBases(payload),
+  listMemories: () => desktopAgent.listMemories(),
+  createMemory: (payload: Parameters<typeof desktopAgent.createMemory>[0]) =>
+    desktopAgent.createMemory(payload),
+  updateMemory: (payload: Parameters<typeof desktopAgent.updateMemory>[0]) =>
+    desktopAgent.updateMemory(payload),
+  deleteMemory: (memoryId: string) => desktopAgent.deleteMemory(memoryId),
+  searchMemories: (payload: Parameters<typeof desktopAgent.searchMemories>[0]) =>
+    desktopAgent.searchMemories(payload),
   selectSkillFolder: () => desktopAgent.selectSkillFolder(),
   importLocalSkill: (sourcePath: string) => desktopAgent.importLocalSkill(sourcePath),
   uninstallSkill: (skillId: string) => desktopAgent.uninstallSkill(skillId),

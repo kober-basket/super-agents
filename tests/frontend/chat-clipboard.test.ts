@@ -132,6 +132,10 @@ test("assistant message actions place copy before the timestamp", () => {
 
   assert.match(
     source,
-    /className=\{`message-actions[\s\S]*message\.role === "assistant"[\s\S]*<button[\s\S]*className=\{`message-action-button[\s\S]*<\/button>[\s\S]*<span className="message-time">/,
+    /className=\{`message-actions[\s\S]*message\.role === "assistant"[\s\S]*<button[\s\S]*className=\{`message-action-button[\s\S]*<\/button>[\s\S]*<span className="message-usage"/,
+  );
+  assert.match(
+    source,
+    /<span className="message-usage"[\s\S]*<\/span>[\s\S]*<span className="message-time">/,
   );
 });

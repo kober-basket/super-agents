@@ -9,9 +9,14 @@ temp-smoke/
 .test-dist/
 vendor/runtime/*
 !vendor/runtime/README.md
-!vendor/runtime/**/
-!vendor/runtime/**/README.md
+!vendor/runtime/win32-x64/
+vendor/runtime/win32-x64/*
+!vendor/runtime/win32-x64/bin/
+vendor/runtime/win32-x64/bin/*
 !vendor/runtime/win32-x64/bin/python3.cmd
+!vendor/runtime/win32-x64/bin/uv.exe
+!vendor/runtime/win32-x64/bin/uvx.exe
+!vendor/runtime/win32-x64/bin/uvw.exe
 
 *.log
 *.zip

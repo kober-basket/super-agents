@@ -7,6 +7,7 @@ import { buildLoadedSkillContent, findEnabledSkill, parseSkillInvocations } from
 
 export interface PreparedPrompt {
   content: string;
+  memoryPrompt: string;
   workspacePrompt: string;
   workspaceRoot: string;
   fullFileSystemAccess: boolean;
@@ -181,6 +182,28 @@ async function resolveKnowledgeContext(
   }
 }
 
+async function resolveMemoryContext(
+  workspaceService: WorkspaceService,
+  content: string,
+  workspaceRoot: string,
+) {
+  const memoryAwareService = workspaceService as WorkspaceService & {
+    buildMemoryPromptContext?: (input: { query: string; workspaceRoot?: string }) => Promise<string>;
+  };
+  if (typeof memoryAwareService.buildMemoryPromptContext !== "function") {
+    return "";
+  }
+
+  try {
+    return await memoryAwareService.buildMemoryPromptContext({
+      query: content,
+      workspaceRoot,
+    });
+  } catch {
+    return "";
+  }
+}
+
 export async function prepareChatPrompt(input: {
   chatInput: ChatSendInput;
   selectedKnowledgeBaseIds: string[];
@@ -207,7 +230,7 @@ export async function prepareChatPrompt(input: {
         content: skillInvocations.args,
       }
     : input.chatInput;
-  const [skillContext, knowledgeContext] = await Promise.all([
+  const [skillContext, knowledgeContext, memoryPrompt] = await Promise.all([
     input.workspaceService.getEnabledSkillPromptContext(config),
     resolveKnowledgeContext(
       input.workspaceService,
@@ -215,6 +238,7 @@ export async function prepareChatPrompt(input: {
       effectiveChatInput.content,
       input.selectedKnowledgeBaseIds,
     ),
+    resolveMemoryContext(input.workspaceService, effectiveChatInput.content, cwd),
   ]);
   const attachmentContext = buildAttachmentContext(effectiveChatInput);
   const invokedSkillContext = invokedSkills
@@ -239,6 +263,7 @@ export async function prepareChatPrompt(input: {
 
   return {
     content: buildTurnPromptContent(effectiveChatInput),
+    memoryPrompt,
     workspacePrompt,
     workspaceRoot: cwd,
     fullFileSystemAccess: config.security.fullFileSystemAccess === true,

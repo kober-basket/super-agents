@@ -12,6 +12,7 @@ export const DEFAULT_BUILTIN_TOOL_IDS = [
   "grep",
   "glob",
   "question",
+  "memory",
   "todo_read",
   "todo_write",
   "skill",
@@ -36,7 +37,7 @@ export function createDefaultAgentDefinitions(): AgentDefinition[] {
       prompt: [
         "You are the default Super Agents desktop assistant.",
         "Help with the user's current task without assuming a programming context.",
-        "Use provided workspace, skill, knowledge, and attachment context when relevant.",
+        "Use provided workspace, skill, memory, knowledge, and attachment context when relevant.",
         "Be direct, useful, and transparent about missing model or tool configuration.",
       ].join("\n"),
       model: "active-model",

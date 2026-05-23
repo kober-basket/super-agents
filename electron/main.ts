@@ -22,6 +22,9 @@ import type {
   ChatConversationExportFormat,
   ChatEvent,
   DesktopWindowState,
+  MemoryCreateInput,
+  MemorySearchInput,
+  MemoryUpdateInput,
 } from "../src/types";
 
 app.setName(APP_NAME);
@@ -483,6 +486,26 @@ app.whenReady().then(async () => {
       return await service!.searchKnowledgeBases(payload);
     },
   );
+
+  ipcMain.handle("desktop:list-memories", async () => {
+    return await service!.listMemories();
+  });
+
+  ipcMain.handle("desktop:create-memory", async (_event, payload: MemoryCreateInput) => {
+    return await service!.createMemory(payload);
+  });
+
+  ipcMain.handle("desktop:update-memory", async (_event, payload: MemoryUpdateInput) => {
+    return await service!.updateMemory(payload);
+  });
+
+  ipcMain.handle("desktop:delete-memory", async (_event, memoryId: string) => {
+    return await service!.deleteMemory(memoryId);
+  });
+
+  ipcMain.handle("desktop:search-memories", async (_event, payload: MemorySearchInput) => {
+    return await service!.searchMemories(payload);
+  });
 
   ipcMain.handle("desktop:select-skill-folder", async () => {
     const result = await dialog.showOpenDialog(mainWindow ?? undefined, {

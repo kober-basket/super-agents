@@ -15,6 +15,7 @@ test("built-in tool catalog exposes native model tools without workspace aliases
     "glob",
     "grep",
     "list",
+    "memory",
     "multi_edit",
     "question",
     "read",

@@ -2,6 +2,7 @@ export type AppSection =
   | "chat"
   | "skills"
   | "tools"
+  | "memory"
   | "knowledge"
   | "settings";
 export type AppearanceThemeId =
@@ -299,6 +300,68 @@ export interface KnowledgeInjectionMeta {
   results?: KnowledgeSearchResultItem[];
 }
 
+export type MemoryEntryType =
+  | "user_preference"
+  | "feedback_rule"
+  | "project_context"
+  | "external_reference";
+
+export type MemoryScope = "global" | "workspace";
+
+export interface MemoryEntry {
+  id: string;
+  type: MemoryEntryType;
+  scope: MemoryScope;
+  title: string;
+  content: string;
+  tags: string[];
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+  workspaceRoot?: string;
+}
+
+export interface MemoryCatalogPayload {
+  fetchedAt: number;
+  entries: MemoryEntry[];
+}
+
+export interface MemoryCreateInput {
+  type: MemoryEntryType;
+  scope?: MemoryScope;
+  title: string;
+  content: string;
+  tags?: string[];
+  enabled?: boolean;
+  workspaceRoot?: string;
+}
+
+export interface MemoryUpdateInput {
+  id: string;
+  type?: MemoryEntryType;
+  scope?: MemoryScope;
+  title?: string;
+  content?: string;
+  tags?: string[];
+  enabled?: boolean;
+  workspaceRoot?: string;
+}
+
+export interface MemorySearchInput {
+  query?: string;
+  type?: MemoryEntryType;
+  scope?: MemoryScope;
+  workspaceRoot?: string;
+  limit?: number;
+  includeDisabled?: boolean;
+}
+
+export interface MemorySearchPayload {
+  query: string;
+  total: number;
+  entries: MemoryEntry[];
+}
+
 export interface KnowledgeBaseCreateInput {
   name: string;
   description?: string;
@@ -561,6 +624,27 @@ export interface ChatMessage {
   updatedAt: number;
 }
 
+export interface ChatModelTokenUsage {
+  providerId?: string;
+  providerName?: string;
+  modelId?: string;
+  modelLabel?: string;
+  inputTokens: number;
+  cachedInputTokens?: number;
+  outputTokens: number;
+  reasoningOutputTokens?: number;
+  totalTokens: number;
+}
+
+export interface ChatTokenUsageSummary {
+  inputTokens: number;
+  cachedInputTokens?: number;
+  outputTokens: number;
+  reasoningOutputTokens?: number;
+  totalTokens: number;
+  modelUsages: ChatModelTokenUsage[];
+}
+
 export interface ChatToolCallLocation {
   path: string;
   line?: number | null;
@@ -680,6 +764,7 @@ export interface ChatMessageRuntimeTrace {
   toolCalls: ChatToolCall[];
   terminalOutputs: Record<string, ChatTerminalOutput>;
   thoughtText: string;
+  usage?: ChatTokenUsageSummary;
   stopReason?: string;
   error?: string;
 }
@@ -693,6 +778,7 @@ export interface ChatConversationRuntimeState {
   toolCalls: ChatToolCall[];
   terminalOutputs: Record<string, ChatTerminalOutput>;
   thoughtText: string;
+  usage?: ChatTokenUsageSummary;
   stopReason?: string;
   error?: string;
 }

@@ -24,6 +24,11 @@ import type {
   KnowledgeBaseCreateInput,
   KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
+  MemoryCatalogPayload,
+  MemoryCreateInput,
+  MemorySearchInput,
+  MemorySearchPayload,
+  MemoryUpdateInput,
   McpInspectInput,
   McpServerToolsResult,
   McpToolDebugInput,
@@ -80,6 +85,16 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:delete-knowledge-item", payload) as Promise<KnowledgeCatalogPayload>,
   searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) =>
     ipcRenderer.invoke("desktop:search-knowledge-bases", payload) as Promise<KnowledgeSearchPayload>,
+  listMemories: () =>
+    ipcRenderer.invoke("desktop:list-memories") as Promise<MemoryCatalogPayload>,
+  createMemory: (payload: MemoryCreateInput) =>
+    ipcRenderer.invoke("desktop:create-memory", payload) as Promise<MemoryCatalogPayload>,
+  updateMemory: (payload: MemoryUpdateInput) =>
+    ipcRenderer.invoke("desktop:update-memory", payload) as Promise<MemoryCatalogPayload>,
+  deleteMemory: (memoryId: string) =>
+    ipcRenderer.invoke("desktop:delete-memory", memoryId) as Promise<MemoryCatalogPayload>,
+  searchMemories: (payload: MemorySearchInput) =>
+    ipcRenderer.invoke("desktop:search-memories", payload) as Promise<MemorySearchPayload>,
   selectSkillFolder: () => ipcRenderer.invoke("desktop:select-skill-folder") as Promise<string>,
   importLocalSkill: (sourcePath: string) =>
     ipcRenderer.invoke("desktop:import-local-skill", sourcePath) as Promise<SkillImportResult>,

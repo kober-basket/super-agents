@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-`super-agents` 是一个基于 Electron、Vite、React 和 TypeScript 的桌面 agent 工作台外壳。当前重点不是单纯聊天 UI，而是逐步形成一个本地原生 agent runtime：会话、工具、技能、MCP、权限、知识库、远程控制和可视化运行轨迹都应该作为同一个能力系统来演进。
+`super-agents` 是一个基于 Electron、Vite、React 和 TypeScript 的桌面 agent 工作台外壳。当前重点不是单纯聊天 UI，而是逐步形成一个本地原生 agent runtime：会话、工具、记忆、技能、MCP、权限、知识库、远程控制和可视化运行轨迹都应该作为同一个能力系统来演进。
 
 关键入口：
 
@@ -14,9 +14,11 @@
 - `electron/agent-core/`：原生 agent 能力层，包括 agent 定义、prompt 组合、工具注册、权限、会话和模型网关。
 - `electron/agent-core/openai/`：OpenAI-compatible 网关的消息映射、SSE 解析等 provider 辅助模块。
 - `electron/tool-catalog.ts`：内置工具与 MCP 工具汇总成工作区工具目录。
+- `electron/memory-service.ts`：本地长期记忆的结构化存储、搜索和 prompt context 构建。
 - `electron/builtin-skills/`：随应用打包的内置技能。
 - `src/features/chat/`：聊天工作区、预览和消息可视化。
 - `src/features/tools/`：工具目录与 MCP 管理界面。
+- `src/features/memory/`：记忆条目的管理界面。
 - `src/features/skills/`：技能列表、导入和新建界面。
 - `src/features/settings/`：模型、MCP、权限、远程控制和外观等设置。
 - `tests/electron/`、`tests/frontend/`：Electron 侧与前端纯逻辑测试。
@@ -40,7 +42,7 @@ npm run preview
 - 修改 TypeScript 或 Electron 逻辑后，优先运行 `npm run test:electron`。
 - 修改前端纯逻辑后，仍使用 `npm run test:electron`，当前测试脚本会先编译 `tsconfig.test.json` 并运行 `.test-dist` 下的 Node tests。
 - 修改打包入口、预加载、Electron 主进程或 Vite 配置后，运行 `npm run build`。
-- 发布开箱即用安装包前，把 Node/npm 运行时放到 `vendor/runtime/<platform>-<arch>/node`；Windows 版还需要 `vendor/runtime/<platform>-<arch>/python/python.exe`，然后运行 `npm run runtime:check` 和 `npm run package:runtime`。
+- 发布开箱即用安装包前，把 Node/npm 运行时放到 `vendor/runtime/<platform>-<arch>/node`；Windows 版还需要 `vendor/runtime/<platform>-<arch>/python/python.exe` 和 `vendor/runtime/<platform>-<arch>/bin/uv.exe`，然后运行 `npm run runtime:check` 和 `npm run package:runtime`。
 - UI 交互改动需要人工或浏览器实际检查，尤其是聊天、工具、技能和设置页面。
 
 ## Architecture Principles
@@ -60,6 +62,7 @@ npm run preview
 - Agent profile：`AgentDefinition` 描述 agent 的身份、角色、prompt、模型、工具、技能、权限模式和最大轮次。
 - Prompt composition：`PromptComposer` 负责组合 runtime prompt、active agent instructions、skills、memory、workspace 和 additional instructions。
 - Tool system：`ToolDefinition` 定义工具 schema、risk 和 `execute`；内置工具由 `electron/agent-core/builtin-tools.ts` 聚合，独立工具族放在 `electron/agent-core/builtin-tools/`，MCP 工具通过 adapter 进入工作区工具目录。
+- Memory：`MemoryService` 管理 app userData 下的结构化长期记忆，`prepareChatPrompt()` 在每轮按当前请求和 workspace scope 构建 `memoryPrompt`，内置 `memory` 工具通过同一 service 读写并在写入前走审批。
 - Permission system：`PermissionManager` 根据 agent policy、工具风险、审批要求和 full filesystem access 做 allow/ask/deny。
 - Execution loop：`AgentCore.sendTurn()` 负责流式模型事件、工具调用、重复工具调用去重、工具结果截断、错误净化和最终回答合成；执行阶段的可见文本先作为 provisional assistant text 流式输出，如果随后出现工具调用，`chat-orchestrator` 会把这段临时正文折回 runtime trace 过程状态。工具结果之后 runtime 会暴露内部 `finish_task` 完成信号，并以 `tool_choice: required` 要求模型继续调用工具或调用 `finish_task`，模型调用后进入关闭工具的最终回答阶段，最终阶段的文本直接作为用户正文流式输出；未调用完成信号的无工具文本仍作为兼容性的最终回答候选。
 - Agent session：`AgentSessionManager` 抽象会话存储；默认可用内存实现，桌面聊天通过 `PersistentAgentSessionManager` 写入 `ConversationService` 的 SQLite `agent_sessions` 表。
@@ -87,6 +90,7 @@ npm run preview
 - Agent、tool、skill、permission、model gateway 是独立边界，可以单测。
 - Runtime prompt 只描述稳定约束；具体 persona 和任务规则放到 agent profile 或 skill。
 - 工具调用输入必须被 schema 校验；错误结果要可读、可截断、不能污染后续 prompt。
+- 长期记忆要保持短、结构化、可删除；写入前拒绝疑似密钥内容，prompt 注入时不能让记忆覆盖 runtime/system/developer/直接用户指令。
 - 工具结果过长时截断并写入 metadata，而不是让模型上下文失控。
 - 工具调用前或工具间的模型可见文本可以先流式显示为 provisional assistant text；一旦确认后续发生工具/权限事件，orchestrator 必须把这段文本清空并折回 runtime trace。工具完成后的正式回答优先通过内部 `finish_task` 进入 final-only 阶段并流式输出，避免完整总结同时出现在过程和最终回答中。
 - turn 事实事件进入 `runtimeTrace.events`，UI timeline/activity 是派生展示，不能反过来作为 agent runtime 的事实来源。
@@ -100,8 +104,10 @@ npm run preview
 
 - `tests/electron/agent-core.test.ts`
 - `tests/electron/builtin-tools.test.ts`
+- `tests/electron/memory-service.test.ts`
 - `tests/electron/tool-catalog.test.ts`
 - `tests/electron/chat-orchestrator.test.ts`
+- `tests/frontend/memory-view.test.tsx`
 - `tests/frontend/runtime-activity.test.ts`
 - `tests/frontend/runtime-timeline.test.ts`
 - `tests/frontend/runtime-tool-visibility.test.ts`

@@ -1,5 +1,6 @@
 import clsx from "clsx";
 import {
+  Brain,
   Database,
   Layers3,
   MessageSquarePlus,
@@ -67,6 +68,14 @@ export function PrimarySidebar({
           >
             <Wrench size={16} />
             <span>工具</span>
+          </button>
+          <button
+            className={clsx("sidebar-link", view === "memory" && "active")}
+            onClick={() => onSetView("memory")}
+            type="button"
+          >
+            <Brain size={16} />
+            <span>记忆</span>
           </button>
           <button
             className={clsx("sidebar-link", view === "knowledge" && "active")}

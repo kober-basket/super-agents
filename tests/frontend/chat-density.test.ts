@@ -109,10 +109,11 @@ test("runtime transcript typography uses the same restrained text colors", () =>
   assert.match(css, /\.message-text\s+code,\s*\.preview-markdown\s+code,\s*\.activity-markdown\s+code\s*{[^}]*color:\s*var\(--text\)[^}]*font-weight:\s*var\(--font-weight-medium\)/s);
 });
 
-test("chat transcript spacing keeps messages readable without becoming loose", () => {
+test("chat transcript spacing keeps question-answer turns visually separated", () => {
   const css = readStyles();
 
-  assert.match(css, /\.message-list\s*{[^}]*gap:\s*18px/s);
+  assert.match(css, /\.message-list\s*{[^}]*gap:\s*22px/s);
+  assert.match(css, /\.message-row\s*{[^}]*padding-bottom:\s*10px/s);
   assert.match(css, /\.message-bubble\s*{[^}]*gap:\s*8px/s);
   assert.match(css, /\.message-runtime-stack\s*{[^}]*gap:\s*4px/s);
   assert.match(css, /\.activity-summary\s*{[^}]*padding:\s*5px 8px/s);

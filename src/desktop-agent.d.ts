@@ -21,6 +21,11 @@ import type {
   KnowledgeBaseCreateInput,
   KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
+  MemoryCatalogPayload,
+  MemoryCreateInput,
+  MemorySearchInput,
+  MemorySearchPayload,
+  MemoryUpdateInput,
   FilePreviewPayload,
   TerminalCommandResult,
   WorkspaceDirectoryListing,
@@ -60,6 +65,11 @@ declare global {
       deleteKnowledgeBase: (baseId: string) => Promise<KnowledgeCatalogPayload>;
       deleteKnowledgeItem: (payload: KnowledgeDeleteItemInput) => Promise<KnowledgeCatalogPayload>;
       searchKnowledgeBases: (payload: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }) => Promise<KnowledgeSearchPayload>;
+      listMemories: () => Promise<MemoryCatalogPayload>;
+      createMemory: (payload: MemoryCreateInput) => Promise<MemoryCatalogPayload>;
+      updateMemory: (payload: MemoryUpdateInput) => Promise<MemoryCatalogPayload>;
+      deleteMemory: (memoryId: string) => Promise<MemoryCatalogPayload>;
+      searchMemories: (payload: MemorySearchInput) => Promise<MemorySearchPayload>;
       selectSkillFolder: () => Promise<string>;
       importLocalSkill: (sourcePath: string) => Promise<SkillImportResult>;
       uninstallSkill: (skillId: string) => Promise<BootstrapPayload>;

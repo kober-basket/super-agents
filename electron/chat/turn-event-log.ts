@@ -41,6 +41,10 @@ export class TurnEventLog {
   }
 
   appendAgentEvent(event: AgentEvent) {
+    if (event.type === "token_usage") {
+      return;
+    }
+
     if (event.type === "thought_delta" || event.type === "status_delta") {
       this.append({
         type: event.type,

@@ -50,6 +50,10 @@ function toolConcurrencySafety(tool: ToolDefinition | undefined, input: unknown)
   return typeof value === "function" ? value(input) : value === true;
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function createCore(
   modelGateway: ModelGateway,
   sessions?: ConstructorParameters<typeof AgentCore>[0]["sessions"],
@@ -667,6 +671,8 @@ test("native agent core does not ask for final_answer after plain post-tool text
 });
 
 test("native agent core repairs bare file tool calls to explicit desktop path from the user request", async () => {
+  const fakeHome = path.resolve(path.sep, "Users", "kober");
+  const fakeDesktop = path.join(fakeHome, "Desktop");
   const gateway = new ScriptedModelGateway([
     [
       {
@@ -725,16 +731,16 @@ test("native agent core repairs bare file tool calls to explicit desktop path fr
     sessionId: "desktop-path-repair-session",
     agentId: "desktop-agent",
     content: "查看桌面文件",
-    workspacePrompt: buildLocalDirectoryContext("/Users/kober"),
-    workspaceRoot: "/Users/kober/Desktop/github/super-agents",
+    workspacePrompt: buildLocalDirectoryContext(fakeHome),
+    workspaceRoot: path.join(fakeDesktop, "github", "super-agents"),
   })) {
     events.push(event);
   }
 
-  assert.deepEqual(executedInputs, [{ path: "/Users/kober/Desktop" }]);
+  assert.deepEqual(executedInputs, [{ path: fakeDesktop }]);
   assert.deepEqual(
     events.filter((event) => event.type === "tool_call_started").map((event) => event.toolCall.input),
-    [{ path: "/Users/kober/Desktop" }],
+    [{ path: fakeDesktop }],
   );
 });
 
@@ -1448,6 +1454,213 @@ test("openai-compatible gateway maps streamed reasoning fields to reasoning delt
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("openai-compatible gateway retries without streaming usage when a provider rejects it", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  globalThis.fetch = (async (_url, init) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestBodies.length === 1) {
+      return new Response(JSON.stringify({ error: { message: "Unknown parameter: stream_options.include_usage" } }), {
+        status: 400,
+        statusText: "Bad Request",
+      });
+    }
+
+    return new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "Fallback answer." } }] })}\n\ndata: [DONE]\n\n`,
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "local::custom-model",
+      modelProviders: [
+        {
+          id: "local",
+          name: "Local Compatible",
+          kind: "openai-compatible",
+          baseUrl: "http://localhost:11434/v1",
+          apiKey: "test-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [
+            {
+              id: "custom-model",
+              label: "Custom Model",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }) as AppConfig);
+
+    const events = [];
+    for await (const event of gateway.stream({
+      model: "custom-model",
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [],
+    })) {
+      events.push(event);
+    }
+
+    assert.equal(requestBodies.length, 2);
+    assert.deepEqual(requestBodies[0]?.stream_options, { include_usage: true });
+    assert.equal("stream_options" in (requestBodies[1] ?? {}), false);
+    assert.deepEqual(
+      events.filter((event) => event.type === "text_delta").map((event) => event.text),
+      ["Fallback answer."],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openai-compatible gateway requests streaming usage and emits normalized token usage", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+  const chunks = [
+    {
+      choices: [
+        {
+          delta: {
+            content: "Tracked answer.",
+          },
+        },
+      ],
+    },
+    {
+      choices: [],
+      usage: {
+        prompt_tokens: 1200,
+        completion_tokens: 240,
+        total_tokens: 1440,
+        prompt_tokens_details: {
+          cached_tokens: 300,
+        },
+        completion_tokens_details: {
+          reasoning_tokens: 42,
+        },
+      },
+    },
+  ];
+
+  globalThis.fetch = (async (_url, init) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    return new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n", {
+      status: 200,
+    });
+  }) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "openai::gpt-5-mini",
+      modelProviders: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          kind: "openai-compatible",
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "test-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [
+            {
+              id: "gpt-5-mini",
+              label: "GPT-5 Mini",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }) as AppConfig);
+
+    const events = [];
+    for await (const event of gateway.stream({
+      model: "gpt-5-mini",
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [],
+    })) {
+      events.push(event);
+    }
+
+    assert.deepEqual(requestBody?.stream_options, { include_usage: true });
+    assert.deepEqual(
+      events.filter((event) => event.type === "usage").map((event) => event.usage),
+      [
+        {
+          providerId: "openai",
+          providerName: "OpenAI",
+          modelId: "gpt-5-mini",
+          modelLabel: "GPT-5 Mini",
+          inputTokens: 1200,
+          cachedInputTokens: 300,
+          outputTokens: 240,
+          reasoningOutputTokens: 42,
+          totalTokens: 1440,
+        },
+      ],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("native agent core forwards model token usage events for a turn", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "usage",
+        usage: {
+          providerId: "openai",
+          providerName: "OpenAI",
+          modelId: "gpt-5-mini",
+          modelLabel: "GPT-5 Mini",
+          inputTokens: 100,
+          cachedInputTokens: 20,
+          outputTokens: 25,
+          reasoningOutputTokens: 5,
+          totalTokens: 125,
+        },
+      },
+      { type: "text_delta", text: "Done." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createCore(gateway);
+  const events = [];
+
+  for await (const event of core.sendTurn({
+    sessionId: "usage-forwarding-session",
+    agentId: "neutral",
+    content: "hello",
+  })) {
+    events.push(event);
+  }
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "token_usage").map((event) => event.usage),
+    [
+      {
+        providerId: "openai",
+        providerName: "OpenAI",
+        modelId: "gpt-5-mini",
+        modelLabel: "GPT-5 Mini",
+        inputTokens: 100,
+        cachedInputTokens: 20,
+        outputTokens: 25,
+        reasoningOutputTokens: 5,
+        totalTokens: 125,
+      },
+    ],
+  );
 });
 
 test("openai-compatible gateway passes assistant reasoning content back to providers", async () => {
@@ -3129,6 +3342,7 @@ test("default native assistant exposes practical built-in tools to the model", a
     "glob",
     "grep",
     "list",
+    "memory",
     "multi_edit",
     "question",
     "read",
@@ -3178,9 +3392,10 @@ test("default read and web tools declare conservative concurrency safety", () =>
 });
 
 test("local directory context maps desktop requests to the real home directory", () => {
-  const context = buildLocalDirectoryContext("/Users/kober");
+  const fakeHome = path.resolve(path.sep, "Users", "kober");
+  const context = buildLocalDirectoryContext(fakeHome);
 
-  assert.match(context, /Desktop \/ 桌面: \/Users\/kober\/Desktop/);
+  assert.match(context, new RegExp(`Desktop / 桌面: ${escapeRegExp(path.join(fakeHome, "Desktop"))}`));
   assert.match(context, /absolute target/i);
   assert.match(context, /Use the workspace root only/i);
 });
@@ -3203,6 +3418,7 @@ test("legacy workspace tool aliases resolve without being exposed to the model",
     "glob",
     "grep",
     "list",
+    "memory",
     "multi_edit",
     "question",
     "read",
@@ -3843,7 +4059,7 @@ test("bash tool runs inside the workspace and caps output", async () => {
     const tool = getBuiltinTool("bash");
     const result = await tool.execute(
       {
-        command: "printf 'abc'; printf '%0500d' 0",
+        command: "node -e \"process.stdout.write('abc' + '0'.repeat(500))\"",
         maxOutputBytes: 80,
       },
       { sessionId: "s", agentId: "a", workspaceRoot },

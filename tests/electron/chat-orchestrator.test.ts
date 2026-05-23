@@ -128,6 +128,107 @@ test("chat orchestrator forwards agent thoughts into runtime trace and thought e
   }
 });
 
+test("chat orchestrator persists assistant token usage in the runtime trace", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
+  const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
+  await conversationService.initialize();
+
+  try {
+    const workspaceService = {
+      async getConfigSnapshot() {
+        return createConfig(tempDir);
+      },
+      async getEnabledSkillPromptContext() {
+        return "";
+      },
+      async searchKnowledgeBases() {
+        return { query: "", total: 0, results: [], searchedBases: [], warnings: [] };
+      },
+      async buildMemoryPromptContext() {
+        return "";
+      },
+    } as unknown as WorkspaceService;
+
+    const runtimeTraceUpdates: Extract<ChatEvent, { type: "message_runtime_trace_updated" }>[] = [];
+    const orchestrator = new ChatOrchestrator(conversationService, workspaceService, (event) => {
+      if (event.type === "message_runtime_trace_updated") {
+        runtimeTraceUpdates.push(event);
+      }
+    });
+
+    (orchestrator as unknown as {
+      nativeCore: {
+        sendTurn(): AsyncIterable<AgentEvent>;
+      };
+    }).nativeCore = {
+      async *sendTurn() {
+        yield {
+          type: "token_usage",
+          sessionId: "s",
+          agentId: "a",
+          usage: {
+            providerId: "openai",
+            providerName: "OpenAI",
+            modelId: "gpt-5-mini",
+            modelLabel: "GPT-5 Mini",
+            inputTokens: 1000,
+            cachedInputTokens: 250,
+            outputTokens: 200,
+            reasoningOutputTokens: 40,
+            totalTokens: 1200,
+          },
+        };
+        yield {
+          type: "token_usage",
+          sessionId: "s",
+          agentId: "a",
+          usage: {
+            providerId: "openai",
+            providerName: "OpenAI",
+            modelId: "gpt-5-mini",
+            modelLabel: "GPT-5 Mini",
+            inputTokens: 50,
+            outputTokens: 10,
+            totalTokens: 60,
+          },
+        };
+        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "Usage tracked." };
+        yield { type: "turn_finished", sessionId: "s", agentId: "a", stopReason: "end_turn" };
+      },
+    };
+
+    const execution = await orchestrator.startTurnWithCompletion({ content: "hello" });
+    await execution.completion;
+
+    const loaded = await conversationService.getConversation(execution.result.conversation.id);
+    const assistantMessage = loaded.messages.find((message) => message.role === "assistant");
+    assert.deepEqual(assistantMessage?.runtimeTrace?.usage, {
+      inputTokens: 1050,
+      cachedInputTokens: 250,
+      outputTokens: 210,
+      reasoningOutputTokens: 40,
+      totalTokens: 1260,
+      modelUsages: [
+        {
+          providerId: "openai",
+          providerName: "OpenAI",
+          modelId: "gpt-5-mini",
+          modelLabel: "GPT-5 Mini",
+          inputTokens: 1050,
+          cachedInputTokens: 250,
+          outputTokens: 210,
+          reasoningOutputTokens: 40,
+          totalTokens: 1260,
+        },
+      ],
+    });
+    assert.deepEqual(runtimeTraceUpdates.at(-1)?.runtimeTrace.usage, assistantMessage?.runtimeTrace?.usage);
+  } finally {
+    await conversationService.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("chat orchestrator runs native turns inside the conversation workspace", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
   const globalWorkspaceRoot = path.join(tempDir, "global-workspace");
@@ -170,6 +271,55 @@ test("chat orchestrator runs native turns inside the conversation workspace", as
     assert.equal(nativeWorkspaceRoot, execution.result.conversation.workspaceRoot);
     assert.notEqual(nativeWorkspaceRoot, globalWorkspaceRoot);
     assert.match(nativeWorkspacePrompt, new RegExp(`Workspace root: ${execution.result.conversation.workspaceRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  } finally {
+    await conversationService.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("chat orchestrator forwards memory prompt into native turns", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-memory-"));
+  const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
+  await conversationService.initialize();
+
+  try {
+    const workspaceService = {
+      async getConfigSnapshot() {
+        return createConfig(tempDir);
+      },
+      async getEnabledSkillPromptContext() {
+        return "";
+      },
+      async searchKnowledgeBases() {
+        return { query: "", total: 0, results: [], searchedBases: [], warnings: [] };
+      },
+      async buildMemoryPromptContext(input: { query: string; workspaceRoot?: string }) {
+        assert.equal(input.query, "回答时记住我的偏好");
+        assert.ok(input.workspaceRoot);
+        return "Long-term memory:\n1. [用户偏好] 默认使用中文回答。";
+      },
+    } as unknown as WorkspaceService;
+
+    const orchestrator = new ChatOrchestrator(conversationService, workspaceService, () => undefined);
+    let nativeMemoryPrompt = "";
+
+    (orchestrator as unknown as {
+      nativeCore: {
+        sendTurn(input: { memoryPrompt?: string }): AsyncIterable<AgentEvent>;
+      };
+    }).nativeCore = {
+      async *sendTurn(input) {
+        nativeMemoryPrompt = input.memoryPrompt ?? "";
+        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "Done." };
+        yield { type: "turn_finished", sessionId: "s", agentId: "a", stopReason: "end_turn" };
+      },
+    };
+
+    const execution = await orchestrator.startTurnWithCompletion({ content: "回答时记住我的偏好" });
+    await execution.completion;
+
+    assert.match(nativeMemoryPrompt, /Long-term memory/);
+    assert.match(nativeMemoryPrompt, /默认使用中文回答/);
   } finally {
     await conversationService.shutdown();
     await rm(tempDir, { recursive: true, force: true });

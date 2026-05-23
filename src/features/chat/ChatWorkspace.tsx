@@ -2,6 +2,7 @@
   AlertCircle,
   ArrowUp,
   BookOpen,
+  Box,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -34,7 +35,14 @@ import {
   insertComposerSkillMention,
   splitComposerSkillMentions,
 } from "../../lib/composer-skills";
+import {
+  buildComposerSlashCommandSuggestions,
+  getComposerSlashCommandTrigger,
+  removeComposerSlashCommandTrigger,
+  type ComposerSlashSuggestion,
+} from "../../lib/composer-slash-commands";
 import { formatBytes } from "../../lib/format";
+import { formatChatTokenUsageBadge } from "../../lib/token-cost";
 import { shouldRenderRuntimeToolCard } from "../../lib/runtime-tool-visibility";
 import {
   buildRuntimeToolDiffs,
@@ -428,11 +436,17 @@ export function ChatWorkspace({
   const [threadActionMenuOpen, setThreadActionMenuOpen] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [activeSkillSuggestionIndex, setActiveSkillSuggestionIndex] = useState(0);
+  const [activeSlashSuggestionIndex, setActiveSlashSuggestionIndex] = useState(0);
+  const [dismissedSlashTriggerKey, setDismissedSlashTriggerKey] = useState<string | null>(null);
   const [messageListEdgeState, setMessageListEdgeState] = useState({
     hasBottomFade: false,
     hasTopFade: false,
   });
   const composerSkillTrigger = getComposerSkillTrigger(draftMessage);
+  const composerSlashTrigger = getComposerSlashCommandTrigger(draftMessage);
+  const slashTriggerKey = composerSlashTrigger
+    ? `${composerSlashTrigger.start}:${composerSlashTrigger.end}:${composerSlashTrigger.query}`
+    : null;
   const skillSuggestions = useMemo(() => {
     if (!composerSkillTrigger || busy) {
       return [];
@@ -456,10 +470,27 @@ export function ChatWorkspace({
       .slice(0, 6);
   }, [busy, composerSkillTrigger, skills]);
   const skillSuggestionsOpen = skillSuggestions.length > 0;
+  const slashSuggestions = useMemo(() => {
+    if (!composerSlashTrigger || busy) {
+      return [];
+    }
+
+    return buildComposerSlashCommandSuggestions({
+      skills,
+      trigger: composerSlashTrigger,
+    });
+  }, [busy, composerSlashTrigger, skills]);
+  const slashSuggestionsOpen =
+    slashSuggestions.length > 0 && slashTriggerKey !== dismissedSlashTriggerKey && !skillSuggestionsOpen;
 
   useEffect(() => {
     setActiveSkillSuggestionIndex(0);
   }, [composerSkillTrigger?.query, skillSuggestions.length]);
+
+  useEffect(() => {
+    setActiveSlashSuggestionIndex(0);
+    setDismissedSlashTriggerKey(null);
+  }, [slashTriggerKey, slashSuggestions.length]);
 
   useEffect(() => {
     if (!knowledgePickerOpen && !modelPickerOpen && !threadActionMenuOpen) return undefined;
@@ -680,6 +711,32 @@ export function ChatWorkspace({
       }
     }
 
+    if (slashSuggestionsOpen) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setActiveSlashSuggestionIndex((index) => (index + 1) % slashSuggestions.length);
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setActiveSlashSuggestionIndex((index) => (index - 1 + slashSuggestions.length) % slashSuggestions.length);
+        return;
+      }
+
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        applySlashSuggestion(slashSuggestions[activeSlashSuggestionIndex] ?? slashSuggestions[0]);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDismissedSlashTriggerKey(slashTriggerKey);
+        return;
+      }
+    }
+
     if (shouldSubmitComposerKeyDown(event)) {
       event.preventDefault();
       onSendMessage();
@@ -736,6 +793,13 @@ export function ChatWorkspace({
     });
   }
 
+  function focusComposerAtEnd() {
+    window.requestAnimationFrame(() => {
+      composerInputRef.current?.focus();
+      composerInputRef.current?.moveCursorToEnd();
+    });
+  }
+
   function applySkillSuggestion(skill: SkillConfig | undefined) {
     if (!skill || !composerSkillTrigger) {
       return;
@@ -743,10 +807,103 @@ export function ChatWorkspace({
 
     const nextDraft = insertComposerSkillMention(draftMessage, composerSkillTrigger, skill);
     onDraftMessageChange(nextDraft);
-    window.requestAnimationFrame(() => {
-      composerInputRef.current?.focus();
-      composerInputRef.current?.moveCursorToEnd();
-    });
+    focusComposerAtEnd();
+  }
+
+  function applySlashSuggestion(item: ComposerSlashSuggestion | undefined) {
+    if (!item || !composerSlashTrigger) {
+      return;
+    }
+
+    if (item.kind === "skill") {
+      const nextDraft = insertComposerSkillMention(draftMessage, composerSlashTrigger, item.skill);
+      onDraftMessageChange(nextDraft);
+      focusComposerAtEnd();
+      return;
+    }
+
+    if (item.action === "open-model-picker") {
+      const nextDraft = removeComposerSlashCommandTrigger(draftMessage, composerSlashTrigger);
+      onDraftMessageChange(nextDraft);
+      setKnowledgePickerOpen(false);
+      setThreadActionMenuOpen(false);
+      setModelPickerOpen(true);
+      focusComposerAtEnd();
+      return;
+    }
+
+    if (item.action === "open-skill-picker") {
+      const before = draftMessage.slice(0, composerSlashTrigger.start);
+      onDraftMessageChange(`${before}$`);
+      focusComposerAtEnd();
+      return;
+    }
+
+    const exhaustiveCheck: never = item.action;
+    return exhaustiveCheck;
+  }
+
+  function renderSlashSuggestionIcon(item: ComposerSlashSuggestion) {
+    if (item.kind === "skill") {
+      return <BookOpen size={16} />;
+    }
+
+    if (item.id === "model") {
+      return <Box size={16} />;
+    }
+
+    return <Wrench size={16} />;
+  }
+
+  function renderSlashCommandSuggestions() {
+    if (!slashSuggestionsOpen) {
+      return null;
+    }
+
+    const groups = (["快捷", "技能"] as const)
+      .map((section) => ({
+        section,
+        items: slashSuggestions.filter((item) => item.section === section),
+      }))
+      .filter((group) => group.items.length > 0);
+    let optionIndex = 0;
+
+    return (
+      <div className="chat-slash-suggestions" role="listbox" aria-label="/ 命令">
+        {groups.map((group) => (
+          <div key={group.section} className="chat-slash-suggestion-section">
+            <div className="chat-slash-suggestion-section-label">{group.section}</div>
+            {group.items.map((item) => {
+              const index = optionIndex;
+              optionIndex += 1;
+              const active = index === activeSlashSuggestionIndex;
+              const sourceLabel = item.kind === "skill" ? item.sourceLabel : "选择";
+
+              return (
+                <button
+                  key={`${item.kind}-${item.id}`}
+                  className={`chat-slash-suggestion ${active ? "active" : ""}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    applySlashSuggestion(item);
+                  }}
+                  role="option"
+                  aria-selected={active}
+                  type="button"
+                >
+                  <span className="chat-slash-suggestion-icon">{renderSlashSuggestionIcon(item)}</span>
+                  <span className="chat-slash-suggestion-copy">
+                    <span className="chat-slash-suggestion-name">{item.label}</span>
+                    <span className="chat-slash-suggestion-desc">{item.description}</span>
+                  </span>
+                  <span className="chat-slash-suggestion-source">{sourceLabel}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    );
   }
 
   function renderSkillSuggestions() {
@@ -1673,6 +1830,8 @@ export function ChatWorkspace({
           };
     const messageCopyText = buildMessageCopyText(message);
     const copied = copiedMessageId === message.id;
+    const usageBadge =
+      message.role === "assistant" ? formatChatTokenUsageBadge(message.runtimeTrace?.usage) : null;
 
     return (
       <div key={message.id} className={`message-row ${message.role === "user" ? "user" : ""}`}>
@@ -1736,6 +1895,11 @@ export function ChatWorkspace({
               >
                 {copied ? <Check size={15} /> : <Copy size={15} />}
               </button>
+              {usageBadge ? (
+                <span className="message-usage" title={usageBadge.title}>
+                  {usageBadge.label}
+                </span>
+              ) : null}
               <span className="message-time">{formatMessageTime(message.createdAt)}</span>
             </div>
           ) : null}
@@ -1813,6 +1977,7 @@ export function ChatWorkspace({
 
     return (
       <div className="chat-composer-frame">
+        {renderSlashCommandSuggestions()}
         {renderSkillSuggestions()}
         <div className="chat-composer-card">
           {renderAttachmentList(attachments, true)}

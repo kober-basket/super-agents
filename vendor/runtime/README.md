@@ -10,6 +10,9 @@ vendor/runtime/
   win32-x64/
     bin/
       python3.cmd
+      uv.exe
+      uvx.exe
+      uvw.exe
     node/
       node.exe
       npm.cmd

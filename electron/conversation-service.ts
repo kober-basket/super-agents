@@ -156,6 +156,10 @@ function parseRuntimeTrace(value: string | null): ChatMessageRuntimeTrace | unde
           ? parsed.terminalOutputs
           : {},
       thoughtText: typeof parsed.thoughtText === "string" ? parsed.thoughtText : "",
+      usage:
+        parsed.usage && typeof parsed.usage === "object" && !Array.isArray(parsed.usage)
+          ? parsed.usage
+          : undefined,
       stopReason: typeof parsed.stopReason === "string" ? parsed.stopReason : undefined,
       error: typeof parsed.error === "string" ? parsed.error : undefined,
     };

@@ -43,6 +43,11 @@ import type {
   KnowledgeCatalogPayload,
   KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
+  MemoryCatalogPayload,
+  MemoryCreateInput,
+  MemorySearchInput,
+  MemorySearchPayload,
+  MemoryUpdateInput,
   McpServerConfig,
   McpServerStatus,
   ModelProviderConfig,
@@ -59,6 +64,7 @@ import type {
   WorkspaceToolCatalog,
 } from "../src/types";
 import { KnowledgeService } from "./knowledge-service";
+import { MemoryService } from "./memory-service";
 import { createRuntimeProcessEnv } from "./runtime-support";
 import { readJsonFile, writeJsonFile } from "./store";
 import { buildWorkspaceToolCatalog } from "./tool-catalog";
@@ -97,6 +103,7 @@ const SKILL_ICON_ASSET_CANDIDATES = [
   "assets/logo.png",
 ] as const;
 const DEFAULT_SKILLS: SkillConfig[] = readBuiltinSkillConfigs();
+const activeBuiltinSkillSyncs = new Map<string, Promise<SkillConfig[]>>();
 
 const DEFAULT_CONFIG: AppConfig = {
   workspaceRoot: "",
@@ -979,6 +986,23 @@ async function resolveImportDestination(rootPath: string, preferredName: string)
 
 async function syncManagedBuiltinSkills(statePath: string) {
   const builtinRoot = getManagedBuiltinSkillsRoot(statePath);
+  const activeSync = activeBuiltinSkillSyncs.get(builtinRoot);
+  if (activeSync) {
+    return await activeSync;
+  }
+
+  const sync = syncManagedBuiltinSkillsForRoot(builtinRoot);
+  activeBuiltinSkillSyncs.set(builtinRoot, sync);
+  try {
+    return await sync;
+  } finally {
+    if (activeBuiltinSkillSyncs.get(builtinRoot) === sync) {
+      activeBuiltinSkillSyncs.delete(builtinRoot);
+    }
+  }
+}
+
+async function syncManagedBuiltinSkillsForRoot(builtinRoot: string) {
   await mkdir(builtinRoot, { recursive: true });
 
   await Promise.all(
@@ -1169,9 +1193,12 @@ function getMcpStatuses(config: AppConfig): McpServerStatus[] {
 
 export class WorkspaceService {
   private readonly knowledge: KnowledgeService;
+  private readonly memory: MemoryService;
 
   constructor(private readonly statePath: string) {
-    this.knowledge = new KnowledgeService(path.join(path.dirname(statePath), "knowledge"));
+    const dataRoot = path.dirname(statePath);
+    this.knowledge = new KnowledgeService(path.join(dataRoot, "knowledge"));
+    this.memory = new MemoryService(path.join(dataRoot, "memory"));
   }
 
   async bootstrap(): Promise<BootstrapPayload> {
@@ -1425,6 +1452,30 @@ export class WorkspaceService {
 
   async searchKnowledgeBases(input: { query: string; knowledgeBaseIds?: string[]; documentCount?: number }): Promise<KnowledgeSearchPayload> {
     return await this.knowledge.search((await this.loadState()).config, input);
+  }
+
+  async listMemories(): Promise<MemoryCatalogPayload> {
+    return await this.memory.listMemories();
+  }
+
+  async createMemory(input: MemoryCreateInput): Promise<MemoryCatalogPayload> {
+    return await this.memory.createMemory(input);
+  }
+
+  async updateMemory(input: MemoryUpdateInput): Promise<MemoryCatalogPayload> {
+    return await this.memory.updateMemory(input);
+  }
+
+  async deleteMemory(id: string): Promise<MemoryCatalogPayload> {
+    return await this.memory.deleteMemory(id);
+  }
+
+  async searchMemories(input: MemorySearchInput): Promise<MemorySearchPayload> {
+    return await this.memory.searchMemories(input);
+  }
+
+  async buildMemoryPromptContext(input: MemorySearchInput): Promise<string> {
+    return await this.memory.buildPromptContext(input);
   }
 
   async selectFiles(filePaths: string[]) {

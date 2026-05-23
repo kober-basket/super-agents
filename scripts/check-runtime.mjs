@@ -31,6 +31,9 @@ const required = [
 if (process.platform === "win32") {
   required.push(path.join(platformRoot, "python", "python.exe"));
   required.push(path.join(platformRoot, "bin", "python3.cmd"));
+  required.push(path.join(platformRoot, "bin", "uv.exe"));
+  required.push(path.join(platformRoot, "bin", "uvx.exe"));
+  required.push(path.join(platformRoot, "bin", "uvw.exe"));
 }
 
 const missing = [];
@@ -51,6 +54,9 @@ if (missing.length > 0) {
   if (process.platform === "win32") {
     console.error(`- vendor/runtime/${platformKey}/python/python.exe`);
     console.error(`- vendor/runtime/${platformKey}/bin/python3.cmd`);
+    console.error(`- vendor/runtime/${platformKey}/bin/uv.exe`);
+    console.error(`- vendor/runtime/${platformKey}/bin/uvx.exe`);
+    console.error(`- vendor/runtime/${platformKey}/bin/uvw.exe`);
   }
   process.exit(1);
 }

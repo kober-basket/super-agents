@@ -2,6 +2,8 @@ export type AgentRole = "assistant" | "coordinator" | "worker" | "specialist";
 export type AgentPromptMode = "replace-default" | "append-default";
 export type PermissionMode = "default" | "allow" | "ask" | "deny";
 
+import type { ChatModelTokenUsage } from "../../src/types";
+
 export type AgentMessageRole = "system" | "user" | "assistant" | "tool";
 
 export interface AgentMessage {
@@ -109,6 +111,7 @@ export type ModelEvent =
   | { type: "reasoning_delta"; text: string; reasoningContent?: string }
   | { type: "status_delta"; text: string }
   | { type: "text_delta"; text: string }
+  | { type: "usage"; usage: ChatModelTokenUsage }
   | { type: "tool_call_delta"; toolCallId?: string; name?: string }
   | { type: "tool_call"; toolCall: ToolCall }
   | { type: "done"; stopReason: string };
@@ -143,6 +146,7 @@ export type AgentEvent =
   | { type: "status_delta"; sessionId: string; agentId: string; text: string }
   | { type: "message_delta"; sessionId: string; agentId: string; text: string }
   | { type: "message_replace"; sessionId: string; agentId: string; text: string }
+  | { type: "token_usage"; sessionId: string; agentId: string; usage: ChatModelTokenUsage }
   | { type: "tool_call_started"; sessionId: string; agentId: string; toolCall: ToolCall }
   | { type: "tool_call_finished"; sessionId: string; agentId: string; toolCall: ToolCall; result: ToolResult }
   | { type: "permission_denied"; sessionId: string; agentId: string; toolCall: ToolCall; reason: string }
