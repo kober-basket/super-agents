@@ -15,7 +15,7 @@ export function createSkillToolDefinition(workspaceService: WorkspaceService): T
     name: "skill",
     aliases: ["load_skill", "use_skill"],
     description:
-      "Load a workspace skill by name before answering. Use when the user's request matches an available skill or explicitly starts with $skill-name.",
+      "按名称加载工作区技能后再回答。用户请求匹配某个可用技能，或明确以 $skill-name 开头时使用。",
     risk: "read",
     isConcurrencySafe: false,
     inputSchema: {

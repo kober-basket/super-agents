@@ -1,6 +1,6 @@
 interface:
   display_name: "Super Agents 管理"
-  short_description: "Operate Super Agents local app state through the JSON-first CLI harness."
+  short_description: "通过 JSON 优先的 CLI harness 管理 Super Agents 本地应用状态。"
   default_prompt: "Use $super-agents-admin to inspect and administer Super Agents app state with JSON output, named sessions, and reversible config changes."
   brand_color: "#2563eb"
 

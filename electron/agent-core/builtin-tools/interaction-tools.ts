@@ -6,7 +6,7 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
   return [
     {
       name: "question",
-      description: "Ask the user one or more structured questions and wait for their answers before continuing.",
+      description: "向用户提出一个或多个结构化问题，并等待回答后再继续。",
       risk: "read",
       inputSchema: {
         type: "object",

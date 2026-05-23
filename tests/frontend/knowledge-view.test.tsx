@@ -175,7 +175,7 @@ test("module titles use one compact shared size and aligned title rows", () => {
   assert.match(css, /--module-title-size:\s*28px;/);
   assert.match(
     css,
-    /\.skills-toolbar\s*{[^}]*min-height:\s*var\(--module-toolbar-title-row-height\);/s,
+    /\.skills-toolbar\s*{[^}]*align-items:\s*center;[^}]*min-height:\s*var\(--module-toolbar-title-row-height\);/s,
   );
   assert.match(
     css,
@@ -183,7 +183,7 @@ test("module titles use one compact shared size and aligned title rows", () => {
   );
   assert.match(
     css,
-    /\.knowledge-sidebar,\s*\.memory-sidebar\s*{[^}]*padding:\s*var\(--module-sidebar-padding\);/s,
+    /\.memory-sidebar,\s*\.knowledge-sidebar\s*{[^}]*padding:\s*var\(--module-sidebar-padding\);/s,
   );
   assert.match(
     css,

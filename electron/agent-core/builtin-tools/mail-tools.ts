@@ -207,7 +207,7 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
     {
       name: "mail_auth",
       description:
-        "Open a private in-chat mail authorization form for adding or connecting an email account. Use this when the user asks to login, connect, add, or authorize a mailbox. The model never receives passwords, authorization codes, OAuth codes, or tokens.",
+        "打开私密的会话内邮箱授权表单，用于添加或连接邮箱账号。用户要求登录、连接、添加或授权邮箱时使用；模型不会收到密码、授权码、OAuth code 或 token。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -255,7 +255,7 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
     {
       name: "mail",
       description:
-        "Inspect configured mail accounts and read mail. Actions: infer_setup, list_accounts, search, read. Use mail_draft before sending.",
+        "查看已配置的邮箱账号并读取邮件。支持 infer_setup、list_accounts、search、read；发送前请先使用 mail_draft。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -326,7 +326,7 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
     },
     {
       name: "mail_draft",
-      description: "Create a local mail draft. This does not send mail. Use mail_send only after the user asks to send.",
+      description: "创建本地邮件草稿，不会直接发送。只有用户明确要求发送后才使用 mail_send。",
       risk: "write",
       inputSchema: {
         type: "object",
@@ -359,7 +359,7 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
     },
     {
       name: "mail_send",
-      description: "Send an existing local mail draft. This is a write action and should only be used after explicit user intent.",
+      description: "发送已有的本地邮件草稿。这是写入/发送动作，只能在用户明确表达发送意图后使用。",
       risk: "write",
       inputSchema: {
         type: "object",

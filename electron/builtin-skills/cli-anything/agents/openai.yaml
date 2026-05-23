@@ -1,4 +1,4 @@
 interface:
   display_name: "CLI-Anything"
-  short_description: "Build or refine CLI-Anything harnesses."
+  short_description: "构建或改进 CLI-Anything harness。"
   default_prompt: "Use CLI-Anything to build, refine, test, or validate a harness for the user's target software or source repository."

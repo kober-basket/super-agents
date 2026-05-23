@@ -132,7 +132,7 @@ export function createMemoryToolDefinition(store?: MemoryToolStore | null): Tool
   return {
     name: "memory",
     description:
-      "List or maintain long-term user/workspace memory. Use list before changing memory when possible. Writes require approval.",
+      "列出或维护用户/工作区长期记忆。尽量先 list 再修改；写入和删除都需要审批。",
     risk: "read",
     inputSchema: {
       type: "object",

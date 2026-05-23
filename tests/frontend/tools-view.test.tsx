@@ -118,12 +118,14 @@ test("tools list icons use a flat low-depth treatment instead of beveled layers"
   );
 
   assert.match(block, /border-radius:\s*12px;/);
-  assert.match(block, /background:\s*color-mix\(in srgb,\s*var\(--icon-start\)\s+18%,\s*#ffffff\);/);
-  assert.match(block, /border-color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+16%,\s*#ffffff\);/);
-  assert.match(block, /color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+92%,\s*#1f2937\);/);
+  assert.match(block, /background:\s*color-mix\(in srgb,\s*var\(--icon-start\)\s+26%,\s*#ffffff\);/);
+  assert.match(block, /border-color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+24%,\s*#ffffff\);/);
+  assert.match(block, /color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+98%,\s*#1f2937\);/);
   assert.match(block, /box-shadow:\s*none;/);
   assert.doesNotMatch(block, /linear-gradient|inset/);
   assert.doesNotMatch(hoverBlock, /linear-gradient|inset/);
+  assert.match(hoverBlock, /border-color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+30%,\s*#ffffff\);/);
+  assert.match(hoverBlock, /background:\s*color-mix\(in srgb,\s*var\(--icon-start\)\s+30%,\s*#ffffff\);/);
   assert.match(hoverBlock, /box-shadow:\s*0\s+4px\s+10px\s+color-mix\(in srgb,\s*var\(--icon-shadow\)\s+8%,\s*transparent\);/);
   assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium::before/s);
   assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium::before\s*{[^}]*display:\s*none;/s);
@@ -132,7 +134,7 @@ test("tools list icons use a flat low-depth treatment instead of beveled layers"
 });
 
 test("built-in tool icons use purpose-specific browser and mail symbols", () => {
-  const html = renderToolsView([
+  const browserHtml = renderToolsView([
     {
       id: "builtin:browser_snapshot",
       name: "browser_snapshot",
@@ -153,6 +155,8 @@ test("built-in tool icons use purpose-specific browser and mail symbols", () => 
       category: "browser",
       categoryLabel: "浏览器",
     },
+  ]);
+  const mailHtml = renderToolsView([
     {
       id: "builtin:mail_auth",
       name: "mail_auth",
@@ -175,14 +179,14 @@ test("built-in tool icons use purpose-specific browser and mail symbols", () => 
     },
   ]);
 
-  assert.match(html, /lucide-camera/);
-  assert.match(html, /lucide-mouse-pointer-click/);
-  assert.match(html, /lucide-mail-check/);
-  assert.match(html, /lucide-send/);
+  assert.match(browserHtml, /lucide-camera/);
+  assert.match(browserHtml, /lucide-mouse-pointer-click/);
+  assert.match(mailHtml, /lucide-mail-check/);
+  assert.match(mailHtml, /lucide-send/);
 });
 
 test("built-in tool icons fall back by catalog category before generic wrench", () => {
-  const html = renderToolsView([
+  const contextHtml = renderToolsView([
     {
       id: "builtin:memory",
       name: "memory",
@@ -193,6 +197,8 @@ test("built-in tool icons fall back by catalog category before generic wrench", 
       category: "context",
       categoryLabel: "上下文",
     },
+  ]);
+  const browserHtml = renderToolsView([
     {
       id: "builtin:custom_browser_probe",
       name: "custom_browser_probe",
@@ -205,9 +211,10 @@ test("built-in tool icons fall back by catalog category before generic wrench", 
     },
   ]);
 
-  assert.match(html, /lucide-database/);
-  assert.match(html, /lucide-panel-top/);
-  assert.doesNotMatch(html, /lucide-wrench/);
+  assert.match(contextHtml, /lucide-database/);
+  assert.match(browserHtml, /lucide-panel-top/);
+  assert.doesNotMatch(contextHtml, /lucide-wrench/);
+  assert.doesNotMatch(browserHtml, /lucide-wrench/);
 });
 
 test("tools page keeps tool descriptions compact and visually grouped", () => {
@@ -244,7 +251,7 @@ test("tools page keeps tool descriptions compact and visually grouped", () => {
   assert.doesNotMatch(css, /\.skill-list-row\s+\.skill-tile-copy p\s*{[^}]*line-height:\s*17px/s);
 });
 
-test("tools page groups built-in tools by catalog category", () => {
+test("tools page switches built-in categories through tabs instead of rendering every group", () => {
   const html = renderToolsView([
     {
       id: "builtin:read",
@@ -255,6 +262,7 @@ test("tools page groups built-in tools by catalog category", () => {
       description: "Read a file.",
       category: "workspace",
       categoryLabel: "工作区",
+      categoryOrder: 10,
     },
     {
       id: "builtin:browser_snapshot",
@@ -265,6 +273,7 @@ test("tools page groups built-in tools by catalog category", () => {
       description: "Snapshot the browser.",
       category: "browser",
       categoryLabel: "浏览器",
+      categoryOrder: 30,
     },
     {
       id: "builtin:mail",
@@ -275,15 +284,46 @@ test("tools page groups built-in tools by catalog category", () => {
       description: "Read mail.",
       category: "mail",
       categoryLabel: "邮件",
+      categoryOrder: 60,
     },
   ]);
 
-  assert.match(html, /class="tool-category"/);
+  assert.match(html, /class="tool-category-tabs"/);
+  assert.match(html, /role="tablist"[^>]*aria-label="内置工具分类"/);
+  assert.match(html, /<button(?=[^>]*role="tab")(?=[^>]*aria-selected="true")[^>]*>\s*<span>工作区<\/span>\s*<em>1<\/em>/s);
+  assert.match(
+    html,
+    /<button(?=[^>]*role="tab")(?=[^>]*aria-selected="false")[^>]*>\s*<span>浏览器<\/span>\s*<em>1<\/em>/s,
+  );
+  assert.match(
+    html,
+    /<button(?=[^>]*role="tab")(?=[^>]*aria-selected="false")[^>]*>\s*<span>邮件<\/span>\s*<em>1<\/em>/s,
+  );
+  assert.match(html, /class="[^"]*\btool-category-panel\b[^"]*"/);
+  assert.match(html, /id="tool-category-panel-workspace"/);
+  assert.match(html, /aria-labelledby="tool-category-tab-workspace"/);
   assert.ok(html.indexOf("工作区") < html.indexOf("read"));
-  assert.ok(html.indexOf("浏览器") < html.indexOf("browser_snapshot"));
-  assert.ok(html.indexOf("邮件") < html.indexOf("mail"));
-  assert.ok(html.indexOf("工作区") < html.indexOf("浏览器"));
-  assert.ok(html.indexOf("浏览器") < html.indexOf("邮件"));
+  assert.doesNotMatch(html, /class="tool-category-head"/);
+  assert.doesNotMatch(html, /<h4>工作区<\/h4>/);
+  assert.doesNotMatch(html, /<span>1 个<\/span>/);
+  assert.doesNotMatch(html, /<strong title="browser_snapshot">browser_snapshot<\/strong>/);
+  assert.doesNotMatch(html, /<strong title="mail">mail<\/strong>/);
+});
+
+test("tool category tabs stay borderless and compact", () => {
+  const css = readSource("src/styles.css");
+  const tabsBlock = extractCssBlock(css, /\.tool-category-tabs\s*{(?<body>[^}]*)}/s);
+  const tabBlock = extractCssBlock(css, /\.tool-category-tab\s*{(?<body>[^}]*)}/s);
+  const activeTabBlock = extractCssBlock(css, /\.tool-category-tab\.active\s*{(?<body>[^}]*)}/s);
+
+  assert.match(tabsBlock, /display:\s*flex;/);
+  assert.match(tabsBlock, /overflow-x:\s*auto;/);
+  assert.match(tabsBlock, /border:\s*0;/);
+  assert.match(tabsBlock, /background:\s*transparent;/);
+  assert.match(tabBlock, /border:\s*0;/);
+  assert.doesNotMatch(tabBlock, /border-color:/);
+  assert.doesNotMatch(activeTabBlock, /border|box-shadow/);
+  assert.match(activeTabBlock, /background:/);
 });
 
 test("tools page does not show an empty mcp service prompt", () => {

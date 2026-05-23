@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import {
   BrainCircuit,
@@ -73,6 +73,7 @@ const TOOL_ICON_TONES = [
 
 type ToolIconTone = (typeof TOOL_ICON_TONES)[number];
 type ToolVisual = { icon: LucideIcon; tone: ToolIconTone };
+type BuiltinToolGroup = { key: string; label: string; order: number; tools: WorkspaceTool[] };
 
 const BUILTIN_TOOL_VISUALS: Partial<Record<string, ToolVisual>> = {
   apply_patch: { icon: GitPullRequest, tone: "skill-accent-violet" },
@@ -145,9 +146,14 @@ export function ToolsView({
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [mcpModalServerId, setMcpModalServerId] = useState<string | null>(null);
   const [pendingNewServer, setPendingNewServer] = useState(false);
+  const [activeBuiltinCategory, setActiveBuiltinCategory] = useState<string | null>(null);
 
-  const builtinTools = tools.filter((tool) => tool.source === "builtin");
-  const builtinToolGroups = groupBuiltinTools(builtinTools);
+  const builtinToolGroups = useMemo(
+    () => groupBuiltinTools(tools.filter((tool) => tool.source === "builtin")),
+    [tools],
+  );
+  const activeBuiltinGroup =
+    builtinToolGroups.find((group) => group.key === activeBuiltinCategory) ?? builtinToolGroups[0] ?? null;
 
   useEffect(() => {
     if (!pendingNewServer || mcpServers.length === 0) return;
@@ -156,6 +162,16 @@ export function ToolsView({
     setMcpModalOpen(true);
     setPendingNewServer(false);
   }, [mcpServers, pendingNewServer]);
+
+  useEffect(() => {
+    if (builtinToolGroups.length === 0) {
+      if (activeBuiltinCategory !== null) setActiveBuiltinCategory(null);
+      return;
+    }
+    if (!builtinToolGroups.some((group) => group.key === activeBuiltinCategory)) {
+      setActiveBuiltinCategory(builtinToolGroups[0].key);
+    }
+  }, [activeBuiltinCategory, builtinToolGroups]);
 
   function openMcpModal(serverId?: string) {
     setMcpModalServerId(serverId ?? null);
@@ -221,19 +237,44 @@ export function ToolsView({
 
           {builtinToolGroups.length > 0 ? (
             <div className="tool-category-list">
-              {builtinToolGroups.map((group) => (
-                <section key={group.key} className="tool-category">
-                  <div className="tool-category-head">
-                    <h4>{group.label}</h4>
-                    <span>{group.tools.length} 个</span>
-                  </div>
+              <div className="tool-category-tabs" role="tablist" aria-label="内置工具分类">
+                {builtinToolGroups.map((group) => {
+                  const active = activeBuiltinGroup?.key === group.key;
+                  const tabId = createToolCategoryDomId("tool-category-tab", group.key);
+                  const panelId = createToolCategoryDomId("tool-category-panel", group.key);
+                  return (
+                    <button
+                      key={group.key}
+                      aria-controls={panelId}
+                      aria-selected={active}
+                      className={clsx("tool-category-tab", active && "active")}
+                      id={tabId}
+                      onClick={() => setActiveBuiltinCategory(group.key)}
+                      role="tab"
+                      type="button"
+                    >
+                      <span>{group.label}</span>
+                      <em>{group.tools.length}</em>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {activeBuiltinGroup ? (
+                <section
+                  key={activeBuiltinGroup.key}
+                  aria-labelledby={createToolCategoryDomId("tool-category-tab", activeBuiltinGroup.key)}
+                  className="tool-category tool-category-panel"
+                  id={createToolCategoryDomId("tool-category-panel", activeBuiltinGroup.key)}
+                  role="tabpanel"
+                >
                   <div className="tool-list">
-                    {group.tools.map((tool, index) => (
+                    {activeBuiltinGroup.tools.map((tool, index) => (
                       <BuiltinToolRow key={tool.id} index={index} tool={tool} />
                     ))}
                   </div>
                 </section>
-              ))}
+              ) : null}
             </div>
           ) : (
             <div className="empty-panel compact">
@@ -283,8 +324,8 @@ function BuiltinToolRow({ index, tool }: { index: number; tool: WorkspaceTool })
   );
 }
 
-function groupBuiltinTools(tools: WorkspaceTool[]) {
-  const groups = new Map<string, { key: string; label: string; order: number; tools: WorkspaceTool[] }>();
+function groupBuiltinTools(tools: WorkspaceTool[]): BuiltinToolGroup[] {
+  const groups = new Map<string, BuiltinToolGroup>();
   for (const tool of tools) {
     const key = tool.category ?? "other";
     const group = groups.get(key) ?? {
@@ -306,6 +347,10 @@ function groupBuiltinTools(tools: WorkspaceTool[]) {
       if (categoryOrder !== 0) return categoryOrder;
       return left.label.localeCompare(right.label, "zh-CN");
     });
+}
+
+function createToolCategoryDomId(prefix: string, key: string) {
+  return `${prefix}-${key.replace(/[^a-z0-9_-]+/gi, "-")}`;
 }
 
 function ToolIcon({ icon: Icon, label, tone }: { icon: LucideIcon; label: string; tone: ToolIconTone }) {

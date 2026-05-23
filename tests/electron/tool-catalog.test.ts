@@ -65,6 +65,14 @@ test("built-in tool catalog exposes native model tools without workspace aliases
   }
 });
 
+test("built-in tool catalog exposes Chinese descriptions", () => {
+  const tools = createBuiltinWorkspaceTools();
+
+  for (const tool of tools) {
+    assert.match(tool.description ?? "", /[\u4e00-\u9fff]/, `${tool.name} should have a Chinese description`);
+  }
+});
+
 test("workspace tool catalog combines built-in tools and concrete MCP tools only", () => {
   const mcpResult: McpServerToolsResult = {
     serverId: "server-1",

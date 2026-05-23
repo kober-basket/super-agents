@@ -729,7 +729,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     {
       name: "read",
       aliases: ["workspace_read_file"],
-      description: "Read a UTF-8 text file. Use a project-relative path for project files or an absolute path when the user explicitly names a local file or folder.",
+      description: "读取 UTF-8 文本文件。项目内文件使用相对路径；只有当用户明确给出本机文件或文件夹时才使用绝对路径。",
       risk: "read",
       isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {
@@ -763,7 +763,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     {
       name: "list",
       aliases: ["workspace_list_directory"],
-      description: "List files and folders. Use a project-relative path for project directories or an absolute path when the user explicitly names a local folder.",
+      description: "列出文件和文件夹。项目目录使用相对路径；只有当用户明确给出本机文件夹时才使用绝对路径。",
       risk: "read",
       isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {
@@ -796,7 +796,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     {
       name: "grep",
       aliases: ["workspace_search_text"],
-      description: "Search text. Uses ripgrep when available and falls back to built-in search. Use a project-relative path for project searches or an absolute path when the user explicitly names a local folder.",
+      description: "搜索文本内容。优先使用 ripgrep，不可用时回退到内置搜索；项目内搜索用相对路径，用户明确指定本机目录时可用绝对路径。",
       risk: "read",
       isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {
@@ -858,7 +858,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     },
     {
       name: "glob",
-      description: "Find files by glob pattern. Use a project-relative path for project searches or an absolute path when the user explicitly names a local folder.",
+      description: "按 glob 模式查找文件。项目内搜索用相对路径；用户明确指定本机目录时可用绝对路径。",
       risk: "read",
       isConcurrencySafe: (input) => isRelativeWorkspacePathInput(input),
       inputSchema: {
@@ -925,7 +925,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     {
       name: "write",
       aliases: ["workspace_write_file"],
-      description: "Write UTF-8 text to a file inside the current project. Creates parent directories as needed.",
+      description: "向当前项目内的文件写入 UTF-8 文本，并在需要时创建父目录。",
       risk: "write",
       inputSchema: {
         type: "object",
@@ -956,7 +956,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     },
     {
       name: "edit",
-      description: "Replace text in a UTF-8 file inside the current project.",
+      description: "替换当前项目内 UTF-8 文件中的指定文本。",
       risk: "write",
       inputSchema: {
         type: "object",
@@ -1008,7 +1008,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     },
     {
       name: "multi_edit",
-      description: "Apply multiple exact string replacements to one UTF-8 file atomically.",
+      description: "对一个 UTF-8 文件按顺序执行多处精确文本替换，并保证整体原子写入。",
       risk: "write",
       inputSchema: {
         type: "object",
@@ -1067,7 +1067,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     },
     {
       name: "apply_patch",
-      description: "Apply a structured patch with add, update, delete, and optional move file operations.",
+      description: "应用结构化补丁，支持新增、更新、删除文件，并可选择移动文件。",
       risk: "write",
       inputSchema: {
         type: "object",
@@ -1151,7 +1151,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     {
       name: "web_search",
       description:
-        "Search the web with a query and return result titles, URLs, and snippets. Use this for current or recent information. Use web_fetch only after you already have a specific URL.",
+        "按查询词搜索网页，并返回结果标题、URL 和摘要。需要当前或近期信息时使用；已有具体 URL 后再使用 web_fetch。",
       risk: "network",
       isConcurrencySafe: true,
       inputSchema: {
@@ -1240,7 +1240,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     {
       name: "web_fetch",
       description:
-        "Fetch a specific HTTP or HTTPS URL and return text, simplified markdown text, or HTML content. This is not a search tool; use web_search when you have a query instead of a URL.",
+        "获取指定 HTTP 或 HTTPS URL，并返回文本、简化 Markdown 文本或 HTML 内容。这不是搜索工具；只有查询词没有 URL 时请用 web_search。",
       risk: "network",
       isConcurrencySafe: true,
       inputSchema: {
@@ -1308,7 +1308,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
       name: "bash",
       aliases: ["workspace_shell"],
       description:
-        "Run a concrete shell command in the current project. The command field is required; never call this tool with an empty object.",
+        "在当前项目中运行明确的 shell 命令。command 字段必填，不能用空对象调用。",
       risk: "shell",
       inputSchema: {
         type: "object",

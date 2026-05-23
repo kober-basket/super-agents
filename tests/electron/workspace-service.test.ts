@@ -419,6 +419,12 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     assert.match(context, /- wx-cli:/);
     assert.doesNotMatch(context, /Anatomy of a Skill/);
     for (const skill of bootstrap.config.skills.filter((item) => item.system)) {
+      const visibleName = skill.displayName || skill.name;
+      const visibleDescription = skill.shortDescription || skill.description;
+      if (skill.id !== "cli-anything") {
+        assert.match(visibleName, /[\u4e00-\u9fff]/, `${skill.id} should expose a Chinese UI name`);
+      }
+      assert.match(visibleDescription, /[\u4e00-\u9fff]/, `${skill.id} should expose a Chinese UI description`);
       const visibleText = [
         skill.description,
         skill.displayName,
@@ -616,7 +622,7 @@ test("workspace service lists built-in agent tools instead of runtime tools", as
     ]);
     assert.equal(catalog.tools.every((tool) => tool.source === "builtin"), true);
     assert.equal(catalog.tools.some((tool) => String(tool.source) === "runtime"), false);
-    assert.match(catalog.tools.find((tool) => tool.name === "read")?.description ?? "", /UTF-8 text file/i);
+    assert.match(catalog.tools.find((tool) => tool.name === "read")?.description ?? "", /读取 UTF-8 文本文件/);
   } finally {
     await service.shutdown();
     await rm(tempDir, { recursive: true, force: true });

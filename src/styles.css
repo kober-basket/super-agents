@@ -73,8 +73,16 @@
   --module-title-size: 28px;
   --module-title-line-height: 1.12;
   --module-toolbar-title-row-height: 44px;
+  --module-sidebar-width: 324px;
   --module-sidebar-title-row-height: 36px;
   --module-sidebar-padding: 28px 22px 22px;
+  --module-sidebar-section-gap: 16px;
+  --module-sidebar-list-gap: 8px;
+  --module-sidebar-list-padding: 0 4px 2px 0;
+  --module-sidebar-row-height: 66px;
+  --module-sidebar-row-radius: 12px;
+  --module-sidebar-row-gap: 11px;
+  --module-sidebar-icon-size: 36px;
   --chat-content-font-size: var(--font-size-content);
   --chat-content-line-height: 1.64;
   --chat-thread-column-width: 820px;
@@ -5385,7 +5393,7 @@ textarea {
 
 .skills-toolbar {
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   min-height: var(--module-toolbar-title-row-height);
@@ -6376,7 +6384,75 @@ textarea {
 
 .tool-category-list {
   display: grid;
-  gap: 18px;
+  gap: 12px;
+}
+
+.tool-category-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  scrollbar-width: none;
+}
+
+.tool-category-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tool-category-tab {
+  min-height: 34px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.tool-category-tab:hover,
+.tool-category-tab:focus-visible {
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  color: var(--text);
+}
+
+.tool-category-tab.active {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+}
+
+.tool-category-tab em {
+  min-width: 20px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+  color: var(--muted);
+  font-style: normal;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  text-align: center;
+}
+
+.tool-category-tab.active em {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+
+.tool-category-panel {
+  display: grid;
+  gap: 10px;
 }
 
 .tool-category {
@@ -6437,7 +6513,6 @@ textarea {
 
 .memory-shell {
   display: grid;
-  grid-template-columns: 292px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -6447,7 +6522,6 @@ textarea {
 .memory-sidebar {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 14px;
   min-height: 0;
   border-right: 1px solid var(--line-soft);
   background:
@@ -6947,7 +7021,6 @@ textarea {
 
 .knowledge-shell {
   display: grid;
-  grid-template-columns: 324px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -6956,10 +7029,14 @@ textarea {
     var(--panel);
 }
 
+.memory-shell,
+.knowledge-shell {
+  grid-template-columns: var(--module-sidebar-width) minmax(0, 1fr);
+}
+
 .knowledge-sidebar {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 18px;
   min-height: 0;
   overflow: hidden;
   border-right: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
@@ -6968,8 +7045,9 @@ textarea {
     var(--panel-soft);
 }
 
-.knowledge-sidebar,
-.memory-sidebar {
+.memory-sidebar,
+.knowledge-sidebar {
+  gap: var(--module-sidebar-section-gap);
   padding: var(--module-sidebar-padding);
 }
 
@@ -7043,17 +7121,27 @@ textarea {
   padding: 2px 4px 2px 0;
 }
 
+.memory-type-list,
+.knowledge-base-list {
+  gap: var(--module-sidebar-list-gap);
+  padding: var(--module-sidebar-list-padding);
+}
+
 .knowledge-base-icon {
   --kb-tone: #607d95;
   --kb-tone-soft: rgba(96, 125, 149, 0.12);
-  width: 36px;
-  height: 36px;
   display: grid;
   place-items: center;
   border-radius: 10px;
   background: var(--kb-tone-soft);
   border: 1px solid color-mix(in srgb, var(--kb-tone) 20%, var(--line));
   color: var(--kb-tone);
+}
+
+.memory-type-icon,
+.knowledge-base-icon {
+  width: var(--module-sidebar-icon-size);
+  height: var(--module-sidebar-icon-size);
 }
 
 .knowledge-base-row.tone-0,
@@ -7116,9 +7204,7 @@ textarea {
   position: relative;
   display: block;
   width: 100%;
-  min-height: 68px;
   padding: 0;
-  border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
   background: color-mix(in srgb, var(--panel) 68%, transparent);
   color: var(--muted-strong);
@@ -7128,16 +7214,27 @@ textarea {
 .knowledge-base-select {
   min-width: 0;
   width: 100%;
-  min-height: 66px;
+  min-height: calc(var(--module-sidebar-row-height) - 2px);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 11px;
   padding: 12px;
   border: 0;
   background: transparent;
   color: inherit;
   text-align: left;
+}
+
+.memory-type-row,
+.knowledge-base-row {
+  min-height: var(--module-sidebar-row-height);
+  border-radius: var(--module-sidebar-row-radius);
+}
+
+.memory-type-row,
+.knowledge-base-select {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--module-sidebar-row-gap);
 }
 
 .knowledge-base-row:hover {
@@ -15225,9 +15322,9 @@ textarea:focus,
 
 .tools-page .tool-list .skill-icon-shell.skill-icon-premium {
   border-radius: 12px;
-  background: color-mix(in srgb, var(--icon-start) 18%, #ffffff);
-  border-color: color-mix(in srgb, var(--icon-end) 16%, #ffffff);
-  color: color-mix(in srgb, var(--icon-end) 92%, #1f2937);
+  background: color-mix(in srgb, var(--icon-start) 26%, #ffffff);
+  border-color: color-mix(in srgb, var(--icon-end) 24%, #ffffff);
+  color: color-mix(in srgb, var(--icon-end) 98%, #1f2937);
   box-shadow: none;
 }
 
@@ -15249,8 +15346,8 @@ textarea:focus,
 
 .tools-page .tool-list .skill-tile:hover .skill-icon-shell.skill-icon-premium,
 .tools-page .tool-list .skill-tile:focus-visible .skill-icon-shell.skill-icon-premium {
-  border-color: color-mix(in srgb, var(--icon-end) 24%, #ffffff);
-  background: color-mix(in srgb, var(--icon-start) 24%, #ffffff);
+  border-color: color-mix(in srgb, var(--icon-end) 30%, #ffffff);
+  background: color-mix(in srgb, var(--icon-start) 30%, #ffffff);
   box-shadow: 0 4px 10px color-mix(in srgb, var(--icon-shadow) 8%, transparent);
 }
 

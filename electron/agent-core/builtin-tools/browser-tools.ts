@@ -101,7 +101,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
   return [
     {
       name: "browser_list_pages",
-      description: "List the visible internal browser webview pages registered in the right-side Browser workspace.",
+      description: "列出右侧 Browser 工作区中已注册、用户可见的内置浏览器 webview 页面。",
       risk: "read",
       isConcurrencySafe: true,
       inputSchema: {
@@ -119,7 +119,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_select_page",
-      description: "Select an internal browser page by id for subsequent browser_* tool calls.",
+      description: "按页面 id 选择一个内置浏览器页面，供后续 browser_* 工具调用使用。",
       risk: "read",
       inputSchema: {
         type: "object",
@@ -138,7 +138,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_navigate",
-      description: "Navigate the selected internal browser page to a URL, or use back, forward, or reload.",
+      description: "让选中的内置浏览器页面打开 URL，或执行后退、前进、刷新。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -163,7 +163,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     {
       name: "browser_snapshot",
       description:
-        "Take a text snapshot of the selected internal browser page. Use fresh uid values from this output for browser_click and browser_fill.",
+        "获取选中内置浏览器页面的文本快照。browser_click 和 browser_fill 必须使用这次输出中的最新 uid。",
       risk: "read",
       inputSchema: {
         type: "object",
@@ -183,7 +183,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_click",
-      description: "Click an element in the selected internal browser page using a uid from browser_snapshot.",
+      description: "使用 browser_snapshot 中的 uid 点击选中内置浏览器页面里的元素。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -209,7 +209,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_fill",
-      description: "Fill an input, textarea, select, checkbox, radio, or editable element using a uid from browser_snapshot.",
+      description: "使用 browser_snapshot 中的 uid 填写输入框、文本域、下拉框、复选框、单选框或可编辑元素。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -236,7 +236,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     {
       name: "browser_fill_form",
       description:
-        "Fill multiple inputs, selects, checkboxes, radios, or editable elements using fresh uid values from browser_snapshot.",
+        "使用 browser_snapshot 中的最新 uid 一次填写多个输入框、下拉框、复选框、单选框或可编辑元素。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -271,7 +271,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_hover",
-      description: "Hover over an element in the selected internal browser page using a uid from browser_snapshot.",
+      description: "使用 browser_snapshot 中的 uid 在选中内置浏览器页面里悬停到某个元素上。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -290,7 +290,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_drag",
-      description: "Drag one element onto another in the selected internal browser page using uid values from browser_snapshot.",
+      description: "使用 browser_snapshot 中的 uid，在选中内置浏览器页面里把一个元素拖到另一个元素上。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -313,7 +313,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_type_text",
-      description: "Type text into the currently focused editable element in the selected internal browser page.",
+      description: "向选中内置浏览器页面当前聚焦的可编辑元素输入文本。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -338,7 +338,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_upload_file",
-      description: "Upload a local file through a file input element using a uid from browser_snapshot.",
+      description: "使用 browser_snapshot 中的 uid，通过文件输入元素上传本地文件。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -366,7 +366,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_press_key",
-      description: "Press a key or key combination in the selected internal browser page, such as Enter or Control+L.",
+      description: "在选中的内置浏览器页面中按下按键或组合键，例如 Enter 或 Control+L。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -385,7 +385,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_wait_for",
-      description: "Wait until any of the requested text appears in the selected internal browser page.",
+      description: "等待指定文本之一出现在选中的内置浏览器页面中。",
       risk: "read",
       inputSchema: {
         type: "object",
@@ -412,7 +412,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     {
       name: "browser_evaluate",
       description:
-        "Evaluate a JavaScript function in the selected internal browser page. Use for inspection data that browser_snapshot cannot expose.",
+        "在选中的内置浏览器页面中执行 JavaScript 函数，用于获取 browser_snapshot 无法暴露的检查数据。",
       risk: "network",
       inputSchema: {
         type: "object",
@@ -438,7 +438,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_list_console_messages",
-      description: "List console messages captured from the selected internal browser page since the last navigation.",
+      description: "列出选中内置浏览器页面自上次导航以来捕获到的控制台消息。",
       risk: "read",
       isConcurrencySafe: true,
       inputSchema: {
@@ -465,7 +465,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_get_console_message",
-      description: "Get one console message by msgid from browser_list_console_messages.",
+      description: "按 msgid 获取 browser_list_console_messages 列出的单条控制台消息。",
       risk: "read",
       isConcurrencySafe: true,
       inputSchema: {
@@ -490,7 +490,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_list_network_requests",
-      description: "List network requests captured from the selected internal browser page since the last navigation.",
+      description: "列出选中内置浏览器页面自上次导航以来捕获到的网络请求。",
       risk: "read",
       isConcurrencySafe: true,
       inputSchema: {
@@ -517,7 +517,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_get_network_request",
-      description: "Get one captured network request by reqid, optionally saving request or response bodies to files.",
+      description: "按 reqid 获取捕获到的单个网络请求，并可选择把请求体或响应体保存为文件。",
       risk: "write",
       inputSchema: {
         type: "object",
@@ -541,7 +541,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
     },
     {
       name: "browser_screenshot",
-      description: "Capture a screenshot of the selected internal browser page. Provide filePath to save it.",
+      description: "截取选中内置浏览器页面的截图；提供 filePath 时会保存到文件。",
       risk: "write",
       inputSchema: {
         type: "object",

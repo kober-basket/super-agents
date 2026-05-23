@@ -83,6 +83,38 @@ test("memory type list borrows knowledge sidebar tone treatment", () => {
   assert.doesNotMatch(css, /\.memory-type-row\.active\s*{[^}]*background:\s*#fff;/s);
 });
 
+test("memory and knowledge sidebars share list position and row rhythm", () => {
+  const css = readSource("src/styles.css");
+
+  assert.match(css, /--module-sidebar-width:\s*324px;/);
+  assert.match(css, /--module-sidebar-section-gap:\s*16px;/);
+  assert.match(css, /--module-sidebar-list-gap:\s*8px;/);
+  assert.match(
+    css,
+    /\.memory-shell,\s*\.knowledge-shell\s*{[^}]*grid-template-columns:\s*var\(--module-sidebar-width\)\s+minmax\(0,\s*1fr\);/s,
+  );
+  assert.match(
+    css,
+    /\.memory-sidebar,\s*\.knowledge-sidebar\s*{[^}]*gap:\s*var\(--module-sidebar-section-gap\);/s,
+  );
+  assert.match(
+    css,
+    /\.memory-type-list,\s*\.knowledge-base-list\s*{[^}]*gap:\s*var\(--module-sidebar-list-gap\);[^}]*padding:\s*var\(--module-sidebar-list-padding\);/s,
+  );
+  assert.match(
+    css,
+    /\.memory-type-row,\s*\.knowledge-base-row\s*{[^}]*min-height:\s*var\(--module-sidebar-row-height\);[^}]*border-radius:\s*var\(--module-sidebar-row-radius\);/s,
+  );
+  assert.match(
+    css,
+    /\.memory-type-row,\s*\.knowledge-base-select\s*{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+auto;[^}]*gap:\s*var\(--module-sidebar-row-gap\);/s,
+  );
+  assert.match(
+    css,
+    /\.memory-type-icon,\s*\.knowledge-base-icon\s*{[^}]*width:\s*var\(--module-sidebar-icon-size\);[^}]*height:\s*var\(--module-sidebar-icon-size\);/s,
+  );
+});
+
 test("memory view omits explanatory helper copy", () => {
   const html = renderToStaticMarkup(
     <MemoryView

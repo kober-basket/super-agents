@@ -255,7 +255,10 @@ test("skills toolbar keeps creation actions behind one add menu trigger", async 
   assert.match(html, /aria-label="刷新技能"/);
   assert.match(html, /aria-label="添加技能"/);
   assert.match(html, /aria-haspopup="menu"/);
-  assert.match(css, /\.skills-toolbar-actions\s*{[^}]*--skill-toolbar-control-size:\s*44px;[^}]*--skill-toolbar-control-radius:\s*14px;[^}]*flex-wrap:\s*nowrap;/s);
+  assert.match(
+    css,
+    /\.skills-toolbar-actions\s*{[^}]*--skill-toolbar-control-size:\s*var\(--module-toolbar-title-row-height\);[^}]*--skill-toolbar-control-radius:\s*14px;[^}]*flex-wrap:\s*nowrap;/s,
+  );
   assert.match(css, /\.skill-search-field\s*{[^}]*min-width:\s*0;[^}]*flex:\s*1\s+1\s+320px;/s);
   assert.match(
     css,

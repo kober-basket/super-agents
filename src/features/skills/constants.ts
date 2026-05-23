@@ -11,8 +11,8 @@ export interface RecommendedSkill {
 export const RECOMMENDED_SKILLS: RecommendedSkill[] = [
   {
     id: "skill-creator",
-    name: "skill-creator",
-    description: "Help design and structure a new skill for repeatable workflows.",
+    name: "技能创建器",
+    description: "帮助设计和组织可复用工作流的新技能。",
     badge: "内置技能",
     tone: "violet",
   },

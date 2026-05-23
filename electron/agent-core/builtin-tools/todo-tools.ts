@@ -42,7 +42,7 @@ export function createTodoToolDefinitions(): ToolDefinition[] {
   return [
     {
       name: "todo_read",
-      description: "Read the current session todo list.",
+      description: "读取当前会话的任务清单。",
       risk: "read",
       inputSchema: {
         type: "object",
@@ -61,7 +61,7 @@ export function createTodoToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "todo_write",
-      description: "Replace the current session todo list with structured task items.",
+      description: "用结构化任务项替换当前会话的任务清单。",
       risk: "read",
       inputSchema: {
         type: "object",
