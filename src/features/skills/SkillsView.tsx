@@ -136,7 +136,6 @@ export function SkillsView({
               skills={builtinSkills}
               emptyText="没有匹配的内置技能。"
               accentOffset={0}
-              onOpenFolder={(skill) => void openSkillFolder(skill)}
               onSelectSkill={(skill) => setActiveSkill({ kind: "installed", skill })}
             />
             <SkillSection
@@ -144,7 +143,6 @@ export function SkillsView({
               skills={userSkills}
               emptyText="没有匹配的用户安装技能。"
               accentOffset={builtinSkills.length}
-              onOpenFolder={(skill) => void openSkillFolder(skill)}
               onSelectSkill={(skill) => setActiveSkill({ kind: "installed", skill })}
             />
           </>
@@ -255,11 +253,10 @@ interface SkillSectionProps {
   skills: InstalledSkillView[];
   emptyText: string;
   accentOffset: number;
-  onOpenFolder: (skill: InstalledSkillView) => void;
   onSelectSkill: (skill: InstalledSkillView) => void;
 }
 
-function SkillSection({ title, skills, emptyText, accentOffset, onOpenFolder, onSelectSkill }: SkillSectionProps) {
+function SkillSection({ title, skills, emptyText, accentOffset, onSelectSkill }: SkillSectionProps) {
   return (
     <section className="skills-section">
       <div className="skills-section-head">
@@ -270,11 +267,11 @@ function SkillSection({ title, skills, emptyText, accentOffset, onOpenFolder, on
       </div>
 
       {skills.length > 0 ? (
-        <div className="skills-gallery">
+        <div className="skills-list">
           {skills.map((skill, index) => (
             <div
               key={skill.id}
-              className="skill-tile"
+              className="skill-list-row skill-tile"
               onClick={() => onSelectSkill(skill)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
@@ -295,23 +292,9 @@ function SkillSection({ title, skills, emptyText, accentOffset, onOpenFolder, on
                 </p>
               </div>
               <div className="skill-tile-status">
-                {skill.system ? <span className="skill-status-chip subtle">内置技能</span> : null}
                 <span className={clsx("skill-status-chip", skill.enabled ? "enabled" : "disabled")}>
                   {skill.enabled ? "启用" : "停用"}
                 </span>
-                {resolveSkillFolderPath({ kind: "installed", skill }) ? (
-                  <button
-                    className="ghost-icon skill-tile-folder"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onOpenFolder(skill);
-                    }}
-                    title="打开技能所在文件夹"
-                    type="button"
-                  >
-                    <FolderOpen size={15} />
-                  </button>
-                ) : null}
               </div>
             </div>
           ))}
@@ -340,12 +323,6 @@ function appendSkillFilePath(sourcePath: string) {
 
 function resolveSkillFolderPath(activeSkill: SkillModalState) {
   return activeSkill.skill.sourcePath?.trim() || "";
-}
-
-async function openSkillFolder(skill: InstalledSkillView) {
-  const folderPath = resolveSkillFolderPath({ kind: "installed", skill });
-  if (!folderPath) return;
-  await workspaceClient.openFolder(folderPath);
 }
 
 async function resolveSkillMarkdown(activeSkill: SkillModalState) {

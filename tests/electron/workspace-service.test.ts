@@ -330,7 +330,7 @@ test("workspace service keeps full filesystem access disabled by default", async
   }
 });
 
-test("workspace service bootstraps copied built-in skill creator without legacy sample skills", async () => {
+test("workspace service bootstraps copied built-in skills without legacy sample skills", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
   const statePath = path.join(tempDir, "data", "workspace.json");
   const service = new WorkspaceService(statePath);
@@ -339,18 +339,25 @@ test("workspace service bootstraps copied built-in skill creator without legacy 
     const bootstrap = await service.bootstrap();
     const skillNames = bootstrap.config.skills.map((skill) => skill.name).sort();
     const skillCreator = bootstrap.config.skills.find((skill) => skill.id === "skill-creator");
+    const wxCli = bootstrap.config.skills.find((skill) => skill.id === "wx-cli");
 
-    assert.deepEqual(skillNames, ["skill-creator"]);
+    assert.deepEqual(skillNames, ["skill-creator", "wx-cli"]);
     assert.ok(skillCreator);
     assert.equal(skillCreator?.system, true);
     assert.equal(skillCreator?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "skill-creator"));
     await access(path.join(skillCreator?.sourcePath ?? "", "SKILL.md"));
     assert.match(skillCreator?.command ?? "", /Anatomy of a Skill/);
+    assert.ok(wxCli);
+    assert.equal(wxCli?.system, true);
+    assert.equal(wxCli?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "wx-cli"));
+    await access(path.join(wxCli?.sourcePath ?? "", "SKILL.md"));
+    assert.match(wxCli?.command ?? "", /wx history/);
     assert.equal(bootstrap.config.skills.some((skill) => skill.id === "meeting-minutes"), false);
 
     const context = await service.getEnabledSkillPromptContext();
     assert.match(context, /Available workspace skills for this turn:/);
     assert.match(context, /- skill-creator:/);
+    assert.match(context, /- wx-cli:/);
     assert.doesNotMatch(context, /Anatomy of a Skill/);
   } finally {
     await service.shutdown();

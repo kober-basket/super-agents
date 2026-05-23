@@ -136,7 +136,7 @@ test("chat thread title sits on the left with a compact actions menu", () => {
   assert.match(css, /\.right-workspace-head\s*{[^}]*min-height:\s*50px/s);
   assert.match(css, /\.chat-thread-title\s*{[^}]*color:\s*#111827/s);
   assert.match(css, /\.chat-thread-title\s*{[^}]*font-size:\s*15px/s);
-  assert.match(css, /\.chat-thread-right-pane-control\s*{[^}]*margin-left:\s*auto/s);
+  assert.match(css, /\.chat-thread-folder-control\s*{[^}]*margin-left:\s*auto/s);
   assert.match(css, /\.workspace-main\.is-thread\s+\.chat-column\s*{[^}]*width:\s*100%/s);
   assert.match(css, /\.workspace-main\.is-thread\s+\.chat-column\s*{[^}]*margin:\s*0/s);
   assert.match(

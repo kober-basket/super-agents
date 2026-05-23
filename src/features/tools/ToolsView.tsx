@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import clsx from "clsx";
 import { LoaderCircle, Plus, RefreshCw, Settings2 } from "lucide-react";
 
 import type {
+  McpConnectionStatus,
   McpServerConfig,
   McpServerStatus,
   McpServerToolsResult,
@@ -9,6 +11,7 @@ import type {
   WorkspaceTool,
 } from "../../types";
 import { McpSettings } from "../settings/McpSettings";
+import { formatMcpStatusLabel, sanitizeMcpName } from "../shared/utils";
 
 interface ToolsViewProps {
   mcpAdvancedOpen: boolean;
@@ -48,7 +51,6 @@ export function ToolsView({
   const [pendingNewServer, setPendingNewServer] = useState(false);
 
   const builtinTools = tools.filter((tool) => tool.source === "builtin");
-  const mcpTools = tools.filter((tool) => tool.source === "mcp");
 
   useEffect(() => {
     if (!pendingNewServer || mcpServers.length === 0) return;
@@ -66,15 +68,6 @@ export function ToolsView({
   function createMcpServer() {
     setPendingNewServer(true);
     onAddMcpServer();
-  }
-
-  function formatParameterSummary(tool: WorkspaceTool, displayName = tool.name) {
-    const count = tool.parameters?.length ?? 0;
-    if (tool.source === "builtin") return null;
-
-    const serverName = tool.serverName && tool.serverName !== displayName ? tool.serverName : "";
-    if (count === 0) return serverName || null;
-    return serverName ? `${serverName} · ${count} 个参数` : `${count} 个参数`;
   }
 
   return (
@@ -99,14 +92,13 @@ export function ToolsView({
           </div>
 
           {builtinTools.length > 0 ? (
-            <div className="tool-grid">
+            <div className="tool-list">
               {builtinTools.map((tool) => (
-                <article key={tool.id} className="tool-card">
+                <article key={tool.id} className="tool-list-row tool-card">
                   <div className="tool-card-head">
                     <div>
                       <strong>{tool.name}</strong>
                     </div>
-                    <span className="tool-chip">内置</span>
                   </div>
                   {tool.description ? <p>{tool.description}</p> : null}
                 </article>
@@ -122,7 +114,7 @@ export function ToolsView({
 
         <section className="skills-section">
           <div className="skills-section-head with-action">
-            <h3>MCP 工具</h3>
+            <h3>MCP 服务</h3>
             <div className="skills-toolbar-actions inline">
               <button className="secondary-button" onClick={() => openMcpModal()} type="button">
                 <Settings2 size={14} />
@@ -135,39 +127,35 @@ export function ToolsView({
             </div>
           </div>
 
-          {mcpTools.length > 0 ? (
-            <div className="tool-grid">
-              {mcpTools.map((tool) => {
-                const displayName = tool.title || tool.name;
-                const summary = formatParameterSummary(tool, displayName);
-
+          {mcpServers.length > 0 ? (
+            <div className="tool-list">
+              {mcpServers.map((server) => {
+                const normalized = sanitizeMcpName(server.name);
+                const status = mcpStatusMap[normalized]?.status ?? (server.enabled ? "connecting" : "disabled");
                 return (
                   <button
-                    key={tool.id}
-                    className="tool-card tool-card-button"
-                    onClick={() => openMcpModal(tool.serverId)}
+                    key={server.id}
+                    className="tool-list-row tool-card tool-card-button"
+                    onClick={() => openMcpModal(server.id)}
                     type="button"
                   >
                     <div className="tool-card-head">
                       <div>
-                        <strong>{displayName}</strong>
-                        {summary ? <span>{summary}</span> : null}
+                        <strong>{server.name}</strong>
+                        <span>{formatMcpTransport(server)}</span>
                       </div>
-                      <span className="tool-chip">MCP</span>
+                      <span className={clsx("skill-status-chip", getMcpStatusClass(status))}>
+                        {formatMcpStatusLabel(status)}
+                      </span>
                     </div>
-                    {tool.description ? <p>{tool.description}</p> : null}
                   </button>
                 );
               })}
             </div>
           ) : (
             <div className="empty-panel compact">
-              <strong>还没有 MCP 工具</strong>
-              <p>
-                {mcpServers.length > 0
-                  ? "启用 MCP 服务后点击刷新工具，这里会显示实际可调用的 MCP 工具。"
-                  : "添加一个 MCP 服务后，就能在这里统一查看和调试工具。"}
-              </p>
+              <strong>还没有 MCP 服务</strong>
+              <p>添加一个 MCP 服务后，点击服务进入配置页获取和调试工具。</p>
             </div>
           )}
         </section>
@@ -190,4 +178,14 @@ export function ToolsView({
       />
     </section>
   );
+}
+
+function formatMcpTransport(server: McpServerConfig) {
+  return server.transport === "remote" ? "远程" : "本地";
+}
+
+function getMcpStatusClass(status: McpConnectionStatus | "connecting") {
+  if (status === "connected") return "enabled";
+  if (status === "disabled") return "disabled";
+  return "quiet";
 }

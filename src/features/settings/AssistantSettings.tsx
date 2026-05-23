@@ -3,6 +3,7 @@ import clsx from "clsx";
 import {
   Brain,
   Eye,
+  EyeOff,
   Globe,
   GripVertical,
   LoaderCircle,
@@ -72,6 +73,7 @@ export function AssistantSettings({
   onUpdateModelProvider,
 }: AssistantSettingsProps) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
   const [draggingProviderId, setDraggingProviderId] = useState<string | null>(null);
   const [dropTargetProviderId, setDropTargetProviderId] = useState<string | null>(null);
@@ -298,16 +300,27 @@ export function AssistantSettings({
                       />
                     </label>
 
-                    <label className="span-two">
+                    <label className="span-two provider-secret-label">
                       <span>接口密钥</span>
                       <input
-                        type="text"
+                        type={apiKeyVisible ? "text" : "password"}
                         value={currentProvider.apiKey}
                         onChange={(event) =>
                           onUpdateModelProvider(currentProvider.id, { apiKey: event.target.value })
                         }
                         placeholder="sk-..."
+                        autoComplete="off"
+                        spellCheck={false}
                       />
+                      <button
+                        aria-label={apiKeyVisible ? "隐藏接口密钥" : "显示接口密钥"}
+                        className="secret-visibility-button"
+                        onClick={() => setApiKeyVisible((visible) => !visible)}
+                        title={apiKeyVisible ? "隐藏接口密钥" : "显示接口密钥"}
+                        type="button"
+                      >
+                        {apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
                     </label>
                   </div>
                 </div>

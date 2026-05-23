@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Suspense, lazy } from "react";
 import clsx from "clsx";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { FolderOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import {
   createRuntimeModelId,
   ensureActiveModelId,
@@ -73,6 +73,7 @@ import {
   upsertRightPaneTab,
   type RightPaneTab,
 } from "./lib/right-pane-tabs";
+import { resolveRightPanePresentation } from "./lib/workspace-layout";
 
 const RightWorkspacePane = lazy(async () => {
   const module = await import("./features/chat/RightWorkspacePane");
@@ -1509,13 +1510,13 @@ export default function App() {
 
   async function refreshSkillsView() {
     setSkillsRefreshing(true);
-    await refreshWorkspaceSnapshot("技能列表已刷新");
+    await refreshWorkspaceSnapshot(undefined, { silent: true });
     setSkillsRefreshing(false);
   }
 
   async function refreshMcpView() {
     setMcpRefreshing(true);
-    await refreshWorkspaceSnapshot("MCP 状态已刷新");
+    await refreshWorkspaceSnapshot(undefined, { silent: true });
     setMcpRefreshing(false);
   }
 
@@ -2377,9 +2378,15 @@ export default function App() {
     }
   }
 
-  const showRightPane = rightPaneOpen;
+  const rightPanePresentation = resolveRightPanePresentation({
+    view,
+    rightPaneOpen,
+    viewportWidth,
+  });
+  const showRightPane = rightPanePresentation !== "hidden";
   const canResizePanels = viewportWidth > 840;
-  const showInlineRightPane = showRightPane && viewportWidth > 1400;
+  const showInlineRightPane = rightPanePresentation === "inline";
+  const showOverlayRightPane = rightPanePresentation === "overlay";
   const activeSidebarWidth = view === "settings" ? settingsSidebarWidth : sidebarWidth;
   const appShellStyle =
     canResizePanels
@@ -2389,19 +2396,17 @@ export default function App() {
             : `${activeSidebarWidth}px minmax(0, 1fr)`,
         }
       : undefined;
-  const rightPaneInstanceCount = rightTabs.filter((tab) => tab.closable).length;
   const canCreateBrowserTab = !hasBrowserRightPaneTab(rightTabs);
 
   function renderRightPaneToggleButton(extraClassName?: string) {
     return (
       <button
         aria-label={showRightPane ? "收起右侧栏" : "展开右侧栏"}
-        className={clsx("right-pane-toggle", extraClassName, showRightPane && "is-open", rightPaneInstanceCount > 0 && "has-tabs")}
+        className={clsx("right-pane-toggle", extraClassName, showRightPane && "is-open")}
         onClick={() => setRightPaneOpen((open) => !open)}
         type="button"
       >
         {showRightPane ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
-        {!showRightPane && rightPaneInstanceCount > 0 ? <span>{rightPaneInstanceCount}</span> : null}
       </button>
     );
   }
@@ -2438,6 +2443,33 @@ export default function App() {
   const activeConversationBusy =
     startingChatTurn || isConversationTurnActive(activeConversationRuntimeState?.status);
   const activeConversationWorkspaceRoot = activeConversation?.workspaceRoot || config.workspaceRoot;
+
+  async function openActiveWorkspaceFolder() {
+    if (!activeConversationWorkspaceRoot.trim()) {
+      setToast("当前对话没有工作目录");
+      return;
+    }
+
+    try {
+      await workspaceClient.openFolder(activeConversationWorkspaceRoot);
+    } catch {
+      setToast("打开当前工作目录失败");
+    }
+  }
+
+  function renderWorkspaceFolderButton() {
+    return (
+      <button
+        aria-label="打开当前工作目录"
+        className="right-pane-toggle workspace-folder-button"
+        onClick={() => void openActiveWorkspaceFolder()}
+        title="打开当前工作目录"
+        type="button"
+      >
+        <FolderOpen size={17} />
+      </button>
+    );
+  }
 
   const beginResize =
     (target: ResizeTarget, width: number) => (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -2571,6 +2603,7 @@ export default function App() {
           onSendMessage={sendChatMessage}
           onToggleKnowledgeBase={toggleKnowledgeBaseSelection}
           runtimeState={activeConversationRuntimeState}
+          workspaceFolderControl={renderWorkspaceFolderButton()}
           rightPaneControl={renderRightPaneToggleButton("in-thread")}
           onVoiceInput={toggleVoiceInput}
           voiceInputState={voiceInputState}
@@ -2688,7 +2721,12 @@ export default function App() {
       />
 
       <div
-        className={clsx("app-shell", showRightPane && "with-preview", view === "settings" && "settings-mode")}
+        className={clsx(
+          "app-shell",
+          showRightPane && "with-preview",
+          showOverlayRightPane && "right-pane-overlay",
+          view === "settings" && "settings-mode",
+        )}
         style={appShellStyle}
       >
         {view === "settings" ? (
@@ -2735,8 +2773,6 @@ export default function App() {
           {renderMainView()}
         </main>
 
-        {view !== "chat" ? renderRightPaneToggleButton("floating") : null}
-
         {showInlineRightPane ? (
           <button
             aria-label="调整右侧栏宽度"
@@ -2748,6 +2784,15 @@ export default function App() {
           >
             <span className="pane-resizer-rail" />
           </button>
+        ) : null}
+
+        {showOverlayRightPane ? (
+          <button
+            aria-label="关闭右侧栏"
+            className="right-pane-backdrop"
+            onClick={() => setRightPaneOpen(false)}
+            type="button"
+          />
         ) : null}
 
         {showRightPane ? (

@@ -95,6 +95,7 @@ interface ChatWorkspaceProps {
   knowledgeEnabled: boolean;
   knowledgeRefreshing: boolean;
   runtimeState?: ChatConversationRuntimeState | null;
+  workspaceFolderControl?: ReactNode;
   rightPaneControl?: ReactNode;
   selectableModels: RuntimeModelOption[];
   selectedKnowledgeBaseIds: string[];
@@ -383,6 +384,7 @@ export function ChatWorkspace({
   knowledgeEnabled,
   knowledgeRefreshing,
   runtimeState,
+  workspaceFolderControl,
   rightPaneControl,
   selectableModels,
   selectedKnowledgeBaseIds,
@@ -1023,14 +1025,14 @@ export function ChatWorkspace({
                       onModelChange(model.id);
                       setModelPickerOpen(false);
                     }}
+                    aria-current={selected ? "true" : undefined}
                     type="button"
                   >
-                    <div className="chat-model-option-copy">
-                      <strong title={fullLabel}>{fullLabel}</strong>
-                      <span>{providerLabel}</span>
-                    </div>
-                    <span className={`chat-model-option-check ${selected ? "selected" : ""}`}>
-                      <Check size={13} />
+                    <strong className="chat-model-option-name" title={fullLabel}>
+                      {fullLabel}
+                    </strong>
+                    <span className="chat-model-option-provider" title={providerLabel}>
+                      {providerLabel}
                     </span>
                   </button>
                 );
@@ -1941,7 +1943,11 @@ export function ChatWorkspace({
             {activeConversation.title}
           </div>
           {renderThreadActions()}
-          {rightPaneControl ? <div className="chat-thread-right-pane-control">{rightPaneControl}</div> : null}
+          {workspaceFolderControl ? (
+            <div className="chat-thread-folder-control">
+              {workspaceFolderControl}
+            </div>
+          ) : null}
         </div>
         <div className={messageListShellClassName}>
           <div
@@ -1982,6 +1988,11 @@ export function ChatWorkspace({
       <div className="chat-column chat-workspace-shell">
         {isHome ? (
             <div className="chat-home chat-home-upgraded">
+              {workspaceFolderControl ? (
+                <div className="chat-home-folder-control">
+                  {workspaceFolderControl}
+                </div>
+              ) : null}
               <div className="chat-home-stage">
                 <div className="chat-home-center-copy">
                   <h1>开始新的对话</h1>
@@ -1995,6 +2006,11 @@ export function ChatWorkspace({
           renderThread()
         )}
       </div>
+      {rightPaneControl ? (
+        <div className="chat-fixed-right-pane-control">
+          {rightPaneControl}
+        </div>
+      ) : null}
     </section>
   );
 }
