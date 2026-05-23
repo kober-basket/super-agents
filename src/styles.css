@@ -13968,6 +13968,49 @@ textarea:focus,
   --icon-shadow: #7c3aed;
 }
 
+.tools-page .tool-list .skill-icon-shell.skill-icon-premium {
+  border-radius: 14px;
+  border-color: color-mix(in srgb, var(--icon-end) 42%, rgba(255, 255, 255, 0.6));
+  background:
+    radial-gradient(circle at 27% 18%, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.14) 30%, transparent 54%),
+    linear-gradient(145deg, color-mix(in srgb, var(--icon-start) 62%, var(--icon-end)) 0%, color-mix(in srgb, var(--icon-end) 82%, #111827) 100%);
+  color: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -14px 22px rgba(15, 23, 42, 0.22),
+    0 10px 20px color-mix(in srgb, var(--icon-shadow) 18%, transparent);
+}
+
+.tools-page .tool-list .skill-icon-shell.skill-icon-premium::before {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.34), transparent 42%),
+    radial-gradient(circle at 76% 76%, rgba(255, 255, 255, 0.2), transparent 36%);
+  opacity: 0.58;
+}
+
+.tools-page .tool-list .skill-icon-shell.skill-icon-premium::after {
+  right: -9px;
+  bottom: -10px;
+  width: 28px;
+  height: 28px;
+  opacity: 0.3;
+}
+
+.tools-page .tool-list .skill-icon-shell.skill-icon-premium svg {
+  filter: drop-shadow(0 1px 1px rgba(2, 8, 23, 0.26));
+}
+
+.tools-page .tool-list .skill-icon-orbit {
+  right: 7px;
+  bottom: 6px;
+  width: 6px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.16),
+    0 0 12px color-mix(in srgb, var(--icon-start) 58%, transparent);
+}
+
 :root[data-theme="graphite"] .skill-icon-shell.skill-icon-premium,
 :root[data-theme="graphite"] .skill-icon-shell.skill-icon-asset,
 :root[data-theme="graphite"] .skill-icon-shell.tool-icon-shell,
