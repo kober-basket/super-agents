@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildMessageListScrollRevision,
   isScrollAtBottom,
   isScrollNearBottom,
   scrollMessageListToBottom,
@@ -66,6 +67,25 @@ test("message list auto-scroll respects explicit requests and pinned state", () 
   );
 });
 
+test("message list scroll revision changes when streaming text grows within the same millisecond", () => {
+  const previous = buildMessageListScrollRevision({
+    lastMessageContentLength: 12,
+    lastMessageId: "assistant-1",
+    lastMessageUpdatedAt: 1_000,
+    messageCount: 2,
+    runtimeFingerprint: "{}",
+  });
+  const next = buildMessageListScrollRevision({
+    lastMessageContentLength: 18,
+    lastMessageId: "assistant-1",
+    lastMessageUpdatedAt: 1_000,
+    messageCount: 2,
+    runtimeFingerprint: "{}",
+  });
+
+  assert.notEqual(next, previous);
+});
+
 test("message list pins to the bottom synchronously during streaming", () => {
   let scrollToCalls = 0;
   const target = {
@@ -81,6 +101,32 @@ test("message list pins to the bottom synchronously during streaming", () => {
 
   assert.equal(target.scrollTop, 1_200);
   assert.equal(scrollToCalls, 0);
+});
+
+test("message list bypasses smooth scrolling when pinning to streaming output", () => {
+  let assignedScrollBehavior = "";
+  const target = {
+    scrollHeight: 1_200,
+    style: {
+      scrollBehavior: "smooth",
+    },
+    currentScrollTop: 700,
+    get scrollTop() {
+      return this.currentScrollTop;
+    },
+    set scrollTop(value: number) {
+      assignedScrollBehavior = this.style.scrollBehavior;
+      if (this.style.scrollBehavior !== "smooth") {
+        this.currentScrollTop = value;
+      }
+    },
+  };
+
+  scrollMessageListToBottom(target);
+
+  assert.equal(assignedScrollBehavior, "auto");
+  assert.equal(target.scrollTop, 1_200);
+  assert.equal(target.style.scrollBehavior, "smooth");
 });
 
 test("message list releases auto-scroll as soon as the user wheels upward", () => {

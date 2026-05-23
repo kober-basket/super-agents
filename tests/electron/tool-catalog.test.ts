@@ -7,6 +7,7 @@ import type { McpServerToolsResult } from "../../src/types";
 test("built-in tool catalog exposes native model tools without workspace aliases", () => {
   const tools = createBuiltinWorkspaceTools();
   const names = tools.map((tool) => tool.name).sort();
+  const findTool = (name: string) => tools.find((tool) => tool.name === name);
 
   assert.deepEqual(names, [
     "apply_patch",
@@ -49,6 +50,15 @@ test("built-in tool catalog exposes native model tools without workspace aliases
     "write",
   ]);
   assert.equal(tools.every((tool) => tool.source === "builtin"), true);
+  assert.equal(tools.every((tool) => Boolean(tool.category)), true);
+  assert.equal(tools.every((tool) => Boolean(tool.categoryLabel)), true);
+  assert.equal(findTool("read")?.category, "workspace");
+  assert.equal(findTool("write")?.category, "workspace");
+  assert.equal(findTool("bash")?.category, "runtime");
+  assert.equal(findTool("memory")?.category, "context");
+  assert.equal(findTool("web_search")?.category, "web");
+  assert.equal(findTool("browser_snapshot")?.category, "browser");
+  assert.equal(findTool("mail")?.category, "mail");
   assert.equal(names.some((name) => name.startsWith("workspace_")), false);
   for (const tool of tools) {
     assert.doesNotMatch(tool.description ?? "", /\bCodex\b/i, `${tool.name} should use product-neutral wording`);

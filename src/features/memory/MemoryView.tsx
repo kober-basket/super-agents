@@ -45,16 +45,16 @@ interface MemoryViewProps {
   onToast: (message: string) => void;
 }
 
-const MEMORY_TYPES: Array<{ key: MemoryTypeFilter; label: string; description: string }> = [
-  { key: "all", label: "全部", description: "所有记忆" },
-  { key: "user_preference", label: "用户偏好", description: "回答习惯和个人偏好" },
-  { key: "feedback_rule", label: "反馈规则", description: "长期执行规则" },
-  { key: "project_context", label: "项目背景", description: "当前项目和工作方式" },
-  { key: "external_reference", label: "外部参考", description: "外部系统和资料线索" },
+const MEMORY_TYPES: Array<{ key: MemoryTypeFilter; label: string }> = [
+  { key: "all", label: "全部" },
+  { key: "user_preference", label: "用户偏好" },
+  { key: "feedback_rule", label: "反馈规则" },
+  { key: "project_context", label: "项目背景" },
+  { key: "external_reference", label: "外部参考" },
 ];
 
 const MEMORY_TYPE_OPTIONS = MEMORY_TYPES.filter(
-  (item): item is { key: MemoryEntryType; label: string; description: string } => item.key !== "all",
+  (item): item is { key: MemoryEntryType; label: string } => item.key !== "all",
 );
 
 function formatMemoryType(type: MemoryEntryType) {
@@ -137,7 +137,6 @@ export function MemoryView({
     return counts;
   }, [entries]);
 
-  const enabledCount = entries.filter((entry) => entry.enabled).length;
   const controlsDisabled = refreshing || busyAction !== null;
   const refreshBusy = busyAction === "refresh" || (refreshing && busyAction === null);
 
@@ -344,28 +343,29 @@ export function MemoryView({
         <aside className="memory-sidebar">
           <header className="memory-sidebar-head">
             <h2>记忆</h2>
-            <p>{enabledCount} 条启用，{entries.length} 条总计</p>
           </header>
 
           <div className="memory-type-list">
-            {MEMORY_TYPES.map((item) => (
-              <button
-                key={item.key}
-                className={clsx("memory-type-row", typeFilter === item.key && "active")}
-                onClick={() => setTypeFilter(item.key)}
-                disabled={controlsDisabled}
-                type="button"
-              >
-                <span className="memory-type-icon">
-                  <Brain size={15} />
-                </span>
-                <span className="memory-type-copy">
-                  <strong>{item.label}</strong>
-                  <em>{item.description}</em>
-                </span>
-                <b>{typeCounts.get(item.key) ?? 0}</b>
-              </button>
-            ))}
+            {MEMORY_TYPES.map((item, index) => {
+              const tone = index % 8;
+              return (
+                <button
+                  key={item.key}
+                  className={clsx("memory-type-row", `tone-${tone}`, typeFilter === item.key && "active")}
+                  onClick={() => setTypeFilter(item.key)}
+                  disabled={controlsDisabled}
+                  type="button"
+                >
+                  <span className={clsx("memory-type-icon", `tone-${tone}`)}>
+                    <Brain size={15} />
+                  </span>
+                  <span className="memory-type-copy">
+                    <strong>{item.label}</strong>
+                  </span>
+                  <b>{typeCounts.get(item.key) ?? 0}</b>
+                </button>
+              );
+            })}
           </div>
 
           <button className="primary-button memory-create-button" onClick={openCreateModal} disabled={controlsDisabled}>
@@ -487,8 +487,7 @@ export function MemoryView({
                 </div>
               ) : (
                 <div className="memory-empty">
-                  <strong>暂无记忆</strong>
-                  <span>{query.trim() ? "没有匹配的条目" : "还没有长期条目"}</span>
+                  <strong>{query.trim() ? "无匹配" : "暂无记忆"}</strong>
                 </div>
               )}
             </div>

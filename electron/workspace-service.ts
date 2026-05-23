@@ -40,6 +40,7 @@ import type {
   KnowledgeAddNoteInput,
   KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
+  KnowledgeBaseUpdateInput,
   KnowledgeCatalogPayload,
   KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
@@ -1441,6 +1442,10 @@ export class WorkspaceService {
 
   async createKnowledgeBase(input: KnowledgeBaseCreateInput): Promise<KnowledgeCatalogPayload> {
     return await this.knowledge.createBase(input);
+  }
+
+  async updateKnowledgeBase(input: KnowledgeBaseUpdateInput): Promise<KnowledgeCatalogPayload> {
+    return await this.knowledge.updateBase(input);
   }
 
   async deleteKnowledgeBase(baseId: string): Promise<KnowledgeCatalogPayload> {

@@ -7,6 +7,17 @@ export interface ScrollMetrics {
 export interface MessageListScrollTarget {
   scrollHeight: number;
   scrollTop: number;
+  style?: {
+    scrollBehavior: string;
+  };
+}
+
+export interface MessageListScrollRevisionInput {
+  lastMessageContentLength: number;
+  lastMessageId: string | null;
+  lastMessageUpdatedAt: number;
+  messageCount: number;
+  runtimeFingerprint: string;
 }
 
 const DEFAULT_BOTTOM_THRESHOLD_PX = 16;
@@ -42,8 +53,29 @@ export function shouldAutoScrollMessageList(options: {
   );
 }
 
+export function buildMessageListScrollRevision(options: MessageListScrollRevisionInput) {
+  return [
+    options.lastMessageId ?? "",
+    options.lastMessageUpdatedAt,
+    options.lastMessageContentLength,
+    options.messageCount,
+    options.runtimeFingerprint,
+  ].join(":");
+}
+
 export function scrollMessageListToBottom(target: MessageListScrollTarget) {
-  target.scrollTop = target.scrollHeight;
+  if (!target.style) {
+    target.scrollTop = target.scrollHeight;
+    return;
+  }
+
+  const previousScrollBehavior = target.style.scrollBehavior;
+  target.style.scrollBehavior = "auto";
+  try {
+    target.scrollTop = target.scrollHeight;
+  } finally {
+    target.style.scrollBehavior = previousScrollBehavior;
+  }
 }
 
 export function shouldReleaseAutoScrollOnWheel(deltaY: number) {

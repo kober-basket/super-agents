@@ -11,6 +11,7 @@ import type {
   KnowledgeAddNoteInput,
   KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
+  KnowledgeBaseUpdateInput,
   KnowledgeDeleteItemInput,
   KnowledgeBaseSummary,
   KnowledgeCatalogPayload,
@@ -484,6 +485,21 @@ export class KnowledgeService {
       updatedAt: now,
       items: [],
     });
+    await this.saveIndex(index);
+    return await this.listBases();
+  }
+
+  async updateBase(input: KnowledgeBaseUpdateInput) {
+    const name = input.name.trim();
+    if (!name) {
+      throw new Error("Enter a knowledge base name first.");
+    }
+
+    const index = await this.loadIndex();
+    const base = this.requireBase(index, input.id);
+    base.name = name;
+    base.description = input.description?.trim() || "";
+    base.updatedAt = Date.now();
     await this.saveIndex(index);
     return await this.listBases();
   }

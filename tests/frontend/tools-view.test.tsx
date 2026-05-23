@@ -12,6 +12,12 @@ function readSource(relativePath: string) {
   return readFileSync(existsSync(localPath) ? localPath : path.resolve(process.cwd(), "..", relativePath), "utf8");
 }
 
+function extractCssBlock(source: string, selectorPattern: RegExp) {
+  const match = selectorPattern.exec(source);
+  assert.ok(match?.groups?.body, "Expected CSS block to exist.");
+  return match.groups.body;
+}
+
 function renderToolsView(
   tools: WorkspaceTool[],
   mcpServers: McpServerConfig[] = [],
@@ -100,14 +106,108 @@ test("tools list icons reuse the skills premium icon implementation", () => {
   assert.doesNotMatch(html, /tool-icon-spark/);
 });
 
-test("tools list icons use a softer darker treatment than the shared default", () => {
+test("tools list icons use a flat low-depth treatment instead of beveled layers", () => {
   const css = readSource("src/styles.css");
+  const block = extractCssBlock(
+    css,
+    /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium\s*{(?<body>[^}]*)}/s,
+  );
+  const hoverBlock = extractCssBlock(
+    css,
+    /\.tools-page\s+\.tool-list\s+\.skill-tile:hover\s+\.skill-icon-shell\.skill-icon-premium,\s*\.tools-page\s+\.tool-list\s+\.skill-tile:focus-visible\s+\.skill-icon-shell\.skill-icon-premium\s*{(?<body>[^}]*)}/s,
+  );
 
-  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium\s*{[^}]*border-radius:\s*14px;/s);
-  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium\s*{[^}]*rgba\(255,\s*255,\s*255,\s*0\.28\)/s);
-  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium\s*{[^}]*#111827/s);
-  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium::before\s*{[^}]*rgba\(255,\s*255,\s*255,\s*0\.18\)/s);
-  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium::before\s*{[^}]*opacity:\s*0\.46;/s);
+  assert.match(block, /border-radius:\s*12px;/);
+  assert.match(block, /background:\s*color-mix\(in srgb,\s*var\(--icon-start\)\s+18%,\s*#ffffff\);/);
+  assert.match(block, /border-color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+16%,\s*#ffffff\);/);
+  assert.match(block, /color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+92%,\s*#1f2937\);/);
+  assert.match(block, /box-shadow:\s*none;/);
+  assert.doesNotMatch(block, /linear-gradient|inset/);
+  assert.doesNotMatch(hoverBlock, /linear-gradient|inset/);
+  assert.match(hoverBlock, /box-shadow:\s*0\s+4px\s+10px\s+color-mix\(in srgb,\s*var\(--icon-shadow\)\s+8%,\s*transparent\);/);
+  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium::before/s);
+  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium::before\s*{[^}]*display:\s*none;/s);
+  assert.doesNotMatch(block, /#111827/);
+  assert.doesNotMatch(block, /rgba\(255,\s*255,\s*255,\s*0\.94\)/);
+});
+
+test("built-in tool icons use purpose-specific browser and mail symbols", () => {
+  const html = renderToolsView([
+    {
+      id: "builtin:browser_snapshot",
+      name: "browser_snapshot",
+      source: "builtin",
+      origin: "内置工具",
+      observed: false,
+      description: "Snapshot the browser.",
+      category: "browser",
+      categoryLabel: "浏览器",
+    },
+    {
+      id: "builtin:browser_click",
+      name: "browser_click",
+      source: "builtin",
+      origin: "内置工具",
+      observed: false,
+      description: "Click an element.",
+      category: "browser",
+      categoryLabel: "浏览器",
+    },
+    {
+      id: "builtin:mail_auth",
+      name: "mail_auth",
+      source: "builtin",
+      origin: "内置工具",
+      observed: false,
+      description: "Authorize mail.",
+      category: "mail",
+      categoryLabel: "邮件",
+    },
+    {
+      id: "builtin:mail_send",
+      name: "mail_send",
+      source: "builtin",
+      origin: "内置工具",
+      observed: false,
+      description: "Send mail.",
+      category: "mail",
+      categoryLabel: "邮件",
+    },
+  ]);
+
+  assert.match(html, /lucide-camera/);
+  assert.match(html, /lucide-mouse-pointer-click/);
+  assert.match(html, /lucide-mail-check/);
+  assert.match(html, /lucide-send/);
+});
+
+test("built-in tool icons fall back by catalog category before generic wrench", () => {
+  const html = renderToolsView([
+    {
+      id: "builtin:memory",
+      name: "memory",
+      source: "builtin",
+      origin: "内置工具",
+      observed: false,
+      description: "Maintain long-term memory.",
+      category: "context",
+      categoryLabel: "上下文",
+    },
+    {
+      id: "builtin:custom_browser_probe",
+      name: "custom_browser_probe",
+      source: "builtin",
+      origin: "内置工具",
+      observed: false,
+      description: "Inspect a browser page.",
+      category: "browser",
+      categoryLabel: "浏览器",
+    },
+  ]);
+
+  assert.match(html, /lucide-database/);
+  assert.match(html, /lucide-panel-top/);
+  assert.doesNotMatch(html, /lucide-wrench/);
 });
 
 test("tools page keeps tool descriptions compact and visually grouped", () => {
@@ -142,6 +242,66 @@ test("tools page keeps tool descriptions compact and visually grouped", () => {
   assert.match(css, /\.skill-list-row\s+\.skill-tile-copy\s*{[^}]*gap:\s*4px;/s);
   assert.doesNotMatch(css, /\.skill-list-row\s+\.skill-tile-copy\s*{[^}]*min-height:\s*36px/s);
   assert.doesNotMatch(css, /\.skill-list-row\s+\.skill-tile-copy p\s*{[^}]*line-height:\s*17px/s);
+});
+
+test("tools page groups built-in tools by catalog category", () => {
+  const html = renderToolsView([
+    {
+      id: "builtin:read",
+      name: "read",
+      source: "builtin",
+      origin: "内置工具",
+      observed: false,
+      description: "Read a file.",
+      category: "workspace",
+      categoryLabel: "工作区",
+    },
+    {
+      id: "builtin:browser_snapshot",
+      name: "browser_snapshot",
+      source: "builtin",
+      origin: "内置工具",
+      observed: false,
+      description: "Snapshot the browser.",
+      category: "browser",
+      categoryLabel: "浏览器",
+    },
+    {
+      id: "builtin:mail",
+      name: "mail",
+      source: "builtin",
+      origin: "内置工具",
+      observed: false,
+      description: "Read mail.",
+      category: "mail",
+      categoryLabel: "邮件",
+    },
+  ]);
+
+  assert.match(html, /class="tool-category"/);
+  assert.ok(html.indexOf("工作区") < html.indexOf("read"));
+  assert.ok(html.indexOf("浏览器") < html.indexOf("browser_snapshot"));
+  assert.ok(html.indexOf("邮件") < html.indexOf("mail"));
+  assert.ok(html.indexOf("工作区") < html.indexOf("浏览器"));
+  assert.ok(html.indexOf("浏览器") < html.indexOf("邮件"));
+});
+
+test("tools page does not show an empty mcp service prompt", () => {
+  const html = renderToolsView([
+    {
+      id: "builtin:bash",
+      name: "bash",
+      source: "builtin",
+      origin: "内置工具",
+      observed: false,
+      description: "Run a shell command in the current project.",
+    },
+  ]);
+
+  assert.match(html, /MCP 服务/);
+  assert.match(html, /添加 MCP/);
+  assert.doesNotMatch(html, /还没有 MCP 服务/);
+  assert.doesNotMatch(html, /添加一个 MCP 服务后/);
 });
 
 test("tools page shows mcp servers instead of every mcp tool", () => {

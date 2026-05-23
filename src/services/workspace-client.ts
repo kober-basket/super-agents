@@ -17,6 +17,8 @@ export const workspaceClient = {
   listKnowledgeBases: () => desktopAgent.listKnowledgeBases(),
   createKnowledgeBase: (payload: Parameters<typeof desktopAgent.createKnowledgeBase>[0]) =>
     desktopAgent.createKnowledgeBase(payload),
+  updateKnowledgeBase: (payload: Parameters<typeof desktopAgent.updateKnowledgeBase>[0]) =>
+    desktopAgent.updateKnowledgeBase(payload),
   deleteKnowledgeBase: (baseId: string) => desktopAgent.deleteKnowledgeBase(baseId),
   addKnowledgeFiles: (payload: Parameters<typeof desktopAgent.addKnowledgeFiles>[0]) =>
     desktopAgent.addKnowledgeFiles(payload),

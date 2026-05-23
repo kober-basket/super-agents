@@ -68,11 +68,12 @@ import {
   shouldShowRuntimeThinkingIndicator,
 } from "../../lib/runtime-timeline";
 import {
+  buildMessageListScrollRevision,
   isScrollAtBottom,
   isScrollNearBottom,
   scrollMessageListToBottom,
-  shouldReleaseAutoScrollOnWheel,
   shouldAutoScrollMessageList,
+  shouldReleaseAutoScrollOnWheel,
 } from "../../lib/chat-scroll";
 import { copyTextToClipboard } from "./clipboard";
 import { createComposerAttachmentsFromFiles } from "./attachment-files";
@@ -709,6 +710,7 @@ export function ChatWorkspace({
   const lastMessage = activeConversation?.messages[messageCount - 1] ?? null;
   const lastMessageId = lastMessage?.id ?? null;
   const lastMessageUpdatedAt = lastMessage?.updatedAt ?? 0;
+  const lastMessageContentLength = lastMessage?.content.length ?? 0;
   const activeModelId = activeModel?.id || composerModelId || selectableModels[0]?.id || "";
   const activeModelOption =
     selectableModels.find((model) => model.id === activeModelId) ?? activeModel ?? selectableModels[0] ?? null;
@@ -736,6 +738,13 @@ export function ChatWorkspace({
       outputLength: terminal.output.length,
       exitCode: terminal.exitCode,
     })),
+  });
+  const messageListScrollRevision = buildMessageListScrollRevision({
+    lastMessageContentLength,
+    lastMessageId,
+    lastMessageUpdatedAt,
+    messageCount,
+    runtimeFingerprint,
   });
   const runtimeToolCalls = runtimeState?.toolCalls ?? [];
   const selectedTerminalIds = new Set(
@@ -838,10 +847,7 @@ export function ChatWorkspace({
     return () => window.cancelAnimationFrame(frame);
   }, [
     activeConversationId,
-    lastMessageId,
-    lastMessageUpdatedAt,
-    messageCount,
-    runtimeFingerprint,
+    messageListScrollRevision,
     scrollToBottomRequest,
   ]);
 

@@ -255,11 +255,15 @@ test("skills toolbar keeps creation actions behind one add menu trigger", async 
   assert.match(html, /aria-label="刷新技能"/);
   assert.match(html, /aria-label="添加技能"/);
   assert.match(html, /aria-haspopup="menu"/);
-  assert.match(css, /\.skills-toolbar-actions\s*{[^}]*--skill-toolbar-control-size:\s*56px;[^}]*flex-wrap:\s*nowrap;/s);
-  assert.match(css, /\.skill-search-field\s*{[^}]*min-width:\s*0;[^}]*flex:\s*1\s+1\s+390px;/s);
+  assert.match(css, /\.skills-toolbar-actions\s*{[^}]*--skill-toolbar-control-size:\s*44px;[^}]*--skill-toolbar-control-radius:\s*14px;[^}]*flex-wrap:\s*nowrap;/s);
+  assert.match(css, /\.skill-search-field\s*{[^}]*min-width:\s*0;[^}]*flex:\s*1\s+1\s+320px;/s);
   assert.match(
     css,
     /\.skills-toolbar-actions\s+\.search-field input\s*{[^}]*min-height:\s*var\(--skill-toolbar-control-size\);[^}]*border-radius:\s*var\(--skill-toolbar-control-radius\);/s,
+  );
+  assert.match(
+    css,
+    /\.skills-toolbar-actions\s+\.search-field input\s*{[^}]*padding:\s*0\s+16px\s+0\s+44px;[^}]*font-size:\s*13px;/s,
   );
   assert.match(
     css,
@@ -285,4 +289,25 @@ test("skills view uses a two-column skill list and silent refresh success", () =
   assert.match(css, /\.skill-list-row\s+\.skill-tile-copy\s*{[^}]*gap:\s*4px;/s);
   assert.doesNotMatch(css, /\.skill-list-row\s+\.skill-tile-copy\s*{[^}]*min-height:\s*36px/s);
   assert.doesNotMatch(css, /\.skill-list-row\s+\.skill-tile-copy p\s*{[^}]*line-height:\s*17px/s);
+});
+
+test("skills view fallback icons use a lighter matte treatment", () => {
+  const css = readSource("src/styles.css");
+
+  assert.match(
+    css,
+    /\.skills-page:not\(\.tools-page\)\s+\.skill-icon-shell\.skill-icon-premium\s*{[^}]*linear-gradient\([^}]*color-mix\(in srgb,\s*var\(--icon-end\)\s+74%,\s*#ffffff\)/s,
+  );
+  assert.match(
+    css,
+    /\.skills-page:not\(\.tools-page\)\s+\.skill-icon-shell\.skill-icon-premium::before,[^}]*\.skills-page:not\(\.tools-page\)\s+\.skill-icon-orbit\s*{[^}]*display:\s*none;/s,
+  );
+  assert.match(
+    css,
+    /\.skills-page:not\(\.tools-page\)\s+\.skill-icon-shell\.skill-accent-sky\s*{[^}]*--icon-end:\s*#93c5fd;[^}]*--icon-ink:\s*#1d4ed8;/s,
+  );
+  assert.match(
+    css,
+    /\.skills-page:not\(\.tools-page\)\s+\.skill-icon-shell\.skill-accent-violet\s*{[^}]*--icon-end:\s*#c4b5fd;[^}]*--icon-ink:\s*#6d28d9;/s,
+  );
 });

@@ -32,6 +32,7 @@ export type McpInspectorTransport = "stdio" | "streamable-http" | "sse";
 export type McpToolTaskSupport = "optional" | "required" | "forbidden";
 export type ModelProviderKind = "openai-compatible";
 export type SkillKind = "command";
+export type WorkspaceToolCategory = "workspace" | "runtime" | "context" | "web" | "browser" | "mail" | "other";
 
 export interface ProviderModelConfig {
   id: string;
@@ -223,6 +224,9 @@ export interface WorkspaceTool {
   name: string;
   title?: string;
   description?: string;
+  category?: WorkspaceToolCategory;
+  categoryLabel?: string;
+  categoryOrder?: number;
   source: "builtin" | "mcp";
   origin: string;
   serverId?: string;
@@ -363,6 +367,12 @@ export interface MemorySearchPayload {
 }
 
 export interface KnowledgeBaseCreateInput {
+  name: string;
+  description?: string;
+}
+
+export interface KnowledgeBaseUpdateInput {
+  id: string;
   name: string;
   description?: string;
 }

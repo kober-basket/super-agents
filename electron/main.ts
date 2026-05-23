@@ -635,6 +635,13 @@ app.whenReady().then(async () => {
     return await service!.createKnowledgeBase(payload);
   });
 
+  ipcMain.handle(
+    "desktop:update-knowledge-base",
+    async (_event, payload: { id: string; name: string; description?: string }) => {
+      return await service!.updateKnowledgeBase(payload);
+    },
+  );
+
   ipcMain.handle("desktop:delete-knowledge-base", async (_event, baseId: string) => {
     return await service!.deleteKnowledgeBase(baseId);
   });

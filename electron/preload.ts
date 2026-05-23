@@ -24,6 +24,7 @@ import type {
   KnowledgeAddNoteInput,
   KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
+  KnowledgeBaseUpdateInput,
   KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
   MailAccountCreateInput,
@@ -84,6 +85,8 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:list-knowledge-bases") as Promise<KnowledgeCatalogPayload>,
   createKnowledgeBase: (payload: KnowledgeBaseCreateInput) =>
     ipcRenderer.invoke("desktop:create-knowledge-base", payload) as Promise<KnowledgeCatalogPayload>,
+  updateKnowledgeBase: (payload: KnowledgeBaseUpdateInput) =>
+    ipcRenderer.invoke("desktop:update-knowledge-base", payload) as Promise<KnowledgeCatalogPayload>,
   deleteKnowledgeBase: (baseId: string) =>
     ipcRenderer.invoke("desktop:delete-knowledge-base", baseId) as Promise<KnowledgeCatalogPayload>,
   addKnowledgeFiles: (payload: KnowledgeAddFilesInput) =>

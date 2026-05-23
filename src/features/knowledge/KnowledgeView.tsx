@@ -1,15 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   BookOpen,
+  ChevronDown,
   FileText,
   Folder,
   Globe,
+  HelpCircle,
   Link2,
   LoaderCircle,
+  MoreHorizontal,
   NotebookPen,
+  Pencil,
   Plus,
-  RefreshCw,
   Search,
   Settings2,
   Trash2,
@@ -18,7 +21,7 @@ import {
 } from "lucide-react";
 
 import { formatRelativeTime } from "../../lib/format";
-import { isEmbeddingModel } from "../../lib/model-config";
+import { createRuntimeModelId, isEmbeddingModel } from "../../lib/model-config";
 import { SurfaceSelect } from "../shared/SurfaceSelect";
 import type {
   AppConfig,
@@ -33,6 +36,7 @@ type KnowledgeSortKey = "updated-desc" | "updated-asc" | "chunks-desc" | "title-
 type KnowledgeBusyAction =
   | "refresh"
   | "create-base"
+  | "update-base"
   | "delete-base"
   | "add-file"
   | "add-note"
@@ -41,6 +45,7 @@ type KnowledgeBusyAction =
   | "add-website"
   | `delete-item:${string}`;
 type KnowledgeComposerModal = Extract<KnowledgeTabKey, "note" | "url" | "website"> | null;
+type KnowledgeBaseModal = "create" | "edit" | null;
 
 interface KnowledgeViewProps {
   config: AppConfig["knowledgeBase"];
@@ -48,10 +53,10 @@ interface KnowledgeViewProps {
   knowledgeBases: KnowledgeBaseSummary[];
   knowledgeRefreshing: boolean;
   onRefresh: () => void | Promise<void>;
-  onChangeEmbeddingProvider: (value: string) => void;
-  onChangeEmbeddingModel: (value: string) => void;
+  onChangeEmbeddingSelection: (providerId: string, modelId: string) => void;
   onToast: (message: string) => void;
   onCreateKnowledgeBase: (name: string, description: string) => Promise<string | null> | string | null;
+  onUpdateKnowledgeBase: (baseId: string, name: string, description: string) => Promise<boolean> | boolean;
   onDeleteKnowledgeBase: (baseId: string) => void | Promise<void>;
   onAddKnowledgeFiles: (baseId: string) => void | Promise<void>;
   onAddKnowledgeDirectory: (baseId: string) => void | Promise<void>;
@@ -126,16 +131,75 @@ function compareItems(left: KnowledgeItemSummary, right: KnowledgeItemSummary, s
   }
 }
 
+function getKnowledgeBaseToneSeed(base: KnowledgeBaseSummary) {
+  const value = `${base.id}:${base.name}`;
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) % 8;
+  }
+  return hash;
+}
+
+function buildKnowledgeBaseToneMap(knowledgeBases: KnowledgeBaseSummary[]) {
+  const tones = new Map<string, number>();
+  const usedTones = new Set<number>();
+
+  for (const base of knowledgeBases) {
+    const seed = getKnowledgeBaseToneSeed(base);
+    let tone = seed;
+
+    if (usedTones.size < 8 && usedTones.has(tone)) {
+      for (let offset = 1; offset < 8; offset += 1) {
+        const candidate = (seed + offset) % 8;
+        if (!usedTones.has(candidate)) {
+          tone = candidate;
+          break;
+        }
+      }
+    }
+
+    usedTones.add(tone);
+    tones.set(base.id, tone);
+  }
+
+  return tones;
+}
+
+export interface KnowledgeEmbeddingModelOption {
+  id: string;
+  label: string;
+  providerId: string;
+  providerName: string;
+  modelId: string;
+  modelLabel: string;
+}
+
+export function buildEmbeddingModelOptions(modelProviders: ModelProviderConfig[]): KnowledgeEmbeddingModelOption[] {
+  return modelProviders.flatMap((provider) => {
+    if (provider.enabled === false) return [];
+
+    return provider.models
+      .filter((model) => model.enabled !== false && isEmbeddingModel(model))
+      .map((model) => ({
+        id: createRuntimeModelId(provider.id, model.id),
+        label: `${provider.name} / ${model.label}`,
+        providerId: provider.id,
+        providerName: provider.name,
+        modelId: model.id,
+        modelLabel: model.label,
+      }));
+  });
+}
+
 export function KnowledgeView({
   config,
   modelProviders,
   knowledgeBases,
   knowledgeRefreshing,
-  onRefresh,
-  onChangeEmbeddingProvider,
-  onChangeEmbeddingModel,
+  onChangeEmbeddingSelection,
   onToast,
   onCreateKnowledgeBase,
+  onUpdateKnowledgeBase,
   onDeleteKnowledgeBase,
   onAddKnowledgeFiles,
   onAddKnowledgeDirectory,
@@ -144,6 +208,7 @@ export function KnowledgeView({
   onAddKnowledgeWebsite,
   onDeleteKnowledgeItem,
 }: KnowledgeViewProps) {
+  const embeddingPickerRef = useRef<HTMLDivElement | null>(null);
   const [selectedBaseId, setSelectedBaseId] = useState("");
   const [activeTab, setActiveTab] = useState<KnowledgeTabKey>("file");
   const [draftBaseName, setDraftBaseName] = useState("");
@@ -155,7 +220,10 @@ export function KnowledgeView({
   const [itemQuery, setItemQuery] = useState("");
   const [sortKey, setSortKey] = useState<KnowledgeSortKey>("updated-desc");
   const [busyAction, setBusyAction] = useState<KnowledgeBusyAction | null>(null);
-  const [confirmDeleteBase, setConfirmDeleteBase] = useState(false);
+  const [baseModal, setBaseModal] = useState<KnowledgeBaseModal>(null);
+  const [embeddingPickerOpen, setEmbeddingPickerOpen] = useState(false);
+  const [openBaseActionMenuId, setOpenBaseActionMenuId] = useState<string | null>(null);
+  const [confirmDeleteBaseId, setConfirmDeleteBaseId] = useState<string | null>(null);
   const [confirmDeleteItemId, setConfirmDeleteItemId] = useState<string | null>(null);
   const [composerModal, setComposerModal] = useState<KnowledgeComposerModal>(null);
 
@@ -173,7 +241,8 @@ export function KnowledgeView({
   }, [knowledgeBases, selectedBaseId]);
 
   useEffect(() => {
-    setConfirmDeleteBase(false);
+    setConfirmDeleteBaseId(null);
+    setOpenBaseActionMenuId(null);
     setConfirmDeleteItemId(null);
     setComposerModal(null);
   }, [selectedBaseId]);
@@ -183,39 +252,50 @@ export function KnowledgeView({
     setComposerModal(null);
   }, [activeTab]);
 
+  useEffect(() => {
+    if (!embeddingPickerOpen && !openBaseActionMenuId) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (embeddingPickerRef.current && !embeddingPickerRef.current.contains(target)) {
+        setEmbeddingPickerOpen(false);
+      }
+      const actionMenuTarget = event.target instanceof Element ? event.target.closest(".knowledge-base-row-actions") : null;
+      if (!actionMenuTarget) {
+        setOpenBaseActionMenuId(null);
+        setConfirmDeleteBaseId(null);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setEmbeddingPickerOpen(false);
+        setOpenBaseActionMenuId(null);
+        setConfirmDeleteBaseId(null);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [embeddingPickerOpen, openBaseActionMenuId]);
+
   const currentType = TAB_ITEMS.find((item) => item.key === activeTab)?.itemType ?? "file";
   const currentTypeLabel = formatItemType(currentType);
   const activeTabMeta = getItemMeta(currentType);
-  const embeddingProvider =
-    modelProviders.find((provider) => provider.id === config.embeddingProviderId) ?? modelProviders[0] ?? null;
-  const embeddingModels = useMemo(() => {
-    if (!embeddingProvider) return [];
-    return embeddingProvider.models.filter(isEmbeddingModel);
-  }, [embeddingProvider]);
+  const embeddingModelOptions = useMemo(() => buildEmbeddingModelOptions(modelProviders), [modelProviders]);
+  const knowledgeBaseToneMap = useMemo(() => buildKnowledgeBaseToneMap(knowledgeBases), [knowledgeBases]);
   const activeEmbeddingModel =
-    embeddingModels.find((model) => model.id === config.embeddingModel) ?? embeddingModels[0] ?? null;
-  const embeddingProviderOptions = useMemo(
-    () =>
-      modelProviders.map((provider) => {
-        const embeddingCount = provider.models.filter(isEmbeddingModel).length;
-
-        return {
-          value: provider.id,
-          label: provider.name,
-          description: embeddingCount > 0 ? `${embeddingCount} 个 Embedding 模型` : "无可用的 Embedding 模型",
-        };
-      }),
-    [modelProviders],
-  );
-  const embeddingModelOptions = useMemo(
-    () =>
-      embeddingModels.map((model) => ({
-        value: model.id,
-        label: model.label,
-        description: model.id !== model.label ? model.id : undefined,
-      })),
-    [embeddingModels],
-  );
+    embeddingModelOptions.find(
+      (model) => model.providerId === config.embeddingProviderId && model.modelId === config.embeddingModel,
+    ) ??
+    embeddingModelOptions[0] ??
+    null;
   const sortOptions = useMemo(
     () =>
       SORT_OPTIONS.map((option) => ({
@@ -250,11 +330,9 @@ export function KnowledgeView({
   }, [selectedBase]);
 
   const controlsDisabled = knowledgeRefreshing || busyAction !== null;
-  const refreshBusy = busyAction === "refresh" || (knowledgeRefreshing && busyAction === null);
   const isSearchActive = itemQuery.trim().length > 0;
   const showToolbarActions = currentItems.length > 0 || isSearchActive;
   const hasFilteredItems = filteredItems.length > 0;
-  const showEmptyComposerStage = currentItems.length === 0 && !isSearchActive;
 
   async function runBusyAction<T>(action: KnowledgeBusyAction, task: () => Promise<T>) {
     if (knowledgeRefreshing || busyAction !== null) {
@@ -266,6 +344,30 @@ export function KnowledgeView({
     } finally {
       setBusyAction((current) => (current === action ? null : current));
     }
+  }
+
+  function openCreateBaseModal() {
+    setDraftBaseName("");
+    setDraftBaseDescription("");
+    setBaseModal("create");
+    setOpenBaseActionMenuId(null);
+    setConfirmDeleteBaseId(null);
+  }
+
+  function openEditBaseModal(base: KnowledgeBaseSummary) {
+    setSelectedBaseId(base.id);
+    setDraftBaseName(base.name);
+    setDraftBaseDescription(base.description ?? "");
+    setBaseModal("edit");
+    setOpenBaseActionMenuId(null);
+    setConfirmDeleteBaseId(null);
+  }
+
+  function closeBaseModal() {
+    if (busyAction === "create-base" || busyAction === "update-base") {
+      return;
+    }
+    setBaseModal(null);
   }
 
   function openComposerModal(type: KnowledgeComposerModal) {
@@ -283,30 +385,44 @@ export function KnowledgeView({
     setComposerModal(null);
   }
 
-  async function handleRefresh() {
-    await runBusyAction("refresh", async () => {
-      await onRefresh();
-    });
-  }
-
   async function handleCreateBase() {
-    const name = draftBaseName.trim() || `新知识库 ${knowledgeBases.length + 1}`;
+    const name = draftBaseName.trim();
+    if (!name) {
+      onToast("请先输入知识库名称");
+      return;
+    }
     const createdBaseId = await runBusyAction("create-base", async () =>
       onCreateKnowledgeBase(name, draftBaseDescription.trim()),
     );
-    setDraftBaseName("");
-    setDraftBaseDescription("");
     if (createdBaseId) {
+      setDraftBaseName("");
+      setDraftBaseDescription("");
       setSelectedBaseId(createdBaseId);
+      setBaseModal(null);
     }
   }
 
-  async function handleDeleteBase() {
+  async function handleUpdateBase() {
     if (!selectedBase) return;
+    const name = draftBaseName.trim();
+    if (!name) {
+      onToast("请先输入知识库名称");
+      return;
+    }
+    const updated = await runBusyAction("update-base", async () =>
+      onUpdateKnowledgeBase(selectedBase.id, name, draftBaseDescription.trim()),
+    );
+    if (updated) {
+      setBaseModal(null);
+    }
+  }
+
+  async function handleDeleteBase(baseId: string) {
     await runBusyAction("delete-base", async () => {
-      await onDeleteKnowledgeBase(selectedBase.id);
+      await onDeleteKnowledgeBase(baseId);
     });
-    setConfirmDeleteBase(false);
+    setConfirmDeleteBaseId(null);
+    setOpenBaseActionMenuId(null);
   }
 
   async function handleDeleteItem(itemId: string) {
@@ -396,6 +512,128 @@ export function KnowledgeView({
     }
   }
 
+  function renderEmbeddingPicker() {
+    const disabled = controlsDisabled || embeddingModelOptions.length === 0;
+    const activeModelLabel = activeEmbeddingModel?.modelLabel.trim() || "未配置嵌入模型";
+
+    return (
+      <div ref={embeddingPickerRef} className="chat-model-picker knowledge-embedding-picker">
+        <button
+          aria-label={disabled ? "未配置嵌入模型" : `当前嵌入模型 ${activeModelLabel}`}
+          className={`chat-model-trigger ${embeddingPickerOpen ? "open" : ""}`}
+          disabled={disabled}
+          onClick={() => {
+            if (disabled) return;
+            setEmbeddingPickerOpen((current) => !current);
+          }}
+          title={activeModelLabel}
+          type="button"
+        >
+          <span className="chat-model-trigger-text">{activeModelLabel}</span>
+          <ChevronDown size={14} />
+        </button>
+
+        {embeddingPickerOpen ? (
+          <div className="chat-model-panel">
+            <div className="chat-model-panel-head">
+              <strong>选择嵌入模型</strong>
+            </div>
+
+            <div className="chat-model-list">
+              {embeddingModelOptions.map((model) => {
+                const selected = activeEmbeddingModel
+                  ? model.providerId === activeEmbeddingModel.providerId && model.modelId === activeEmbeddingModel.modelId
+                  : false;
+                const fullLabel = model.modelLabel.trim() || model.modelId;
+                const providerLabel = model.providerName.trim();
+
+                return (
+                  <button
+                    key={model.id}
+                    className={`chat-model-option ${selected ? "selected" : ""}`}
+                    onClick={() => {
+                      onChangeEmbeddingSelection(model.providerId, model.modelId);
+                      setEmbeddingPickerOpen(false);
+                    }}
+                    aria-current={selected ? "true" : undefined}
+                    type="button"
+                  >
+                    <strong className="chat-model-option-name" title={fullLabel}>
+                      {fullLabel}
+                    </strong>
+                    <span className="chat-model-option-provider" title={providerLabel}>
+                      {providerLabel}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderBaseModal() {
+    if (!baseModal) return null;
+
+    const editing = baseModal === "edit";
+    const busy = editing ? busyAction === "update-base" : busyAction === "create-base";
+    const selectedTone = selectedBase ? knowledgeBaseToneMap.get(selectedBase.id) ?? getKnowledgeBaseToneSeed(selectedBase) : null;
+
+    return (
+      <div className="modal-scrim" onClick={closeBaseModal}>
+        <div className="knowledge-modal knowledge-base-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="knowledge-base-modal-head">
+            <span className={clsx("knowledge-base-modal-icon", selectedTone !== null && `tone-${selectedTone}`)}>
+              <BookOpen size={18} />
+            </span>
+            <div className="knowledge-base-modal-title">
+              <strong>{editing ? "编辑知识库" : "创建知识库"}</strong>
+            </div>
+            <button className="knowledge-icon-button" onClick={closeBaseModal} disabled={controlsDisabled} title="关闭">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="knowledge-base-modal-fields">
+            <label>
+              <span>名称</span>
+              <input
+                value={draftBaseName}
+                onChange={(event) => setDraftBaseName(event.target.value)}
+                placeholder="知识库名称"
+                disabled={controlsDisabled}
+              />
+            </label>
+            <label>
+              <span>描述</span>
+              <textarea
+                value={draftBaseDescription}
+                onChange={(event) => setDraftBaseDescription(event.target.value)}
+                placeholder="描述"
+                disabled={controlsDisabled}
+                rows={3}
+              />
+            </label>
+          </div>
+          <div className="knowledge-modal-actions">
+            <button className="secondary-button" onClick={closeBaseModal} disabled={controlsDisabled}>
+              取消
+            </button>
+            <button
+              className="primary-button"
+              onClick={() => void (editing ? handleUpdateBase() : handleCreateBase())}
+              disabled={controlsDisabled}
+            >
+              {busy ? <LoaderCircle size={14} className="spin" /> : editing ? <Pencil size={14} /> : <Plus size={14} />}
+              {busy ? (editing ? "保存中…" : "创建中…") : editing ? "保存修改" : "创建知识库"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderComposerTrigger() {
     if (!selectedBase) return null;
 
@@ -403,7 +641,6 @@ export function KnowledgeView({
       KnowledgeTabKey,
       {
         title: string;
-        emptyTitle: string;
         action: string;
         busyTitle?: string;
         busyAction?: KnowledgeBusyAction;
@@ -411,21 +648,19 @@ export function KnowledgeView({
     > = {
       file: {
         title: "添加文件",
-        emptyTitle: "还没有文件",
         action: "添加文件",
         busyTitle: "正在导入文件…",
         busyAction: "add-file",
       },
-      note: { title: "添加笔记", emptyTitle: "还没有笔记", action: "新建笔记" },
+      note: { title: "添加笔记", action: "新建笔记" },
       directory: {
         title: "导入目录",
-        emptyTitle: "还没有目录",
         action: "选择目录",
         busyTitle: "正在导入目录…",
         busyAction: "add-directory",
       },
-      url: { title: "添加网址", emptyTitle: "还没有网址", action: "添加网址" },
-      website: { title: "添加网站", emptyTitle: "还没有网站", action: "添加网站" },
+      url: { title: "添加网址", action: "添加网址" },
+      website: { title: "添加网站", action: "添加网站" },
     };
     const copy = composerCopy[activeTab];
     const Icon = activeTab === "file" ? UploadCloud : activeTabMeta.icon;
@@ -445,42 +680,14 @@ export function KnowledgeView({
       openComposerModal(activeTab as KnowledgeComposerModal);
     }
 
-    if (showEmptyComposerStage) {
-      return (
-        <div className={clsx("knowledge-empty-upload", actionBusy && "busy")} aria-busy={actionBusy}>
-          <span className="knowledge-upload-illustration" aria-hidden="true">
-            {actionBusy ? <LoaderCircle size={30} className="spin" /> : <Icon size={34} />}
-          </span>
-          <div className="knowledge-empty-upload-copy">
-            <strong>{actionBusy ? (copy.busyTitle ?? "处理中…") : copy.emptyTitle}</strong>
-            <span>{selectedBase.name}</span>
-          </div>
-          <button
-            className="primary-button knowledge-upload-button"
-            onClick={handleComposerAction}
-            disabled={controlsDisabled}
-            type="button"
-          >
-            {actionBusy ? <LoaderCircle size={15} className="spin" /> : <Plus size={15} />}
-            {actionBusy ? "处理中…" : copy.action}
-          </button>
-        </div>
-      );
-    }
-
     return (
-      <div className={clsx("knowledge-composer-card", "compact", "trigger-only", actionBusy && "busy")}>
-        <span className="knowledge-composer-icon" aria-hidden="true">
-          {actionBusy ? <LoaderCircle size={16} className="spin" /> : <Icon size={16} />}
+      <div className={clsx("knowledge-ingest-panel", actionBusy && "busy")} aria-busy={actionBusy}>
+        <span className="knowledge-ingest-icon" aria-hidden="true">
+          {actionBusy ? <LoaderCircle size={16} className="spin" /> : <Icon size={17} />}
         </span>
-        <div className="knowledge-composer-copy">
-          <strong>{copy.title}</strong>
-          <span>
-            {currentItems.length} 项{currentTypeLabel}
-          </span>
-        </div>
+        <strong>{actionBusy ? (copy.busyTitle ?? "处理中…") : copy.title}</strong>
         <button
-          className="primary-button"
+          className="primary-button knowledge-ingest-action knowledge-upload-button"
           onClick={handleComposerAction}
           disabled={controlsDisabled}
           type="button"
@@ -580,60 +787,121 @@ export function KnowledgeView({
       <section className="knowledge-shell">
         <aside className="knowledge-sidebar">
           <header className="knowledge-sidebar-head">
-            <h2>
-              <span className="knowledge-sidebar-title-icon">
-                <BookOpen size={18} />
-              </span>
-              知识库
-            </h2>
+            <div className="knowledge-sidebar-title-row">
+              <h2>
+                知识库
+              </h2>
+              <button
+                aria-label="新建知识库"
+                className="knowledge-icon-button knowledge-sidebar-create-trigger"
+                disabled={controlsDisabled}
+                onClick={openCreateBaseModal}
+                title="新建知识库"
+                type="button"
+              >
+                <Plus size={16} />
+              </button>
+            </div>
           </header>
 
           <div className="knowledge-base-list">
-            {knowledgeBases.map((base) => (
-              <button
-                key={base.id}
-                className={clsx("knowledge-base-row", selectedBase?.id === base.id && "active")}
-                onClick={() => setSelectedBaseId(base.id)}
-                disabled={controlsDisabled}
-              >
-                <span className="knowledge-base-icon">
-                  <BookOpen size={16} />
-                </span>
-                <div className="knowledge-base-copy">
-                  <strong>{base.name}</strong>
-                  <span>{base.itemCount} 条资料</span>
-                </div>
-                <em>{formatRelativeTime(base.updatedAt)}</em>
-              </button>
-            ))}
-          </div>
+            {knowledgeBases.map((base) => {
+              const active = selectedBase?.id === base.id;
+              const menuOpen = openBaseActionMenuId === base.id;
+              const confirmingDelete = confirmDeleteBaseId === base.id;
+              const tone = knowledgeBaseToneMap.get(base.id) ?? getKnowledgeBaseToneSeed(base);
 
-          <div className="knowledge-sidebar-create">
-            <div className="knowledge-sidebar-create-head">
-              <strong>新建知识库</strong>
-            </div>
-            <input
-              value={draftBaseName}
-              onChange={(event) => setDraftBaseName(event.target.value)}
-              placeholder="例如：产品文档"
-              disabled={controlsDisabled}
-            />
-            <textarea
-              value={draftBaseDescription}
-              onChange={(event) => setDraftBaseDescription(event.target.value)}
-              placeholder="可选描述"
-              disabled={controlsDisabled}
-              rows={3}
-            />
-            <button
-              type="button"
-              className="primary-button knowledge-create-button"
-              onClick={() => void handleCreateBase()}
-              disabled={controlsDisabled}
-            >
-              {busyAction === "create-base" ? <LoaderCircle size={14} className="spin" /> : <Plus size={14} />}
-              {busyAction === "create-base" ? "创建中…" : "创建知识库"}
-            </button>
+              return (
+                <div
+                  key={base.id}
+                  className={clsx("knowledge-base-row", `tone-${tone}`, active && "active", menuOpen && "menu-open")}
+                >
+                  <button
+                    className="knowledge-base-select"
+                    onClick={() => setSelectedBaseId(base.id)}
+                    disabled={controlsDisabled}
+                    type="button"
+                  >
+                    <span className={clsx("knowledge-base-icon", `tone-${tone}`)} aria-hidden="true">
+                      <BookOpen size={15} />
+                    </span>
+                    <div className="knowledge-base-copy">
+                      <strong>{base.name}</strong>
+                    </div>
+                    <b className="knowledge-base-count" aria-label={`${base.itemCount} 条资料`}>
+                      {base.itemCount}
+                    </b>
+                  </button>
+
+                  <div className="knowledge-base-row-actions">
+                    <button
+                      aria-label={`管理知识库 ${base.name}`}
+                      className="knowledge-icon-button knowledge-base-menu-trigger"
+                      disabled={controlsDisabled}
+                      onClick={() => {
+                        setOpenBaseActionMenuId((current) => (current === base.id ? null : base.id));
+                        setConfirmDeleteBaseId(null);
+                      }}
+                      title="更多操作"
+                      type="button"
+                    >
+                      <MoreHorizontal size={16} />
+                    </button>
+
+                    {menuOpen ? (
+                      <div className="knowledge-base-action-menu">
+                        {confirmingDelete ? (
+                          <>
+                            <button
+                              className="knowledge-inline-action"
+                              onClick={() => setConfirmDeleteBaseId(null)}
+                              disabled={controlsDisabled}
+                              type="button"
+                            >
+                              取消
+                            </button>
+                            <button
+                              className="knowledge-inline-action danger"
+                              onClick={() => void handleDeleteBase(base.id)}
+                              disabled={controlsDisabled}
+                              type="button"
+                            >
+                              {busyAction === "delete-base" ? (
+                                <LoaderCircle size={14} className="spin" />
+                              ) : (
+                                <Trash2 size={14} />
+                              )}
+                              删除
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="knowledge-base-menu-item"
+                              onClick={() => openEditBaseModal(base)}
+                              disabled={controlsDisabled}
+                              type="button"
+                            >
+                              <Pencil size={14} />
+                              编辑
+                            </button>
+                            <button
+                              className="knowledge-base-menu-item danger"
+                              onClick={() => setConfirmDeleteBaseId(base.id)}
+                              disabled={controlsDisabled}
+                              type="button"
+                            >
+                              <Trash2 size={14} />
+                              删除
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </aside>
 
@@ -642,100 +910,21 @@ export function KnowledgeView({
             {selectedBase ? (
               <div className="knowledge-detail">
                 <section className="knowledge-hero simple">
-                  <div className="knowledge-hero-head">
-                    <div className="knowledge-hero-copy">
-                      <h3>{selectedBase.name}</h3>
-                      {selectedBase.description?.trim() ? <p>{selectedBase.description.trim()}</p> : null}
-                    </div>
-                    <div className="knowledge-hero-actions">
-                      <button
-                        className="knowledge-icon-button"
-                        onClick={() => void handleRefresh()}
-                        disabled={controlsDisabled}
-                        title="刷新知识库"
-                      >
-                        {refreshBusy ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}
-                      </button>
-
-                      {confirmDeleteBase ? (
-                        <>
-                          <button
-                            className="knowledge-icon-button"
-                            onClick={() => setConfirmDeleteBase(false)}
-                            disabled={controlsDisabled}
-                            title="取消删除"
-                          >
-                            <X size={16} />
-                          </button>
-                          <button
-                            className="knowledge-icon-button danger"
-                            onClick={() => void handleDeleteBase()}
-                            disabled={controlsDisabled}
-                            title="确认删除知识库"
-                          >
-                            {busyAction === "delete-base" ? (
-                              <LoaderCircle size={16} className="spin" />
-                            ) : (
-                              <Trash2 size={16} />
-                            )}
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="knowledge-icon-button"
-                          onClick={() => setConfirmDeleteBase(true)}
-                          disabled={controlsDisabled}
-                          title="删除知识库"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
                   <div className="knowledge-hero-main">
-                    <div className="knowledge-settings-strip">
-                      <label className="knowledge-setting-card">
+                    <div className="knowledge-embedding-row">
+                      <div className="knowledge-setting-card knowledge-embedding-card">
                         <span className="knowledge-setting-label">
                           <Settings2 size={14} />
-                          提供商
+                          嵌入模型
+                          <span className="knowledge-help-tip" aria-label="嵌入模型说明" tabIndex={0}>
+                            <HelpCircle size={13} />
+                            <span className="knowledge-help-tooltip" role="tooltip">
+                              把资料转换成可检索向量，影响知识库搜索效果。
+                            </span>
+                          </span>
                         </span>
-                        <SurfaceSelect
-                          align="left"
-                          ariaLabel="选择 Embedding 提供商"
-                          className="knowledge-setting-select"
-                          disabled={controlsDisabled}
-                          emptyLabel="暂无提供商"
-                          fullWidth
-                          onChange={onChangeEmbeddingProvider}
-                          options={embeddingProviderOptions}
-                          value={embeddingProvider?.id ?? config.embeddingProviderId}
-                        />
-                      </label>
-
-                      <label className="knowledge-setting-card grow">
-                        <span className="knowledge-setting-label">模型</span>
-                        {embeddingModels.length > 0 ? (
-                          <SurfaceSelect
-                            align="left"
-                            ariaLabel="选择 Embedding 模型"
-                            className="knowledge-setting-select wide"
-                            disabled={controlsDisabled}
-                            emptyLabel="无可用的 Embedding 模型"
-                            fullWidth
-                            onChange={onChangeEmbeddingModel}
-                            options={embeddingModelOptions}
-                            value={activeEmbeddingModel?.id ?? config.embeddingModel}
-                          />
-                        ) : (
-                          <div
-                            className="knowledge-setting-empty"
-                            title={`${embeddingProvider?.name ?? "当前提供商"} 无可用的 Embedding 模型`}
-                          >
-                            <strong>无可用的 Embedding 模型</strong>
-                          </div>
-                        )}
-                      </label>
+                        {renderEmbeddingPicker()}
+                      </div>
                     </div>
                   </div>
                 </section>
@@ -873,6 +1062,7 @@ export function KnowledgeView({
         </div>
       </section>
 
+      {renderBaseModal()}
       {renderComposerModal()}
     </>
   );

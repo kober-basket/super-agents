@@ -731,11 +731,19 @@ export default function App() {
     }
 
     const currentProviderId = config.knowledgeBase.embeddingProviderId;
-    if (currentProviderId && config.modelProviders.some((item) => item.id === currentProviderId)) {
+    const currentProvider = config.modelProviders.find((item) => item.id === currentProviderId);
+    if (currentProvider?.models.some((model) => model.enabled !== false && isEmbeddingModel(model))) {
       return;
     }
 
-    const fallbackProviderId = activeModel?.providerId || config.modelProviders[0]?.id || "";
+    const activeEmbeddingProvider =
+      activeModel?.providerId && config.modelProviders.find((item) => item.id === activeModel.providerId);
+    const fallbackProviderId =
+      activeEmbeddingProvider?.models.some((model) => model.enabled !== false && isEmbeddingModel(model))
+        ? activeEmbeddingProvider.id
+        : config.modelProviders.find((item) =>
+            item.models.some((model) => model.enabled !== false && isEmbeddingModel(model)),
+          )?.id || "";
     if (!fallbackProviderId) return;
 
     updateKnowledgeBaseConfig({ embeddingProviderId: fallbackProviderId });
@@ -745,7 +753,7 @@ export default function App() {
     const provider = config.modelProviders.find((item) => item.id === config.knowledgeBase.embeddingProviderId);
     if (!provider) return;
 
-    const embeddingModels = provider.models.filter(isEmbeddingModel);
+    const embeddingModels = provider.models.filter((model) => model.enabled !== false && isEmbeddingModel(model));
     if (embeddingModels.length === 0) {
       if (config.knowledgeBase.embeddingModel) {
         updateKnowledgeBaseConfig({ embeddingModel: "" });
@@ -1956,6 +1964,32 @@ export default function App() {
     }
   }
 
+  async function updateKnowledgeBase(baseId: string, name: string, description: string) {
+    const trimmedName = name.trim();
+    const trimmedDescription = description.trim();
+    if (!trimmedName) {
+      setToast("请先输入知识库名称");
+      return false;
+    }
+
+    knowledgeLoadedRef.current = true;
+    setKnowledgeRefreshing(true);
+    try {
+      const payload = await workspaceClient.updateKnowledgeBase({
+        id: baseId,
+        name: trimmedName,
+        description: trimmedDescription,
+      });
+      setKnowledgeBases(payload.knowledgeBases);
+      return true;
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "编辑知识库失败");
+      return false;
+    } finally {
+      setKnowledgeRefreshing(false);
+    }
+  }
+
   async function deleteKnowledgeBase(baseId: string) {
     setKnowledgeRefreshing(true);
     try {
@@ -2897,10 +2931,12 @@ export default function App() {
             knowledgeBases={knowledgeBases}
             knowledgeRefreshing={knowledgeRefreshing}
             onRefresh={refreshKnowledgeView}
-            onChangeEmbeddingProvider={(embeddingProviderId) => updateKnowledgeBaseConfig({ embeddingProviderId })}
-            onChangeEmbeddingModel={(embeddingModel) => updateKnowledgeBaseConfig({ embeddingModel })}
+            onChangeEmbeddingSelection={(embeddingProviderId, embeddingModel) =>
+              updateKnowledgeBaseConfig({ embeddingProviderId, embeddingModel })
+            }
             onToast={(message) => setToast(message)}
             onCreateKnowledgeBase={createKnowledgeBase}
+            onUpdateKnowledgeBase={updateKnowledgeBase}
             onDeleteKnowledgeBase={deleteKnowledgeBase}
             onAddKnowledgeFiles={addKnowledgeFiles}
             onAddKnowledgeDirectory={addKnowledgeDirectory}

@@ -15,7 +15,7 @@
 - `electron/browser-automation-service.ts`：内置浏览器 webview 的 agent 自动化服务，负责页面注册、可访问快照、交互和截图。
 - `electron/mail/`：本地邮件账号、授权、凭据存储和 OAuth/API/IMAP/SMTP 辅助模块。
 - `electron/agent-core/openai/`：OpenAI-compatible 网关的消息映射、SSE 解析等 provider 辅助模块。
-- `electron/tool-catalog.ts`：内置工具与 MCP 工具汇总成工作区工具目录。
+- `electron/tool-catalog.ts`：内置工具与 MCP 工具汇总成工作区工具目录，并维护内置工具分类元数据。
 - `electron/memory-service.ts`：本地长期记忆的结构化存储、搜索和 prompt context 构建。
 - `electron/builtin-skills/`：随应用打包的内置技能。
 - `src/features/chat/`：聊天工作区、预览和消息可视化。
@@ -67,7 +67,7 @@ npm run preview
 
 - Agent profile：`AgentDefinition` 描述 agent 的身份、角色、prompt、模型、工具、技能、权限模式和最大轮次。
 - Prompt composition：`PromptComposer` 负责组合 runtime prompt、active agent instructions、skills、memory、workspace 和 additional instructions。
-- Tool system：`ToolDefinition` 定义工具 schema、risk 和 `execute`；内置工具由 `electron/agent-core/builtin-tools.ts` 聚合，独立工具族放在 `electron/agent-core/builtin-tools/`，MCP 工具通过 adapter 进入工作区工具目录。
+- Tool system：`ToolDefinition` 定义工具 schema、risk 和 `execute`；内置工具由 `electron/agent-core/builtin-tools.ts` 聚合，独立工具族放在 `electron/agent-core/builtin-tools/`，MCP 工具通过 adapter 进入工作区工具目录，工具目录负责给内置工具补充展示分类。
 - Memory：`MemoryService` 管理 app userData 下的结构化长期记忆，`prepareChatPrompt()` 在每轮按当前请求和 workspace scope 构建 `memoryPrompt`，内置 `memory` 工具通过同一 service 读写并在写入前走审批。
 - Permission system：`PermissionManager` 根据 agent policy、工具风险、审批要求和 full filesystem access 做 allow/ask/deny。
 - Execution loop：`AgentCore.sendTurn()` 负责流式模型事件、工具调用、重复工具调用去重、工具结果截断、错误净化和最终回答合成；执行阶段的可见文本先作为 provisional assistant text 流式输出，如果随后出现工具调用，`chat-orchestrator` 会把这段临时正文折回 runtime trace 过程状态。工具结果之后 runtime 会暴露内部 `finish_task` 完成信号，并以 `tool_choice: required` 要求模型继续调用工具或调用 `finish_task`，模型调用后进入关闭工具的最终回答阶段，最终阶段的文本直接作为用户正文流式输出；未调用完成信号的无工具文本仍作为兼容性的最终回答候选。

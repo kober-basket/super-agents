@@ -21,6 +21,7 @@ import type {
   KnowledgeAddNoteInput,
   KnowledgeAddUrlInput,
   KnowledgeBaseCreateInput,
+  KnowledgeBaseUpdateInput,
   KnowledgeDeleteItemInput,
   KnowledgeSearchPayload,
   MailAccountCreateInput,
@@ -72,6 +73,7 @@ declare global {
       writeClipboardText: (text: string) => Promise<void>;
       listKnowledgeBases: () => Promise<KnowledgeCatalogPayload>;
       createKnowledgeBase: (payload: KnowledgeBaseCreateInput) => Promise<KnowledgeCatalogPayload>;
+      updateKnowledgeBase: (payload: KnowledgeBaseUpdateInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeFiles: (payload: KnowledgeAddFilesInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeDirectory: (payload: KnowledgeAddDirectoryInput) => Promise<KnowledgeCatalogPayload>;
       addKnowledgeNote: (payload: KnowledgeAddNoteInput) => Promise<KnowledgeCatalogPayload>;

@@ -1,22 +1,37 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import {
+  BrainCircuit,
+  Camera,
   ClipboardList,
   CloudDownload,
+  Code2,
+  Database,
   FilePlus2,
   FileSearch,
+  FileUp,
   FolderTree,
   GitPullRequest,
   Globe,
+  Inbox,
+  Keyboard,
   Layers,
   ListChecks,
+  Mail,
+  MailCheck,
+  MailPlus,
   MessageCircleQuestion,
+  MousePointerClick,
+  Network,
+  PanelTop,
   PencilLine,
   PlugZap,
   Plus,
   Radar,
   Search,
+  Send,
   TerminalSquare,
+  TextCursorInput,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -57,23 +72,61 @@ const TOOL_ICON_TONES = [
 ] as const;
 
 type ToolIconTone = (typeof TOOL_ICON_TONES)[number];
+type ToolVisual = { icon: LucideIcon; tone: ToolIconTone };
 
-const BUILTIN_TOOL_VISUALS: Partial<Record<string, { icon: LucideIcon; tone: ToolIconTone }>> = {
+const BUILTIN_TOOL_VISUALS: Partial<Record<string, ToolVisual>> = {
   apply_patch: { icon: GitPullRequest, tone: "skill-accent-violet" },
   bash: { icon: TerminalSquare, tone: "skill-accent-indigo" },
+  browser_click: { icon: MousePointerClick, tone: "skill-accent-sky" },
+  browser_drag: { icon: MousePointerClick, tone: "skill-accent-sky" },
+  browser_evaluate: { icon: Code2, tone: "skill-accent-violet" },
+  browser_fill: { icon: TextCursorInput, tone: "skill-accent-mint" },
+  browser_fill_form: { icon: TextCursorInput, tone: "skill-accent-mint" },
+  browser_get_console_message: { icon: TerminalSquare, tone: "skill-accent-indigo" },
+  browser_get_network_request: { icon: Network, tone: "skill-accent-sky" },
+  browser_hover: { icon: MousePointerClick, tone: "skill-accent-sky" },
+  browser_list_console_messages: { icon: TerminalSquare, tone: "skill-accent-indigo" },
+  browser_list_network_requests: { icon: Network, tone: "skill-accent-sky" },
+  browser_list_pages: { icon: PanelTop, tone: "skill-accent-sky" },
+  browser_navigate: { icon: Globe, tone: "skill-accent-sky" },
+  browser_press_key: { icon: Keyboard, tone: "skill-accent-indigo" },
+  browser_screenshot: { icon: Camera, tone: "skill-accent-sky" },
+  browser_select_page: { icon: PanelTop, tone: "skill-accent-sky" },
+  browser_snapshot: { icon: Camera, tone: "skill-accent-sky" },
+  browser_type_text: { icon: Keyboard, tone: "skill-accent-indigo" },
+  browser_upload_file: { icon: FileUp, tone: "skill-accent-amber" },
+  browser_wait_for: { icon: PanelTop, tone: "skill-accent-amber" },
   edit: { icon: PencilLine, tone: "skill-accent-amber" },
   glob: { icon: Radar, tone: "skill-accent-sky" },
   grep: { icon: Search, tone: "skill-accent-sky" },
   list: { icon: FolderTree, tone: "skill-accent-mint" },
+  mail: { icon: Inbox, tone: "skill-accent-rose" },
+  mail_auth: { icon: MailCheck, tone: "skill-accent-mint" },
+  mail_draft: { icon: MailPlus, tone: "skill-accent-amber" },
+  mail_send: { icon: Send, tone: "skill-accent-rose" },
+  memory: { icon: Database, tone: "skill-accent-mint" },
   multi_edit: { icon: Layers, tone: "skill-accent-amber" },
   question: { icon: MessageCircleQuestion, tone: "skill-accent-violet" },
   read: { icon: FileSearch, tone: "skill-accent-mint" },
+  skill: { icon: BrainCircuit, tone: "skill-accent-violet" },
   todo_read: { icon: ClipboardList, tone: "skill-accent-indigo" },
   todo_write: { icon: ListChecks, tone: "skill-accent-mint" },
   web_fetch: { icon: CloudDownload, tone: "skill-accent-rose" },
   web_search: { icon: Globe, tone: "skill-accent-sky" },
   write: { icon: FilePlus2, tone: "skill-accent-amber" },
 };
+
+const CATEGORY_TOOL_VISUALS: Record<NonNullable<WorkspaceTool["category"]>, ToolVisual> = {
+  browser: { icon: PanelTop, tone: "skill-accent-sky" },
+  context: { icon: BrainCircuit, tone: "skill-accent-violet" },
+  mail: { icon: Mail, tone: "skill-accent-rose" },
+  other: { icon: Wrench, tone: "skill-accent-indigo" },
+  runtime: { icon: TerminalSquare, tone: "skill-accent-indigo" },
+  web: { icon: Globe, tone: "skill-accent-sky" },
+  workspace: { icon: FolderTree, tone: "skill-accent-mint" },
+};
+
+const DEFAULT_TOOL_CATEGORY_ORDER = 90;
 
 export function ToolsView({
   mcpAdvancedOpen,
@@ -94,6 +147,7 @@ export function ToolsView({
   const [pendingNewServer, setPendingNewServer] = useState(false);
 
   const builtinTools = tools.filter((tool) => tool.source === "builtin");
+  const builtinToolGroups = groupBuiltinTools(builtinTools);
 
   useEffect(() => {
     if (!pendingNewServer || mcpServers.length === 0) return;
@@ -157,12 +211,7 @@ export function ToolsView({
                 );
               })}
             </div>
-          ) : (
-            <div className="empty-panel compact">
-              <strong>还没有 MCP 服务</strong>
-              <p>添加一个 MCP 服务后，点击服务进入配置页获取和调试工具。</p>
-            </div>
-          )}
+          ) : null}
         </section>
 
         <section className="skills-section">
@@ -170,27 +219,21 @@ export function ToolsView({
             <h3>内置工具</h3>
           </div>
 
-          {builtinTools.length > 0 ? (
-            <div className="tool-list">
-              {builtinTools.map((tool, index) => {
-                const visual = resolveBuiltinToolVisual(tool, index);
-                return (
-                <article key={tool.id} className="tool-list-row skill-list-row skill-tile">
-                  <ToolIcon icon={visual.icon} label={tool.name} tone={visual.tone} />
-                  <div className="skill-tile-copy">
-                    <strong title={tool.name}>{tool.name}</strong>
-                    {tool.description ? (
-                      <p className="tool-description" title={tool.description}>
-                        {tool.description}
-                      </p>
-                    ) : null}
+          {builtinToolGroups.length > 0 ? (
+            <div className="tool-category-list">
+              {builtinToolGroups.map((group) => (
+                <section key={group.key} className="tool-category">
+                  <div className="tool-category-head">
+                    <h4>{group.label}</h4>
+                    <span>{group.tools.length} 个</span>
                   </div>
-                  <div className="skill-tile-status">
-                    <span className="skill-status-chip enabled">可用</span>
+                  <div className="tool-list">
+                    {group.tools.map((tool, index) => (
+                      <BuiltinToolRow key={tool.id} index={index} tool={tool} />
+                    ))}
                   </div>
-                </article>
-                );
-              })}
+                </section>
+              ))}
             </div>
           ) : (
             <div className="empty-panel compact">
@@ -220,6 +263,51 @@ export function ToolsView({
   );
 }
 
+function BuiltinToolRow({ index, tool }: { index: number; tool: WorkspaceTool }) {
+  const visual = resolveBuiltinToolVisual(tool, index);
+  return (
+    <article className="tool-list-row skill-list-row skill-tile">
+      <ToolIcon icon={visual.icon} label={tool.name} tone={visual.tone} />
+      <div className="skill-tile-copy">
+        <strong title={tool.name}>{tool.name}</strong>
+        {tool.description ? (
+          <p className="tool-description" title={tool.description}>
+            {tool.description}
+          </p>
+        ) : null}
+      </div>
+      <div className="skill-tile-status">
+        <span className="skill-status-chip enabled">可用</span>
+      </div>
+    </article>
+  );
+}
+
+function groupBuiltinTools(tools: WorkspaceTool[]) {
+  const groups = new Map<string, { key: string; label: string; order: number; tools: WorkspaceTool[] }>();
+  for (const tool of tools) {
+    const key = tool.category ?? "other";
+    const group = groups.get(key) ?? {
+      key,
+      label: tool.categoryLabel ?? "其他",
+      order: tool.categoryOrder ?? DEFAULT_TOOL_CATEGORY_ORDER,
+      tools: [],
+    };
+    group.tools.push(tool);
+    groups.set(key, group);
+  }
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      tools: group.tools.slice().sort((left, right) => left.name.localeCompare(right.name, "zh-CN")),
+    }))
+    .sort((left, right) => {
+      const categoryOrder = left.order - right.order;
+      if (categoryOrder !== 0) return categoryOrder;
+      return left.label.localeCompare(right.label, "zh-CN");
+    });
+}
+
 function ToolIcon({ icon: Icon, label, tone }: { icon: LucideIcon; label: string; tone: ToolIconTone }) {
   return (
     <div className={clsx("skill-icon-shell", "skill-icon-premium", tone)} title={label}>
@@ -231,7 +319,13 @@ function ToolIcon({ icon: Icon, label, tone }: { icon: LucideIcon; label: string
 
 function resolveBuiltinToolVisual(tool: WorkspaceTool, index: number) {
   const name = normalizeToolName(tool.name);
-  return BUILTIN_TOOL_VISUALS[name] ?? { icon: Wrench, tone: TOOL_ICON_TONES[index % TOOL_ICON_TONES.length] };
+  return (
+    BUILTIN_TOOL_VISUALS[name] ??
+    (tool.category ? CATEGORY_TOOL_VISUALS[tool.category] : undefined) ?? {
+      icon: Wrench,
+      tone: TOOL_ICON_TONES[index % TOOL_ICON_TONES.length],
+    }
+  );
 }
 
 function normalizeToolName(name: string) {
