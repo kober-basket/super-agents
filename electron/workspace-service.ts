@@ -59,6 +59,7 @@ import type {
   WorkspaceToolCatalog,
 } from "../src/types";
 import { KnowledgeService } from "./knowledge-service";
+import { createRuntimeProcessEnv } from "./runtime-support";
 import { readJsonFile, writeJsonFile } from "./store";
 import { buildWorkspaceToolCatalog } from "./tool-catalog";
 
@@ -86,6 +87,15 @@ const LEGACY_DEFAULT_PROVIDER_MODEL_IDS = [
 const DEFAULT_MODEL_PROVIDERS: ModelProviderConfig[] = getDefaultModelProviders();
 
 const LEGACY_DEFAULT_SKILL_IDS = new Set(["meeting-minutes", "email-draft", "schedule-summary"]);
+// Keep the imagegen names as legacy fallbacks for skills copied before icon.* became the canonical asset name.
+const SKILL_ICON_ASSET_CANDIDATES = [
+  "assets/icon.svg",
+  "assets/imagegen-small.svg",
+  "assets/icon.png",
+  "assets/imagegen.png",
+  "assets/logo.svg",
+  "assets/logo.png",
+] as const;
 const DEFAULT_SKILLS: SkillConfig[] = readBuiltinSkillConfigs();
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -693,6 +703,22 @@ function readSkillOpenAiMetadataSync(skillRoot: string): SkillOpenAiMetadata {
   }
 }
 
+function readSkillIconDataUrlSync(skillRoot: string) {
+  for (const relativePath of SKILL_ICON_ASSET_CANDIDATES) {
+    const assetPath = path.join(skillRoot, relativePath);
+    if (!existsSync(assetPath)) continue;
+
+    try {
+      const mimeType = mime.lookup(assetPath) || "application/octet-stream";
+      return `data:${mimeType};base64,${readFileSync(assetPath).toString("base64")}`;
+    } catch {
+      continue;
+    }
+  }
+
+  return undefined;
+}
+
 async function readSkillOpenAiMetadata(skillRoot: string): Promise<SkillOpenAiMetadata> {
   try {
     return parseSkillOpenAiMetadata(await readFile(path.join(skillRoot, "agents", "openai.yaml"), "utf8"));
@@ -750,6 +776,7 @@ function readBuiltinSkillConfigs(): SkillConfig[] {
           name,
           description: parsed.description || "Built-in skill",
           ...readSkillOpenAiMetadataSync(skillRoot),
+          iconDataUrl: readSkillIconDataUrlSync(skillRoot),
           kind: "command" as const,
           command: stripSkillFrontmatter(content, name),
           enabled: true,
@@ -787,6 +814,10 @@ function normalizeSkillList(rawSkills: unknown, builtinSkills: SkillConfig[] = D
     if (!id || !name || kind !== "command") return [];
     if (builtinIds.has(id)) return [];
     if (!item?.sourcePath && (LEGACY_DEFAULT_SKILL_IDS.has(id) || LEGACY_DEFAULT_SKILL_IDS.has(name))) return [];
+    const sourcePath = typeof item?.sourcePath === "string" ? item.sourcePath : undefined;
+    const iconDataUrl =
+      (sourcePath ? readSkillIconDataUrlSync(sourcePath) : undefined) ||
+      (typeof item?.iconDataUrl === "string" ? item.iconDataUrl : undefined);
 
     return [
       {
@@ -796,12 +827,13 @@ function normalizeSkillList(rawSkills: unknown, builtinSkills: SkillConfig[] = D
         displayName: typeof item?.displayName === "string" ? item.displayName : undefined,
         shortDescription: typeof item?.shortDescription === "string" ? item.shortDescription : undefined,
         brandColor: typeof item?.brandColor === "string" ? item.brandColor : undefined,
+        iconDataUrl,
         defaultPrompt: typeof item?.defaultPrompt === "string" ? item.defaultPrompt : undefined,
         allowImplicitInvocation: typeof item?.allowImplicitInvocation === "boolean" ? item.allowImplicitInvocation : undefined,
         kind: "command",
         command: String(item?.command ?? ""),
         enabled: item?.enabled !== false,
-        sourcePath: typeof item?.sourcePath === "string" ? item.sourcePath : undefined,
+        sourcePath,
         system: item?.system === true,
       },
     ];
@@ -822,6 +854,7 @@ async function readLocalSkill(skillRoot: string): Promise<SkillConfig | null> {
       name,
       description: parsed.description || "Local skill",
       ...metadata,
+      iconDataUrl: readSkillIconDataUrlSync(skillRoot),
       kind: "command",
       command: body,
       enabled: true,
@@ -843,6 +876,7 @@ async function readRuntimeSkill(skillRoot: string, location: string): Promise<Ru
       name,
       description: parsed.description || "Local skill",
       ...metadata,
+      iconDataUrl: readSkillIconDataUrlSync(skillRoot),
       location,
       content,
     };
@@ -1053,12 +1087,13 @@ function normalizeRelativePath(rootPath: string, targetPath: string) {
   return path.relative(rootPath, targetPath).replace(/\\/g, "/");
 }
 
-function runShellCommand(command: string, cwd: string): Promise<Omit<TerminalCommandResult, "command" | "cwd" | "durationMs">> {
+async function runShellCommand(command: string, cwd: string): Promise<Omit<TerminalCommandResult, "command" | "cwd" | "durationMs">> {
   const shell = process.platform === "win32" ? "powershell.exe" : "/bin/sh";
   const args = process.platform === "win32" ? ["-NoProfile", "-Command", command] : ["-lc", command];
+  const env = await createRuntimeProcessEnv();
 
   return new Promise((resolve) => {
-    execFile(shell, args, { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(shell, args, { cwd, env, timeout: 30_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
       const exitCode =
         typeof (error as NodeJS.ErrnoException | null)?.errno === "number"
           ? 1

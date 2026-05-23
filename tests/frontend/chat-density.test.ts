@@ -83,6 +83,15 @@ test("assistant standalone bold markdown lines keep body typography", () => {
   );
 });
 
+test("assistant markdown blockquotes reset browser margins to align with transcript content", () => {
+  const css = readStyles();
+
+  assert.match(
+    css,
+    /\.message-text\s+blockquote,\s*\.preview-markdown\s+blockquote\s*{[^}]*margin:\s*8px\s+0\s+12px/s,
+  );
+});
+
 test("runtime transcript typography uses the same restrained text colors", () => {
   const css = readStyles();
 

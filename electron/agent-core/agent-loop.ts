@@ -574,6 +574,7 @@ export class AgentCore {
       }));
 
       let assistantText = "";
+      let reasoningContent = "";
       let toolCallsThisStep = 0;
       let calledTool = false;
       const assistantToolCalls: ToolCall[] = [];
@@ -589,6 +590,9 @@ export class AgentCore {
         toolChoice: "auto",
       })) {
         if (event.type === "reasoning_delta") {
+          if (event.reasoningContent !== undefined) {
+            reasoningContent += event.reasoningContent;
+          }
           yield {
             type: "thought_delta",
             sessionId: input.sessionId,
@@ -795,11 +799,15 @@ export class AgentCore {
       const pendingToolMessages = toolMessageSlots.filter((message): message is AgentMessage => Boolean(message));
 
       if (assistantToolCalls.length > 0 || assistantText) {
-        session.messages.push({
+        const assistantMessage: AgentMessage = {
           role: "assistant",
           content: assistantText,
           toolCalls: assistantToolCalls,
-        });
+        };
+        if (assistantToolCalls.length > 0 && reasoningContent.length > 0) {
+          assistantMessage.reasoningContent = reasoningContent;
+        }
+        session.messages.push(assistantMessage);
         this.sessions.save(session);
       }
       session.messages.push(...pendingToolMessages);

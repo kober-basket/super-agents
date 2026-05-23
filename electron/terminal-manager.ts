@@ -4,6 +4,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type * as acp from "@agentclientprotocol/sdk";
 
 import type { ChatTerminalOutput } from "../src/types";
+import { createRuntimeProcessEnv } from "./runtime-support";
 
 interface ManagedTerminal {
   id: string;
@@ -72,12 +73,13 @@ export class TerminalManager {
 
   async createTerminal(params: acp.CreateTerminalRequest): Promise<acp.CreateTerminalResponse> {
     const terminalId = randomUUID();
+    const env = await createRuntimeProcessEnv({
+      ...process.env,
+      ...Object.fromEntries((params.env ?? []).map((entry) => [entry.name, entry.value])),
+    });
     const child = spawn(params.command, params.args ?? [], {
       cwd: params.cwd ?? process.cwd(),
-      env: {
-        ...process.env,
-        ...Object.fromEntries((params.env ?? []).map((entry) => [entry.name, entry.value])),
-      },
+      env,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     });

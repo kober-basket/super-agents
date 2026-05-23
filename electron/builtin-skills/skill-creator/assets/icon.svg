@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="8" y1="5" x2="57" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9B8CFF"/>
+      <stop offset="0.52" stop-color="#6752E8"/>
+      <stop offset="1" stop-color="#312E81"/>
+    </linearGradient>
+    <linearGradient id="card" x1="16" y1="15" x2="47" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#D8E2FF" stop-opacity="0.86"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#bg)"/>
+  <path d="M13 17.5C13 14.46 15.46 12 18.5 12H40.5C43.54 12 46 14.46 46 17.5V39.5C46 42.54 43.54 45 40.5 45H18.5C15.46 45 13 42.54 13 39.5V17.5Z" fill="white" opacity="0.18"/>
+  <path d="M20 20.5C20 17.46 22.46 15 25.5 15H44.5C47.54 15 50 17.46 50 20.5V45.5C50 48.54 47.54 51 44.5 51H25.5C22.46 51 20 48.54 20 45.5V20.5Z" fill="url(#card)"/>
+  <path d="M27 26H43M27 33H39M27 40H35" stroke="#4C3FC7" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M16 48L21 43L26 48L21 53L16 48Z" fill="#7DD3FC"/>
+  <path d="M48 11V19M52 15H44" stroke="#FDE68A" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="16" cy="16" r="3" fill="#FDE68A"/>
+</svg>

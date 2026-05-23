@@ -10782,6 +10782,7 @@ textarea:focus,
 .activity-markdown blockquote,
 .message-text blockquote,
 .preview-markdown blockquote {
+  margin: 8px 0 12px;
   padding: 10px 12px;
   border-left: 3px solid rgba(var(--accent-rgb), 0.28);
   background: rgba(var(--accent-rgb), 0.05);
@@ -12566,4 +12567,215 @@ textarea:focus,
   .remote-card-actions {
     justify-content: flex-start;
   }
+}
+
+.skill-icon-shell.skill-icon-premium,
+.skill-icon-shell.tool-icon-shell {
+  --icon-start: #eef2f7;
+  --icon-end: #94a3b8;
+  --icon-ink: #f8fafc;
+  --icon-shadow: #64748b;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid color-mix(in srgb, var(--icon-end) 36%, #ffffff);
+  background:
+    radial-gradient(circle at 24% 18%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.26) 28%, transparent 52%),
+    linear-gradient(145deg, color-mix(in srgb, var(--icon-start) 90%, #ffffff), var(--icon-end));
+  color: var(--icon-ink);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.56),
+    inset 0 -18px 24px rgba(15, 23, 42, 0.14),
+    0 12px 24px color-mix(in srgb, var(--icon-shadow) 24%, transparent);
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.skill-icon-shell.skill-icon-asset {
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    0 12px 24px rgba(15, 23, 42, 0.1);
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.skill-icon-shell.skill-icon-asset img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.skill-tile:hover .skill-icon-shell.skill-icon-asset,
+.skill-tile:focus-visible .skill-icon-shell.skill-icon-asset {
+  transform: translateY(-1px) scale(1.03);
+  border-color: rgba(15, 23, 42, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 16px 30px rgba(15, 23, 42, 0.14);
+}
+
+.skill-icon-shell.skill-icon-premium::before,
+.skill-icon-shell.tool-icon-shell::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.58), transparent 42%),
+    radial-gradient(circle at 78% 78%, rgba(255, 255, 255, 0.34), transparent 34%);
+  opacity: 0.8;
+}
+
+.skill-icon-shell.skill-icon-premium::after,
+.skill-icon-shell.tool-icon-shell::after {
+  content: "";
+  position: absolute;
+  right: -12px;
+  bottom: -13px;
+  z-index: 0;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 999px;
+  opacity: 0.46;
+}
+
+.skill-icon-shell.skill-icon-premium svg,
+.skill-icon-shell.tool-icon-shell svg {
+  position: relative;
+  z-index: 2;
+  filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.2));
+}
+
+.skill-icon-orbit,
+.tool-icon-spark {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  z-index: 2;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--icon-ink) 86%, #ffffff);
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.24),
+    0 0 14px color-mix(in srgb, var(--icon-start) 76%, transparent);
+}
+
+.skill-tile:hover .skill-icon-shell.skill-icon-premium,
+.skill-tile:focus-visible .skill-icon-shell.skill-icon-premium,
+.skill-tile:hover .skill-icon-shell.tool-icon-shell,
+.skill-tile:focus-visible .skill-icon-shell.tool-icon-shell {
+  transform: translateY(-1px) scale(1.03);
+  border-color: color-mix(in srgb, var(--icon-end) 58%, #ffffff);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.68),
+    inset 0 -18px 24px rgba(15, 23, 42, 0.12),
+    0 16px 30px color-mix(in srgb, var(--icon-shadow) 32%, transparent);
+}
+
+.skill-icon-shell.skill-accent-sky {
+  --icon-start: #7dd3fc;
+  --icon-end: #2563eb;
+  --icon-ink: #f8fbff;
+  --icon-shadow: #2563eb;
+}
+
+.skill-icon-shell.skill-accent-amber {
+  --icon-start: #fde68a;
+  --icon-end: #d97706;
+  --icon-ink: #372600;
+  --icon-shadow: #d97706;
+}
+
+.skill-icon-shell.skill-accent-violet {
+  --icon-start: #c084fc;
+  --icon-end: #7c3aed;
+  --icon-ink: #faf5ff;
+  --icon-shadow: #7c3aed;
+}
+
+.skill-icon-shell.skill-accent-mint {
+  --icon-start: #5eead4;
+  --icon-end: #059669;
+  --icon-ink: #ecfdf5;
+  --icon-shadow: #059669;
+}
+
+.skill-icon-shell.skill-accent-rose {
+  --icon-start: #fb7185;
+  --icon-end: #be123c;
+  --icon-ink: #fff1f2;
+  --icon-shadow: #be123c;
+}
+
+.skill-icon-shell.skill-accent-indigo {
+  --icon-start: #818cf8;
+  --icon-end: #3730a3;
+  --icon-ink: #eef2ff;
+  --icon-shadow: #4f46e5;
+}
+
+.skill-icon-shell.tool-accent-slate {
+  --icon-start: #d1d5db;
+  --icon-end: #334155;
+  --icon-ink: #f8fafc;
+  --icon-shadow: #475569;
+}
+
+.skill-icon-shell.tool-accent-sky {
+  --icon-start: #67e8f9;
+  --icon-end: #2563eb;
+  --icon-ink: #f8fbff;
+  --icon-shadow: #2563eb;
+}
+
+.skill-icon-shell.tool-accent-emerald {
+  --icon-start: #86efac;
+  --icon-end: #059669;
+  --icon-ink: #ecfdf5;
+  --icon-shadow: #059669;
+}
+
+.skill-icon-shell.tool-accent-amber {
+  --icon-start: #fde68a;
+  --icon-end: #d97706;
+  --icon-ink: #372600;
+  --icon-shadow: #d97706;
+}
+
+.skill-icon-shell.tool-accent-rose {
+  --icon-start: #fda4af;
+  --icon-end: #be123c;
+  --icon-ink: #fff1f2;
+  --icon-shadow: #be123c;
+}
+
+.skill-icon-shell.tool-accent-violet {
+  --icon-start: #ddd6fe;
+  --icon-end: #7c3aed;
+  --icon-ink: #faf5ff;
+  --icon-shadow: #7c3aed;
+}
+
+:root[data-theme="graphite"] .skill-icon-shell.skill-icon-premium,
+:root[data-theme="graphite"] .skill-icon-shell.skill-icon-asset,
+:root[data-theme="graphite"] .skill-icon-shell.tool-icon-shell,
+:root[data-theme="dusk"] .skill-icon-shell.skill-icon-premium,
+:root[data-theme="dusk"] .skill-icon-shell.skill-icon-asset,
+:root[data-theme="dusk"] .skill-icon-shell.tool-icon-shell,
+:root[data-theme="midnight"] .skill-icon-shell.skill-icon-premium,
+:root[data-theme="midnight"] .skill-icon-shell.skill-icon-asset,
+:root[data-theme="midnight"] .skill-icon-shell.tool-icon-shell,
+:root[data-theme="ember"] .skill-icon-shell.skill-icon-premium,
+:root[data-theme="ember"] .skill-icon-shell.skill-icon-asset,
+:root[data-theme="ember"] .skill-icon-shell.tool-icon-shell {
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -18px 24px rgba(2, 8, 23, 0.24),
+    0 14px 28px rgba(0, 0, 0, 0.24);
 }

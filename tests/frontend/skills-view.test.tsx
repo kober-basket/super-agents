@@ -131,6 +131,45 @@ test("skills view prefers openai interface metadata for skill labels", async () 
   assert.doesNotMatch(html, /Create or update a skill/);
 });
 
+test("skills view prefers bundled asset icons when a skill provides one", async () => {
+  (globalThis as any).window = {};
+  const { SkillsView } = await import("../../src/features/skills/SkillsView.js");
+  const iconDataUrl = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIC8+";
+
+  const html = renderToStaticMarkup(
+    <SkillsView
+      filteredInstalledSkills={[
+        {
+          id: "asset-skill",
+          name: "asset-skill",
+          description: "Uses a bundled icon asset",
+          iconDataUrl,
+          kind: "command",
+          command: "Asset skill instructions",
+          enabled: true,
+          sourcePath: "/workspace/.super-agents/skills/asset-skill",
+          location: "/workspace/.super-agents/skills/asset-skill",
+        },
+      ]}
+      hasResults={true}
+      skillQuery=""
+      skillsImporting={false}
+      skillsRefreshing={false}
+      onImportLocalSkill={() => undefined}
+      onPrepareSkillDraft={() => undefined}
+      onRefresh={() => undefined}
+      onSkillQueryChange={() => undefined}
+      onUninstallSkill={() => undefined}
+      onUpdateInstalledSkill={() => undefined}
+    />,
+  );
+
+  assert.match(html, /class="skill-icon-shell skill-icon-asset/);
+  assert.match(html, /<img alt="" aria-hidden="true" src="data:image\/svg\+xml;base64,/);
+  assert.ok(html.includes(`src="${iconDataUrl}"`));
+  assert.doesNotMatch(html, /skill-icon-orbit/);
+});
+
 test("skills view keeps skill rows simple with status only", async () => {
   (globalThis as any).window = {};
   const { SkillsView } = await import("../../src/features/skills/SkillsView.js");

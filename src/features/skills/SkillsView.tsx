@@ -1,5 +1,33 @@
 import clsx from "clsx";
-import { Boxes, FilePlus2, FolderOpen, Import as ImportIcon, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
+import {
+  Boxes,
+  BrainCircuit,
+  Braces,
+  Code,
+  Command,
+  Compass,
+  FilePlus2,
+  FileSearch,
+  FolderOpen,
+  Import as ImportIcon,
+  Library,
+  LoaderCircle,
+  MessageSquareText,
+  PackageCheck,
+  PenTool,
+  PlugZap,
+  Plus,
+  Puzzle,
+  RefreshCw,
+  ScrollText,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  TestTube,
+  Workflow,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { workspaceClient } from "../../services/workspace-client";
@@ -32,6 +60,27 @@ const SKILL_ACCENTS = [
   "skill-accent-rose",
   "skill-accent-indigo",
 ] as const;
+
+type SkillAccent = (typeof SKILL_ACCENTS)[number];
+
+const SKILL_ICON_RULES: Array<{ keywords: string[]; icon: LucideIcon }> = [
+  { keywords: ["browser", "web", "search", "crawl"], icon: Compass },
+  { keywords: ["code", "coding", "developer", "repo", "typescript"], icon: Code },
+  { keywords: ["debug", "test", "verify", "tdd"], icon: TestTube },
+  { keywords: ["design", "frontend", "ui", "ux", "image"], icon: PenTool },
+  { keywords: ["doc", "markdown", "pdf", "write"], icon: ScrollText },
+  { keywords: ["git", "review", "security", "permission"], icon: ShieldCheck },
+  { keywords: ["mcp", "plugin", "tool", "connector"], icon: PlugZap },
+  { keywords: ["plan", "workflow", "dispatch", "parallel"], icon: Workflow },
+  { keywords: ["agent", "bot", "assistant", "model"], icon: BrainCircuit },
+  { keywords: ["prompt", "chat", "conversation"], icon: MessageSquareText },
+  { keywords: ["command", "shell", "terminal"], icon: Command },
+  { keywords: ["json", "schema", "config"], icon: Braces },
+  { keywords: ["knowledge", "memory", "reference"], icon: Library },
+  { keywords: ["install", "creator"], icon: PackageCheck },
+  { keywords: ["file", "read"], icon: FileSearch },
+  { keywords: ["puzzle", "extension"], icon: Puzzle },
+];
 
 export function SkillsView({
   filteredInstalledSkills,
@@ -227,9 +276,7 @@ export function SkillsView({
           <div className="skill-detail-modal" onClick={(event) => event.stopPropagation()}>
             <div className="skill-detail-head">
               <div className="skill-detail-title-wrap compact">
-                <div className={clsx("skill-icon-shell", "large", resolveAccent(activeSkill.skill.name.length))}>
-                  <Boxes size={28} />
-                </div>
+                <SkillIcon accent={resolveAccent(activeSkill.skill.name.length)} large skill={activeSkill.skill} />
                 <div className="skill-detail-title-copy">
                   <div className="skill-detail-title-row">
                     <h3>{resolveSkillDisplayName(activeSkill.skill)}</h3>
@@ -341,9 +388,7 @@ function SkillSection({ title, skills, emptyText, accentOffset, onSelectSkill }:
                 role="button"
                 tabIndex={0}
               >
-                <div className={clsx("skill-icon-shell", resolveAccent(accentOffset + index))}>
-                  <Boxes size={20} />
-                </div>
+                <SkillIcon accent={resolveAccent(accentOffset + index)} skill={skill} />
                 <div className="skill-tile-copy">
                   <strong title={displayName}>{displayName}</strong>
                   <p title={description}>
@@ -366,6 +411,44 @@ function SkillSection({ title, skills, emptyText, accentOffset, onSelectSkill }:
       )}
     </section>
   );
+}
+
+function SkillIcon({ accent, large = false, skill }: { accent: SkillAccent; large?: boolean; skill: SkillConfig }) {
+  if (skill.iconDataUrl) {
+    return (
+      <div
+        className={clsx("skill-icon-shell", "skill-icon-asset", large && "large")}
+        title={resolveSkillDisplayName(skill)}
+      >
+        <img alt="" aria-hidden="true" src={skill.iconDataUrl} />
+      </div>
+    );
+  }
+
+  const Icon = resolveSkillIcon(skill);
+
+  return (
+    <div className={clsx("skill-icon-shell", "skill-icon-premium", large && "large", accent)} title={resolveSkillDisplayName(skill)}>
+      <Icon size={large ? 28 : 20} strokeWidth={2.1} />
+      <span aria-hidden="true" className="skill-icon-orbit" />
+    </div>
+  );
+}
+
+function resolveSkillIcon(skill: SkillConfig): LucideIcon {
+  const haystack = [
+    skill.name,
+    skill.displayName,
+    skill.shortDescription,
+    skill.description,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  const match = SKILL_ICON_RULES.find((rule) => rule.keywords.some((keyword) => haystack.includes(keyword)));
+  if (match) return match.icon;
+  return skill.system ? Boxes : Sparkles;
 }
 
 function compactSkillDescription(description: string | undefined, fallback: string) {

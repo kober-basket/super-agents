@@ -7,6 +7,11 @@ out/
 .cache/
 temp-smoke/
 .test-dist/
+vendor/runtime/*
+!vendor/runtime/README.md
+!vendor/runtime/**/
+!vendor/runtime/**/README.md
+!vendor/runtime/win32-x64/bin/python3.cmd
 
 *.log
 *.zip

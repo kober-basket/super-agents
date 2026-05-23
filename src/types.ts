@@ -122,6 +122,7 @@ export interface SkillConfig {
   displayName?: string;
   shortDescription?: string;
   brandColor?: string;
+  iconDataUrl?: string;
   defaultPrompt?: string;
   allowImplicitInvocation?: boolean;
   kind: SkillKind;
@@ -138,6 +139,7 @@ export interface RuntimeSkill {
   displayName?: string;
   shortDescription?: string;
   brandColor?: string;
+  iconDataUrl?: string;
   defaultPrompt?: string;
   allowImplicitInvocation?: boolean;
   location: string;

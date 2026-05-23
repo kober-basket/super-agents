@@ -349,6 +349,8 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     assert.equal(skillCreator?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "skill-creator"));
     await access(path.join(skillCreator?.sourcePath ?? "", "SKILL.md"));
     await access(path.join(skillCreator?.sourcePath ?? "", "agents", "openai.yaml"));
+    await access(path.join(skillCreator?.sourcePath ?? "", "assets", "icon.svg"));
+    assert.match(skillCreator?.iconDataUrl ?? "", /^data:image\/svg\+xml;base64,/);
     assert.match(skillCreator?.command ?? "", /Anatomy of a Skill/);
     assert.equal(skillCreator?.displayName, "技能创建器");
     assert.equal(skillCreator?.shortDescription, "创建、更新和验证 Codex 技能结构、资源与触发说明");
@@ -358,6 +360,8 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     assert.equal(wxCli?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "wx-cli"));
     await access(path.join(wxCli?.sourcePath ?? "", "SKILL.md"));
     await access(path.join(wxCli?.sourcePath ?? "", "agents", "openai.yaml"));
+    await access(path.join(wxCli?.sourcePath ?? "", "assets", "icon.svg"));
+    assert.match(wxCli?.iconDataUrl ?? "", /^data:image\/svg\+xml;base64,/);
     assert.match(wxCli?.command ?? "", /wx history/);
     assert.equal(wxCli?.displayName, "微信本地检索");
     assert.match(wxCli?.defaultPrompt ?? "", /\$wx-cli/);
@@ -365,6 +369,8 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     assert.equal(stockResearch?.system, true);
     assert.equal(stockResearch?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "股市调研专家"));
     await access(path.join(stockResearch?.sourcePath ?? "", "agents", "openai.yaml"));
+    await access(path.join(stockResearch?.sourcePath ?? "", "assets", "icon.svg"));
+    assert.match(stockResearch?.iconDataUrl ?? "", /^data:image\/svg\+xml;base64,/);
     assert.equal(stockResearch?.displayName, "股市调研专家");
     assert.match(stockResearch?.defaultPrompt ?? "", /\$stock-market-research-expert/);
     assert.equal(bootstrap.config.skills.some((skill) => skill.id === "meeting-minutes"), false);
@@ -375,6 +381,31 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     assert.match(context, /- stock-market-research-expert:/);
     assert.match(context, /- wx-cli:/);
     assert.doesNotMatch(context, /Anatomy of a Skill/);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("workspace service serializes concurrent bootstrap skill syncs", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const service = new WorkspaceService(statePath);
+
+  try {
+    const results = await Promise.allSettled(Array.from({ length: 8 }, () => service.bootstrap()));
+    const failures = results
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => String(result.reason?.message ?? result.reason));
+
+    assert.deepEqual(failures, []);
+    for (const result of results) {
+      assert.equal(result.status, "fulfilled");
+      assert.deepEqual(
+        result.value.config.skills.map((skill) => skill.name).sort(),
+        ["skill-creator", "stock-market-research-expert", "wx-cli"],
+      );
+    }
   } finally {
     await service.shutdown();
     await rm(tempDir, { recursive: true, force: true });

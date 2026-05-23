@@ -819,10 +819,14 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
 
         const chunk = JSON.parse(eventData) as ChatCompletionChunk;
         for (const choice of chunk.choices ?? []) {
-          const reasoning =
-            choice.delta?.reasoning_content ?? choice.delta?.reasoning ?? choice.delta?.reasoning_text;
-          if (reasoning) {
-            yield { type: "reasoning_delta", text: reasoning };
+          const reasoningContent = choice.delta?.reasoning_content;
+          if (reasoningContent) {
+            yield { type: "reasoning_delta", text: reasoningContent, reasoningContent };
+          } else {
+            const reasoning = choice.delta?.reasoning ?? choice.delta?.reasoning_text;
+            if (reasoning) {
+              yield { type: "reasoning_delta", text: reasoning };
+            }
           }
 
           for (const toolDelta of choice.delta?.tool_calls ?? []) {

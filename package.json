@@ -14,6 +14,8 @@
     "build:main": "tsup electron/main.ts electron/preload.ts --format cjs --out-dir dist-electron --minify --external electron",
     "test:electron": "tsc -p tsconfig.test.json && node -e \"const { spawnSync } = require('node:child_process'); const result = spawnSync(process.execPath, ['--test'], { cwd: '.test-dist', stdio: 'inherit' }); process.exit(result.status ?? 1);\"",
     "package": "npm run build && electron-builder --dir",
+    "package:runtime": "npm run runtime:check && npm run build && electron-builder --dir",
+    "runtime:check": "node scripts/check-runtime.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4173"
   },
   "dependencies": {
@@ -67,6 +69,15 @@
       "dist-electron/**",
       "electron/builtin-skills/**",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "asar": true,
     "win": {

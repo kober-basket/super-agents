@@ -7,6 +7,7 @@ export type AgentMessageRole = "system" | "user" | "assistant" | "tool";
 export interface AgentMessage {
   role: AgentMessageRole;
   content: string;
+  reasoningContent?: string;
   toolCallId?: string;
   name?: string;
   toolCalls?: ToolCall[];
@@ -105,7 +106,7 @@ export interface ModelRequest {
 }
 
 export type ModelEvent =
-  | { type: "reasoning_delta"; text: string }
+  | { type: "reasoning_delta"; text: string; reasoningContent?: string }
   | { type: "status_delta"; text: string }
   | { type: "text_delta"; text: string }
   | { type: "tool_call_delta"; toolCallId?: string; name?: string }

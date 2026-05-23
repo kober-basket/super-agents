@@ -20,6 +20,7 @@ import type {
   McpToolParameter,
 } from "../src/types";
 import { resolveGeneratedSupportDir } from "./app-identity";
+import { createRuntimeProcessEnv, resolveRuntimeCommand } from "./runtime-support";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_STDERR_LENGTH = 20_000;
@@ -267,7 +268,11 @@ function isNodeExecutablePath(command: string) {
   return basename === "node" || basename === "node.exe";
 }
 
-function getNodeCommand() {
+async function getNodeCommand() {
+  const runtimeNode = await resolveRuntimeCommand("node");
+  if (runtimeNode !== "node") {
+    return runtimeNode;
+  }
   return isNodeExecutablePath(process.execPath) ? process.execPath : "node";
 }
 
@@ -315,11 +320,12 @@ async function fileExists(filePath: string) {
 }
 
 async function runInstaller(command: string, args: string[], cwd: string) {
+  const env = await createRuntimeProcessEnv();
   return await new Promise<void>((resolve, reject) => {
     const decode = createChunkDecoder();
     const child = spawn(command, args, {
       cwd,
-      env: process.env,
+      env,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -384,7 +390,7 @@ async function resolveLocalServer(server: McpServerConfig) {
   const cliPath = await ensurePlaywrightMcpCli();
   return {
     ...server,
-    command: getNodeCommand(),
+    command: await getNodeCommand(),
     args: [cliPath, ...playwrightArgs],
   } satisfies McpServerConfig;
 }
@@ -435,6 +441,16 @@ function isInterpreterLikeCommand(command: string) {
 
 function formatCommandPreview(command: string, args: string[]) {
   return [command.trim(), ...args.filter(Boolean)].join(" ").trim();
+}
+
+function stringifyEnvRecord(input: JsonRecord) {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === "string") {
+      env[key] = value;
+    }
+  }
+  return env;
 }
 
 function buildLocalServerError(server: McpServerConfig, stderr: string, fallback: string) {
@@ -490,10 +506,13 @@ async function connectWithServer(input: McpInspectInput): Promise<ConnectionHand
     }
 
     const decodeStderr = createChunkDecoder();
+    const serverEnv = stringifyEnvRecord(parseJsonRecord(resolvedServer.envJson, "鐜鍙橀噺"));
+    const env = await createRuntimeProcessEnv({ ...process.env, ...serverEnv });
+    const command = await resolveRuntimeCommand(normalizeLocalCommand(resolvedServer.command));
     const transport = new StdioClientTransport({
-      command: normalizeLocalCommand(resolvedServer.command),
+      command,
       args: resolvedServer.args.filter(Boolean),
-      env: parseJsonRecord(resolvedServer.envJson, "环境变量"),
+      env,
       stderr: "pipe",
       cwd: workspaceRoot?.trim() || undefined,
     });

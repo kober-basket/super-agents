@@ -30,6 +30,8 @@ npm install
 npm run dev
 npm run build
 npm run test:electron
+npm run runtime:check
+npm run package:runtime
 npm run preview
 ```
 
@@ -38,6 +40,7 @@ npm run preview
 - 修改 TypeScript 或 Electron 逻辑后，优先运行 `npm run test:electron`。
 - 修改前端纯逻辑后，仍使用 `npm run test:electron`，当前测试脚本会先编译 `tsconfig.test.json` 并运行 `.test-dist` 下的 Node tests。
 - 修改打包入口、预加载、Electron 主进程或 Vite 配置后，运行 `npm run build`。
+- 发布开箱即用安装包前，把 Node/npm 运行时放到 `vendor/runtime/<platform>-<arch>/node`；Windows 版还需要 `vendor/runtime/<platform>-<arch>/python/python.exe`，然后运行 `npm run runtime:check` 和 `npm run package:runtime`。
 - UI 交互改动需要人工或浏览器实际检查，尤其是聊天、工具、技能和设置页面。
 
 ## Architecture Principles
@@ -91,6 +94,7 @@ npm run preview
 - 同一 turn 内重复的同签名工具调用应复用已有结果或给出明确提示。
 - Coordinator/worker/specialist agent 应该通过清晰的任务边界协作，简单任务由当前 agent 直接完成。
 - MCP 是外部能力入口，内置工具是本地基础能力；两者在 UI 中统一展示，但实现边界不要混淆。
+- Agent shell、终端命令和本地 MCP 启动都通过 `electron/runtime-support.ts` 注入应用私有 runtime PATH。不要直接在各调用点拼 PATH；新增子进程入口时复用 `createRuntimeProcessEnv()`。
 
 新增或调整 agent 能力时，优先补齐对应测试：
 

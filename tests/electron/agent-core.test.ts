@@ -208,6 +208,100 @@ test("native agent core emits reasoning separately from assistant text", async (
   });
 });
 
+test("native agent core preserves reasoning content on assistant tool-call messages", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "reasoning_delta",
+        text: "Check the lookup key. ",
+        reasoningContent: "Check the lookup key. ",
+      },
+      {
+        type: "reasoning_delta",
+        text: "Then call the tool.",
+        reasoningContent: "Then call the tool.",
+      },
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "reasoning-tool-call",
+          name: "lookup",
+          input: { key: "alpha" },
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "Final answer." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createCore(gateway);
+
+  for await (const _event of core.sendTurn({
+    sessionId: "reasoning-tool-session",
+    agentId: "neutral",
+    content: "look up alpha",
+  })) {
+    // Drain the turn.
+  }
+
+  assert.deepEqual(core.getSession("reasoning-tool-session")?.messages.at(-3), {
+    role: "assistant",
+    content: "",
+    reasoningContent: "Check the lookup key. Then call the tool.",
+    toolCalls: [
+      {
+        id: "reasoning-tool-call",
+        name: "lookup",
+        input: { key: "alpha" },
+      },
+    ],
+  });
+});
+
+test("native agent core does not replay display-only reasoning as provider reasoning content", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      { type: "reasoning_delta", text: "Visible only in the runtime trace. " },
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "display-only-reasoning-tool-call",
+          name: "lookup",
+          input: { key: "alpha" },
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "Final answer." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createCore(gateway);
+
+  for await (const _event of core.sendTurn({
+    sessionId: "display-only-reasoning-tool-session",
+    agentId: "neutral",
+    content: "look up alpha",
+  })) {
+    // Drain the turn.
+  }
+
+  assert.deepEqual(core.getSession("display-only-reasoning-tool-session")?.messages.at(-3), {
+    role: "assistant",
+    content: "",
+    toolCalls: [
+      {
+        id: "display-only-reasoning-tool-call",
+        name: "lookup",
+        input: { key: "alpha" },
+      },
+    ],
+  });
+});
+
 test("native agent core persists and restores session messages", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-agent-session-"));
   const databasePath = path.join(tempDir, "data", "app.db");
@@ -1342,9 +1436,93 @@ test("openai-compatible gateway maps streamed reasoning fields to reasoning delt
       ["Check assumptions. ", "Compare options. "],
     );
     assert.deepEqual(
+      events
+        .filter((event) => event.type === "reasoning_delta")
+        .map((event) => event.reasoningContent),
+      ["Check assumptions. ", undefined],
+    );
+    assert.deepEqual(
       events.filter((event) => event.type === "text_delta").map((event) => event.text),
       ["Final answer."],
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openai-compatible gateway passes assistant reasoning content back to providers", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+
+  globalThis.fetch = (async (_url, init) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    return new Response('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', {
+      status: 200,
+    });
+  }) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "test-provider::reasoning-model",
+      modelProviders: [
+        {
+          id: "test-provider",
+          name: "Test Provider",
+          kind: "openai-compatible",
+          baseUrl: "https://example.test/v1",
+          apiKey: "test-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [
+            {
+              id: "reasoning-model",
+              label: "Reasoning Model",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }) as AppConfig);
+
+    for await (const _event of gateway.stream({
+      model: "reasoning-model",
+      system: "system",
+      messages: [
+        { role: "user", content: "hello" },
+        {
+          role: "assistant",
+          content: "",
+          reasoningContent: "Need a lookup before answering.",
+          toolCalls: [
+            {
+              id: "call-1",
+              name: "lookup",
+              input: { key: "alpha" },
+            },
+          ],
+        },
+      ],
+      tools: [],
+    })) {
+      // Drain the stream.
+    }
+
+    assert.deepEqual((requestBody?.messages as Array<Record<string, unknown>>)[2], {
+      role: "assistant",
+      content: null,
+      reasoning_content: "Need a lookup before answering.",
+      tool_calls: [
+        {
+          id: "call-1",
+          type: "function",
+          function: {
+            name: "lookup",
+            arguments: JSON.stringify({ key: "alpha" }),
+          },
+        },
+      ],
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -1,6 +1,25 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
-import { Plus, Server, Wrench } from "lucide-react";
+import {
+  ClipboardList,
+  CloudDownload,
+  FilePlus2,
+  FileSearch,
+  FolderTree,
+  GitPullRequest,
+  Globe,
+  Layers,
+  ListChecks,
+  MessageCircleQuestion,
+  PencilLine,
+  PlugZap,
+  Plus,
+  Radar,
+  Search,
+  TerminalSquare,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 
 import type {
   McpConnectionStatus,
@@ -27,6 +46,34 @@ interface ToolsViewProps {
   onToggleAdvanced: () => void;
   onUpdateMcp: (serverId: string, patch: Partial<McpServerConfig>) => void;
 }
+
+const TOOL_ICON_TONES = [
+  "tool-accent-slate",
+  "tool-accent-sky",
+  "tool-accent-emerald",
+  "tool-accent-amber",
+  "tool-accent-rose",
+  "tool-accent-violet",
+] as const;
+
+type ToolIconTone = (typeof TOOL_ICON_TONES)[number];
+
+const BUILTIN_TOOL_VISUALS: Partial<Record<string, { icon: LucideIcon; tone: ToolIconTone }>> = {
+  apply_patch: { icon: GitPullRequest, tone: "tool-accent-violet" },
+  bash: { icon: TerminalSquare, tone: "tool-accent-slate" },
+  edit: { icon: PencilLine, tone: "tool-accent-amber" },
+  glob: { icon: Radar, tone: "tool-accent-sky" },
+  grep: { icon: Search, tone: "tool-accent-sky" },
+  list: { icon: FolderTree, tone: "tool-accent-emerald" },
+  multi_edit: { icon: Layers, tone: "tool-accent-amber" },
+  question: { icon: MessageCircleQuestion, tone: "tool-accent-violet" },
+  read: { icon: FileSearch, tone: "tool-accent-emerald" },
+  todo_read: { icon: ClipboardList, tone: "tool-accent-slate" },
+  todo_write: { icon: ListChecks, tone: "tool-accent-emerald" },
+  web_fetch: { icon: CloudDownload, tone: "tool-accent-rose" },
+  web_search: { icon: Globe, tone: "tool-accent-sky" },
+  write: { icon: FilePlus2, tone: "tool-accent-amber" },
+};
 
 export function ToolsView({
   mcpAdvancedOpen,
@@ -96,9 +143,7 @@ export function ToolsView({
                     onClick={() => openMcpModal(server.id)}
                     type="button"
                   >
-                    <div className="skill-icon-shell">
-                      <Server size={18} />
-                    </div>
+                    <ToolIcon icon={PlugZap} label={server.name} tone={resolveMcpTone(status)} />
                     <div className="skill-tile-copy">
                       <strong title={server.name}>{server.name}</strong>
                       <p>{formatMcpTransport(server)}</p>
@@ -127,11 +172,11 @@ export function ToolsView({
 
           {builtinTools.length > 0 ? (
             <div className="tool-list">
-              {builtinTools.map((tool) => (
+              {builtinTools.map((tool, index) => {
+                const visual = resolveBuiltinToolVisual(tool, index);
+                return (
                 <article key={tool.id} className="tool-list-row skill-list-row skill-tile">
-                  <div className="skill-icon-shell">
-                    <Wrench size={18} />
-                  </div>
+                  <ToolIcon icon={visual.icon} label={tool.name} tone={visual.tone} />
                   <div className="skill-tile-copy">
                     <strong title={tool.name}>{tool.name}</strong>
                     {tool.description ? (
@@ -144,7 +189,8 @@ export function ToolsView({
                     <span className="skill-status-chip enabled">可用</span>
                   </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="empty-panel compact">
@@ -174,8 +220,32 @@ export function ToolsView({
   );
 }
 
+function ToolIcon({ icon: Icon, label, tone }: { icon: LucideIcon; label: string; tone: ToolIconTone }) {
+  return (
+    <div className={clsx("skill-icon-shell", "tool-icon-shell", tone)} title={label}>
+      <Icon size={20} strokeWidth={2.1} />
+      <span aria-hidden="true" className="tool-icon-spark" />
+    </div>
+  );
+}
+
+function resolveBuiltinToolVisual(tool: WorkspaceTool, index: number) {
+  const name = normalizeToolName(tool.name);
+  return BUILTIN_TOOL_VISUALS[name] ?? { icon: Wrench, tone: TOOL_ICON_TONES[index % TOOL_ICON_TONES.length] };
+}
+
+function normalizeToolName(name: string) {
+  return name.trim().toLowerCase().replace(/[-\s]+/g, "_");
+}
+
 function formatMcpTransport(server: McpServerConfig) {
   return server.transport === "remote" ? "远程" : "本地";
+}
+
+function resolveMcpTone(status: McpConnectionStatus | "connecting"): ToolIconTone {
+  if (status === "connected") return "tool-accent-emerald";
+  if (status === "disabled") return "tool-accent-slate";
+  return "tool-accent-amber";
 }
 
 function getMcpStatusClass(status: McpConnectionStatus | "connecting") {

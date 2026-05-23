@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -120,6 +120,61 @@ test(
     }
   },
 );
+
+test("bash tool prefers app-private runtime commands over the system PATH", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-bash-runtime-"));
+  const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "super-agents-runtime-"));
+  const platformKey = `${process.platform}-${process.arch}`;
+  const runtimeBin = path.join(runtimeRoot, platformKey, "bin");
+  const originalPath = process.env.PATH;
+  const originalPathKey = process.env.Path;
+  const originalRuntimeRoot = process.env.SUPER_AGENTS_RUNTIME_ROOT;
+
+  try {
+    await mkdir(runtimeBin, { recursive: true });
+    const commandPath =
+      process.platform === "win32" ? path.join(runtimeBin, "node.cmd") : path.join(runtimeBin, "node");
+    await writeFile(
+      commandPath,
+      process.platform === "win32"
+        ? "@echo off\r\necho private-runtime-node\r\n"
+        : "#!/bin/sh\nprintf private-runtime-node\n",
+      "utf8",
+    );
+    if (process.platform !== "win32") {
+      await chmod(commandPath, 0o755);
+    }
+
+    process.env.SUPER_AGENTS_RUNTIME_ROOT = runtimeRoot;
+    process.env.PATH = "";
+    if (process.env.Path !== undefined) {
+      process.env.Path = "";
+    }
+
+    const bash = toolByName("bash");
+    const result = await bash.execute({ command: "node" }, createContext(tempDir));
+
+    assert.equal(result.content.trim(), "private-runtime-node");
+  } finally {
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
+    if (originalPathKey === undefined) {
+      delete process.env.Path;
+    } else {
+      process.env.Path = originalPathKey;
+    }
+    if (originalRuntimeRoot === undefined) {
+      delete process.env.SUPER_AGENTS_RUNTIME_ROOT;
+    } else {
+      process.env.SUPER_AGENTS_RUNTIME_ROOT = originalRuntimeRoot;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+    await rm(runtimeRoot, { recursive: true, force: true });
+  }
+});
 
 test("multi_edit applies multiple replacements atomically", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-multi-edit-"));

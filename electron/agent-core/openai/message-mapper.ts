@@ -11,7 +11,19 @@ export function mapAgentMessageToOpenAIMessage(message: AgentMessage) {
   }
 
   if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
-    return {
+    const mappedMessage: {
+      role: "assistant";
+      content: string | null;
+      reasoning_content?: string;
+      tool_calls: Array<{
+        id: string;
+        type: "function";
+        function: {
+          name: string;
+          arguments: string;
+        };
+      }>;
+    } = {
       role: "assistant",
       content: message.content || null,
       tool_calls: message.toolCalls.map((toolCall) => ({
@@ -23,6 +35,10 @@ export function mapAgentMessageToOpenAIMessage(message: AgentMessage) {
         },
       })),
     };
+    if (message.reasoningContent !== undefined) {
+      mappedMessage.reasoning_content = message.reasoningContent;
+    }
+    return mappedMessage;
   }
 
   return {

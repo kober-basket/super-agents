@@ -7,6 +7,7 @@ import { ToolPermissionDeniedError } from "./types";
 import type { ToolContext, ToolDefinition } from "./types";
 import { createInteractionToolDefinitions } from "./builtin-tools/interaction-tools";
 import { createTodoToolDefinitions } from "./builtin-tools/todo-tools";
+import { createRuntimeProcessEnv } from "../runtime-support";
 
 const MAX_READ_BYTES = 220_000;
 const MAX_WRITE_BYTES = 500_000;
@@ -378,9 +379,11 @@ function isPotentiallyDestructiveCommand(command: string) {
 }
 
 async function runRg(args: string[], cwd: string) {
+  const env = await createRuntimeProcessEnv();
   return await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
     const child = spawn("rg", args, {
       cwd,
+      env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -647,6 +650,7 @@ function decodeShellOutputBytes(buffer: Buffer) {
 }
 
 async function runShellCommand(command: string, cwd: string, timeoutMs: number, maxOutputBytes: number) {
+  const env = await createRuntimeProcessEnv();
   return await new Promise<{
     stdout: string;
     stderr: string;
@@ -657,6 +661,7 @@ async function runShellCommand(command: string, cwd: string, timeoutMs: number, 
   }>((resolve, reject) => {
     const child = spawn(command, {
       cwd,
+      env,
       shell: true,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
