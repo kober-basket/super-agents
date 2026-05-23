@@ -8,8 +8,10 @@ import {
   migrateLegacyAppData,
 } from "./app-identity";
 import { ChatOrchestrator } from "./chat-orchestrator";
+import { BrowserAutomationService } from "./browser-automation-service";
 import { exportConversationToFile } from "./conversation-export";
 import type { ToolApprovalDecision, ToolApprovalRequest } from "./agent-core";
+import { InteractiveTerminalManager } from "./interactive-terminal-manager";
 import { ConversationService } from "./conversation-service";
 import { isTrustedDesktopOrigin } from "./media-permissions";
 import { McpInspector } from "./mcp-inspector";
@@ -21,6 +23,8 @@ import type {
   AppConfig,
   ChatConversationExportFormat,
   ChatEvent,
+  DesktopApprovalRequest,
+  DesktopApprovalResponse,
   DesktopWindowState,
   MailAccountCreateInput,
   MailOAuthAuthorizationInput,
@@ -30,6 +34,9 @@ import type {
   MemoryCreateInput,
   MemorySearchInput,
   MemoryUpdateInput,
+  TerminalSessionCreateInput,
+  TerminalSessionInput,
+  TerminalSessionResizeInput,
 } from "../src/types";
 
 app.setName(APP_NAME);
@@ -40,12 +47,40 @@ let service: WorkspaceService | null = null;
 let conversationService: ConversationService | null = null;
 let remoteControlService: RemoteControlService | null = null;
 let chatOrchestrator: ChatOrchestrator | null = null;
+let browserAutomationService: BrowserAutomationService | null = null;
+let terminalManager: InteractiveTerminalManager | null = null;
 const mcpInspector = new McpInspector();
 const approvedExternalDirectories = new Set<string>();
+const APPROVAL_TIMEOUT_MS = 10 * 60_000;
+const pendingRendererApprovals = new Map<
+  string,
+  {
+    resolve: (decision: ToolApprovalDecision) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }
+>();
 
 function isInsideDirectory(candidatePath: string, directoryPath: string) {
   const relative = path.relative(path.resolve(directoryPath), path.resolve(candidatePath));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function resolveTerminalCreateInput(payload: TerminalSessionCreateInput = {}) {
+  const config = await service!.getConfigSnapshot();
+  const workspaceRoot = path.resolve(
+    payload.workspaceRoot?.trim() || config.workspaceRoot.trim() || process.cwd(),
+  );
+  const cwd = path.resolve(payload.cwd?.trim() || workspaceRoot);
+
+  if (!isInsideDirectory(cwd, workspaceRoot)) {
+    throw new Error("Terminal cwd is outside the current workspace.");
+  }
+
+  return {
+    ...payload,
+    cwd,
+    workspaceRoot,
+  };
 }
 
 function getApprovalWindow() {
@@ -72,6 +107,92 @@ async function showApprovalMessageBox(options: Electron.MessageBoxOptions) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringField(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function authTypeField(value: unknown) {
+  return value === "oauth" || value === "password" ? value : undefined;
+}
+
+function mailStatusField(value: unknown) {
+  return value === "needs_auth" || value === "connected" || value === "error" ? value : undefined;
+}
+
+function sanitizeMailServerConfig(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  const host = stringField(value.host);
+  const port = typeof value.port === "number" && Number.isFinite(value.port) ? value.port : undefined;
+  const secure = typeof value.secure === "boolean" ? value.secure : undefined;
+  if (!host || port === undefined || secure === undefined) return undefined;
+  return { host, port, secure };
+}
+
+function sanitizeMailSetup(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  const incoming = sanitizeMailServerConfig(value.incoming);
+  const outgoing = sanitizeMailServerConfig(value.outgoing);
+  const email = stringField(value.email);
+  const domain = stringField(value.domain) ?? "";
+  const providerId = stringField(value.providerId);
+  const providerName = stringField(value.providerName);
+  const authType = authTypeField(value.authType);
+  if (!email || !providerId || !providerName || !authType || !incoming || !outgoing) return undefined;
+  return {
+    email,
+    domain,
+    providerId,
+    providerName,
+    authType,
+    oauthProvider: value.oauthProvider === "google" || value.oauthProvider === "microsoft" ? value.oauthProvider : undefined,
+    incoming,
+    outgoing,
+    advancedRequired: value.advancedRequired === true,
+    helpText: stringField(value.helpText),
+  };
+}
+
+function sanitizeMailAuthRequestMetadata(metadata: unknown): DesktopApprovalRequest["metadata"] {
+  if (!isRecord(metadata)) {
+    return {};
+  }
+  return {
+    email: stringField(metadata.email),
+    provider: stringField(metadata.provider),
+    providerName: stringField(metadata.providerName),
+    authType: authTypeField(metadata.authType),
+    helpText: stringField(metadata.helpText),
+    setup: sanitizeMailSetup(metadata.setup),
+  };
+}
+
+function sanitizeMailAuthDecision(decision: DesktopApprovalResponse["decision"]): ToolApprovalDecision {
+  if (decision.type === "deny") {
+    return { type: "deny", reason: decision.reason || "User denied mail authorization." };
+  }
+
+  const metadata = isRecord(decision.metadata) ? decision.metadata : {};
+  return {
+    type: "allow",
+    metadata: {
+      accountId: stringField(metadata.accountId),
+      email: stringField(metadata.email),
+      providerId: stringField(metadata.providerId),
+      providerName: stringField(metadata.providerName),
+      authType: authTypeField(metadata.authType),
+      status: mailStatusField(metadata.status),
+    },
+  };
+}
+
+function denyPendingRendererApprovals(reason: string) {
+  for (const [approvalId, pending] of pendingRendererApprovals) {
+    clearTimeout(pending.timeout);
+    pending.resolve({ type: "deny", reason });
+    pendingRendererApprovals.delete(approvalId);
+  }
 }
 
 function questionOptionText(option: unknown) {
@@ -167,7 +288,41 @@ async function requestQuestionApproval(request: ToolApprovalRequest): Promise<To
   return { type: "allow", metadata: { answers } };
 }
 
+async function requestRendererApproval(request: ToolApprovalRequest): Promise<ToolApprovalDecision> {
+  const approvalWindow = getApprovalWindow();
+  if (!approvalWindow || request.kind !== "mail_auth") {
+    return { type: "deny", reason: "Interactive approval is not available." };
+  }
+
+  const approvalId = `approval_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const payload: DesktopApprovalRequest = {
+    approvalId,
+    kind: "mail_auth",
+    sessionId: request.sessionId,
+    agentId: request.agentId,
+    toolCallId: request.toolCall.id,
+    toolName: request.toolCall.name,
+    reason: request.reason,
+    createdAt: Date.now(),
+    metadata: sanitizeMailAuthRequestMetadata(request.metadata),
+  };
+
+  return await new Promise<ToolApprovalDecision>((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingRendererApprovals.delete(approvalId);
+      resolve({ type: "deny", reason: "Interactive approval timed out." });
+    }, APPROVAL_TIMEOUT_MS);
+
+    pendingRendererApprovals.set(approvalId, { resolve, timeout });
+    approvalWindow.webContents.send("desktop:approval-request", payload);
+  });
+}
+
 async function requestToolApproval(request: ToolApprovalRequest): Promise<ToolApprovalDecision> {
+  if (request.kind === "mail_auth") {
+    return await requestRendererApproval(request);
+  }
+
   if (request.kind === "question") {
     return await requestQuestionApproval(request);
   }
@@ -260,6 +415,10 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.removeMenu();
+  mainWindow.on("closed", () => {
+    denyPendingRendererApprovals("Desktop window closed before approval completed.");
+    mainWindow = null;
+  });
 
   const emitWindowState = () => {
     if (!mainWindow) return;
@@ -278,6 +437,7 @@ function createWindow() {
   });
 
   mainWindow.webContents.on("did-attach-webview", (_event, webContents) => {
+    browserAutomationService?.registerWebContents(webContents);
     webContents.setWindowOpenHandler((details) => {
       const payload = createWebviewWindowOpenPayload(webContents.id, details);
       if (payload && mainWindow && !mainWindow.isDestroyed()) {
@@ -360,6 +520,13 @@ app.whenReady().then(async () => {
   const statePath = path.join(app.getPath("userData"), "workspace.json");
   const conversationDatabasePath = path.join(app.getPath("userData"), "data", "app.db");
   service = new WorkspaceService(statePath);
+  browserAutomationService = new BrowserAutomationService();
+  terminalManager = new InteractiveTerminalManager((event) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    mainWindow.webContents.send("desktop:terminal-event", event);
+  });
   conversationService = new ConversationService(conversationDatabasePath, {
     userDataPath: app.getPath("userData"),
   });
@@ -377,6 +544,7 @@ app.whenReady().then(async () => {
     service,
     emitChatEvent,
     requestToolApproval,
+    browserAutomationService,
   );
   remoteControlService = new RemoteControlService(statePath, service, chatOrchestrator, {
     onWorkspaceChanged: async () => {
@@ -411,6 +579,22 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("desktop:cancel-chat-turn", async (_event, conversationId: string) => {
     await chatOrchestrator!.cancelTurn(conversationId);
+  });
+
+  ipcMain.handle("desktop:resolve-approval", async (event, payload: DesktopApprovalResponse) => {
+    if (mainWindow && event.sender !== mainWindow.webContents) {
+      throw new Error("Approval response came from an unexpected renderer.");
+    }
+    const approvalId = String(payload?.approvalId ?? "");
+    const pending = pendingRendererApprovals.get(approvalId);
+    if (!pending) {
+      return false;
+    }
+
+    pendingRendererApprovals.delete(approvalId);
+    clearTimeout(pending.timeout);
+    pending.resolve(sanitizeMailAuthDecision(payload.decision));
+    return true;
   });
 
   ipcMain.handle("desktop:send-chat-message", async (_event, payload) => {
@@ -659,6 +843,10 @@ app.whenReady().then(async () => {
     return await mcpInspector.debugTool(payload);
   });
 
+  ipcMain.handle("desktop:mark-browser-page-active", async (_event, webContentsId: number) => {
+    browserAutomationService?.markActivePage(Number(webContentsId));
+  });
+
   ipcMain.handle("desktop:list-tools", async () => {
     const config = await service!.getConfigSnapshot();
     const inspectedServers = await Promise.all(
@@ -717,6 +905,34 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("desktop:run-terminal-command", async (_event, payload: { command: string; cwd?: string; workspaceRoot?: string }) => {
     return await service!.runTerminalCommand(payload);
+  });
+
+  ipcMain.handle("desktop:create-terminal-session", async (_event, payload: TerminalSessionCreateInput) => {
+    return await terminalManager!.createTerminalSession(await resolveTerminalCreateInput(payload));
+  });
+
+  ipcMain.handle("desktop:write-terminal-input", async (_event, payload: TerminalSessionInput) => {
+    return await terminalManager!.writeTerminalInput(payload);
+  });
+
+  ipcMain.handle("desktop:resize-terminal-session", async (_event, payload: TerminalSessionResizeInput) => {
+    return await terminalManager!.resizeTerminalSession(payload);
+  });
+
+  ipcMain.handle("desktop:clear-terminal-session", async (_event, terminalId: string) => {
+    return await terminalManager!.clearTerminalSession({ terminalId });
+  });
+
+  ipcMain.handle("desktop:stop-terminal-session", async (_event, terminalId: string) => {
+    return await terminalManager!.stopTerminalSession({ terminalId });
+  });
+
+  ipcMain.handle("desktop:restart-terminal-session", async (_event, terminalId: string) => {
+    return await terminalManager!.restartTerminalSession({ terminalId });
+  });
+
+  ipcMain.handle("desktop:release-terminal-session", async (_event, terminalId: string) => {
+    await terminalManager!.releaseTerminalSession({ terminalId });
   });
 
   ipcMain.handle("desktop:open-preview-target", async (_event, payload: { path?: string; url?: string }) => {
@@ -794,6 +1010,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", async () => {
+  await terminalManager?.shutdown();
   await remoteControlService?.shutdown();
   await conversationService?.shutdown();
   await service?.shutdown();

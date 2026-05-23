@@ -11,6 +11,8 @@ import type {
   ChatSendResult,
   ChatTurnStartResult,
   BootstrapPayload,
+  DesktopApprovalRequest,
+  DesktopApprovalResponse,
   DesktopWindowState,
   FileDropEntry,
   KnowledgeCatalogPayload,
@@ -45,6 +47,11 @@ import type {
   ModelProviderFetchResult,
   RemoteControlStatus,
   SkillImportResult,
+  TerminalSessionCreateInput,
+  TerminalSessionEvent,
+  TerminalSessionInput,
+  TerminalSessionResizeInput,
+  TerminalSessionSnapshot,
   WechatLoginStartResult,
   WechatLoginWaitResult,
   WebviewWindowOpenPayload,
@@ -99,6 +106,7 @@ declare global {
       transcribeAudio: (payload: AudioTranscriptionInput) => Promise<AudioTranscriptionResult>;
       inspectMcpServer: (payload: McpInspectInput) => Promise<McpServerToolsResult>;
       debugMcpTool: (payload: McpToolDebugInput) => Promise<McpToolDebugResult>;
+      markBrowserPageActive: (webContentsId: number) => Promise<void>;
       listTools: () => Promise<WorkspaceToolCatalog>;
       selectFiles: () => Promise<FileDropEntry[]>;
       prepareAttachments: (filePaths: string[]) => Promise<FileDropEntry[]>;
@@ -106,6 +114,13 @@ declare global {
       listWorkspaceDirectory: (payload?: { path?: string; workspaceRoot?: string }) => Promise<WorkspaceDirectoryListing>;
       readPreview: (payload: { path?: string; url?: string; content?: string; kind?: string; title?: string }) => Promise<FilePreviewPayload>;
       runTerminalCommand: (payload: { command: string; cwd?: string; workspaceRoot?: string }) => Promise<TerminalCommandResult>;
+      createTerminalSession: (payload: TerminalSessionCreateInput) => Promise<TerminalSessionSnapshot>;
+      writeTerminalInput: (payload: TerminalSessionInput) => Promise<TerminalSessionSnapshot>;
+      resizeTerminalSession: (payload: TerminalSessionResizeInput) => Promise<TerminalSessionSnapshot>;
+      clearTerminalSession: (terminalId: string) => Promise<TerminalSessionSnapshot>;
+      stopTerminalSession: (terminalId: string) => Promise<TerminalSessionSnapshot>;
+      restartTerminalSession: (terminalId: string) => Promise<TerminalSessionSnapshot>;
+      releaseTerminalSession: (terminalId: string) => Promise<void>;
       openPreviewTarget: (payload: { path?: string; url?: string }) => Promise<void>;
       openWorkspaceFolder: () => Promise<void>;
       openFolder: (targetPath: string) => Promise<void>;
@@ -113,10 +128,13 @@ declare global {
       minimizeWindow: () => Promise<DesktopWindowState>;
       toggleMaximizeWindow: () => Promise<DesktopWindowState>;
       closeWindow: () => Promise<void>;
+      respondToApproval: (payload: DesktopApprovalResponse) => Promise<boolean>;
       onWorkspaceChanged: (listener: (payload: BootstrapPayload) => void) => () => void;
       onWindowStateChanged: (listener: (payload: DesktopWindowState) => void) => () => void;
       onChatEvent: (listener: (event: ChatEvent) => void) => () => void;
+      onApprovalRequest: (listener: (request: DesktopApprovalRequest) => void) => () => void;
       onBrowserWindowOpen: (listener: (payload: WebviewWindowOpenPayload) => void) => () => void;
+      onTerminalEvent: (listener: (event: TerminalSessionEvent) => void) => () => void;
     };
   }
 }

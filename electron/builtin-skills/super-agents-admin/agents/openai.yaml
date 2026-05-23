@@ -1,0 +1,8 @@
+interface:
+  display_name: "Super Agents Admin"
+  short_description: "Operate Super Agents local app state through the JSON-first CLI harness."
+  default_prompt: "Use $super-agents-admin to inspect and administer Super Agents app state with JSON output, named sessions, and reversible config changes."
+  brand_color: "#2563eb"
+
+policy:
+  allow_implicit_invocation: true

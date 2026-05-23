@@ -59,8 +59,8 @@ test("token usage badge formats compact totals and RMB cost with model unit pric
     label: "1.5K tokens · ¥0.0058",
     title: [
       "GPT-5 Mini",
-      "用量：输入 1.2K，缓存 200，输出 300，推理 0",
-      "单价：输入 ¥1.70/M、缓存 ¥0.17/M、输出 ¥13.60/M",
+      "用量：输入 1.2K · 缓存 200 · 输出 300",
+      "单价/百万：输入 ¥1.70 · 缓存 ¥0.17 · 输出 ¥13.60",
       "估算：¥0.0058",
     ].join("\n"),
   });
@@ -88,7 +88,7 @@ test("token usage badge keeps token counts when model price is unknown", () => {
     label: "120 tokens",
     title: [
       "Private Model",
-      "用量：输入 100，缓存 0，输出 20，推理 0",
+      "用量：输入 100 · 输出 20",
       "单价：未知",
       "价格未知",
     ].join("\n"),

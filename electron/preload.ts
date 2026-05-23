@@ -13,6 +13,8 @@ import type {
   ChatSendResult,
   ChatTurnStartResult,
   BootstrapPayload,
+  DesktopApprovalRequest,
+  DesktopApprovalResponse,
   DesktopWindowState,
   FileDropEntry,
   FilePreviewPayload,
@@ -46,6 +48,11 @@ import type {
   RemoteControlStatus,
   SkillImportResult,
   TerminalCommandResult,
+  TerminalSessionCreateInput,
+  TerminalSessionEvent,
+  TerminalSessionInput,
+  TerminalSessionResizeInput,
+  TerminalSessionSnapshot,
   WebviewWindowOpenPayload,
   WechatLoginStartResult,
   WechatLoginWaitResult,
@@ -144,6 +151,8 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:inspect-mcp-server", payload) as Promise<McpServerToolsResult>,
   debugMcpTool: (payload: McpToolDebugInput) =>
     ipcRenderer.invoke("desktop:debug-mcp-tool", payload) as Promise<McpToolDebugResult>,
+  markBrowserPageActive: (webContentsId: number) =>
+    ipcRenderer.invoke("desktop:mark-browser-page-active", webContentsId) as Promise<void>,
   listTools: () =>
     ipcRenderer.invoke("desktop:list-tools") as Promise<WorkspaceToolCatalog>,
   selectFiles: () => ipcRenderer.invoke("desktop:select-files") as Promise<FileDropEntry[]>,
@@ -156,6 +165,20 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:read-preview", payload) as Promise<FilePreviewPayload>,
   runTerminalCommand: (payload: { command: string; cwd?: string; workspaceRoot?: string }) =>
     ipcRenderer.invoke("desktop:run-terminal-command", payload) as Promise<TerminalCommandResult>,
+  createTerminalSession: (payload: TerminalSessionCreateInput) =>
+    ipcRenderer.invoke("desktop:create-terminal-session", payload) as Promise<TerminalSessionSnapshot>,
+  writeTerminalInput: (payload: TerminalSessionInput) =>
+    ipcRenderer.invoke("desktop:write-terminal-input", payload) as Promise<TerminalSessionSnapshot>,
+  resizeTerminalSession: (payload: TerminalSessionResizeInput) =>
+    ipcRenderer.invoke("desktop:resize-terminal-session", payload) as Promise<TerminalSessionSnapshot>,
+  clearTerminalSession: (terminalId: string) =>
+    ipcRenderer.invoke("desktop:clear-terminal-session", terminalId) as Promise<TerminalSessionSnapshot>,
+  stopTerminalSession: (terminalId: string) =>
+    ipcRenderer.invoke("desktop:stop-terminal-session", terminalId) as Promise<TerminalSessionSnapshot>,
+  restartTerminalSession: (terminalId: string) =>
+    ipcRenderer.invoke("desktop:restart-terminal-session", terminalId) as Promise<TerminalSessionSnapshot>,
+  releaseTerminalSession: (terminalId: string) =>
+    ipcRenderer.invoke("desktop:release-terminal-session", terminalId) as Promise<void>,
   openPreviewTarget: (payload: { path?: string; url?: string }) =>
     ipcRenderer.invoke("desktop:open-preview-target", payload) as Promise<void>,
   openWorkspaceFolder: () => ipcRenderer.invoke("desktop:open-workspace-folder") as Promise<void>,
@@ -164,6 +187,8 @@ const desktopAgent = {
   minimizeWindow: () => ipcRenderer.invoke("desktop:minimize-window") as Promise<DesktopWindowState>,
   toggleMaximizeWindow: () => ipcRenderer.invoke("desktop:toggle-maximize-window") as Promise<DesktopWindowState>,
   closeWindow: () => ipcRenderer.invoke("desktop:close-window") as Promise<void>,
+  respondToApproval: (payload: DesktopApprovalResponse) =>
+    ipcRenderer.invoke("desktop:resolve-approval", payload) as Promise<boolean>,
   onWorkspaceChanged: (listener: (payload: BootstrapPayload) => void) => {
     const wrapped = (_event: unknown, payload: BootstrapPayload) => listener(payload);
     ipcRenderer.on("desktop:workspace-changed", wrapped);
@@ -179,10 +204,20 @@ const desktopAgent = {
     ipcRenderer.on("desktop:chat-event", wrapped);
     return () => ipcRenderer.removeListener("desktop:chat-event", wrapped);
   },
+  onApprovalRequest: (listener: (request: DesktopApprovalRequest) => void) => {
+    const wrapped = (_event: unknown, request: DesktopApprovalRequest) => listener(request);
+    ipcRenderer.on("desktop:approval-request", wrapped);
+    return () => ipcRenderer.removeListener("desktop:approval-request", wrapped);
+  },
   onBrowserWindowOpen: (listener: (payload: WebviewWindowOpenPayload) => void) => {
     const wrapped = (_event: unknown, payload: WebviewWindowOpenPayload) => listener(payload);
     ipcRenderer.on("desktop:browser-window-open", wrapped);
     return () => ipcRenderer.removeListener("desktop:browser-window-open", wrapped);
+  },
+  onTerminalEvent: (listener: (event: TerminalSessionEvent) => void) => {
+    const wrapped = (_event: unknown, event: TerminalSessionEvent) => listener(event);
+    ipcRenderer.on("desktop:terminal-event", wrapped);
+    return () => ipcRenderer.removeListener("desktop:terminal-event", wrapped);
   },
 };
 

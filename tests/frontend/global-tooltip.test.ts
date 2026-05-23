@@ -14,26 +14,20 @@ function readSource(relativePath: string) {
   return readFileSync(existsSync(localPath) ? localPath : path.resolve(process.cwd(), "..", relativePath), "utf8");
 }
 
-function candidate(
-  attributes: Record<string, string | undefined>,
-  interactive = false,
-): TooltipCandidateElement {
+function candidate(attributes: Record<string, string | undefined>): TooltipCandidateElement {
   return {
     getAttribute(name: string) {
       return attributes[name] ?? null;
     },
-    matches() {
-      return interactive;
-    },
   };
 }
 
-test("global tooltip prefers explicit labels and limits aria-label fallback to controls", () => {
+test("global tooltip only shows explicit tooltip labels", () => {
   assert.equal(readTooltipLabel(candidate({ "data-tooltip": "刷新列表", title: "系统标题" })), "刷新列表");
-  assert.equal(readTooltipLabel(candidate({ title: "  打开当前工作目录  " })), "打开当前工作目录");
-  assert.equal(readTooltipLabel(candidate({ "aria-label": "删除会话" }, true)), "删除会话");
-  assert.equal(readTooltipLabel(candidate({ "aria-label": "文件路径" }, false)), null);
-  assert.equal(readTooltipLabel(candidate({ title: "   " }, true)), null);
+  assert.equal(readTooltipLabel(candidate({ title: "  打开当前工作目录  " })), null);
+  assert.equal(readTooltipLabel(candidate({ "aria-label": "删除会话" })), null);
+  assert.equal(readTooltipLabel(candidate({ "aria-label": "文件路径" })), null);
+  assert.equal(readTooltipLabel(candidate({ "data-tooltip": "   " })), null);
 });
 
 test("global tooltip positions above controls and clamps inside the viewport", () => {

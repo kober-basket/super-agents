@@ -10,6 +10,7 @@ Add a generic mail capability that agents can use with minimal user setup. The f
 - Provider detection from an email address.
 - OAuth-first setup for Gmail and Microsoft/Outlook accounts.
 - Password/app-password setup for common IMAP/SMTP providers.
+- IMAP search/read for password/app-password providers such as QQ Mail, Tencent Exmail, and NetEase mail.
 - A local authorization and account-management surface in Settings.
 - Built-in agent tools for account discovery, mail search/read, draft creation, and approved sending.
 - A bundled mail skill that teaches agents safe and practical mail workflows.
@@ -20,7 +21,7 @@ The user should normally type only an email address. The app infers the provider
 
 - Gmail: email plus OAuth client settings when the app has no packaged OAuth client.
 - Microsoft/Outlook/Office 365: email plus OAuth client id when the app has no packaged OAuth client.
-- Known IMAP/SMTP providers: email plus password/app password.
+- Known IMAP/SMTP providers: email plus password/app password or mailbox authorization code.
 - Unknown domains: email plus advanced IMAP/SMTP host, port, TLS, username, and password fields.
 
 OAuth accounts use a desktop browser authorization flow and store refresh/access tokens locally. Password accounts store the password/app password locally.
@@ -47,6 +48,7 @@ OAuth accounts use a desktop browser authorization flow and store refresh/access
 - Add a local mail service with encrypted-at-rest secret storage.
 - Add provider inference and setup metadata.
 - Add Gmail and Microsoft Graph API clients for OAuth-backed search/read/send.
+- Add an IMAP client for password/app-password backed search/read.
 - Add local draft storage.
 - Add Electron IPC/preload/client methods for mail setup.
 - Add a Settings > Mail page for account setup and connection management.
@@ -57,7 +59,6 @@ OAuth accounts use a desktop browser authorization flow and store refresh/access
 ## Out of scope
 
 - Attachments.
-- Full IMAP/SMTP protocol implementation without a vetted dependency.
 - Background sync and notifications.
 - Shared/team credential vaults.
 - Complex mailbox rules and labels.

@@ -58,6 +58,8 @@ function toolResultIndicatesFailure(result: ToolResult) {
   const signal = metadata.signal;
 
   return (
+    metadata.cancelled === true ||
+    metadata.canceled === true ||
     metadata.isError === true ||
     metadata.timedOut === true ||
     (typeof exitCode === "number" && exitCode !== 0) ||

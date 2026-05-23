@@ -1,0 +1,7 @@
+interface:
+  display_name: "内置浏览器自动化"
+  short_description: "操控右侧工作区里用户可见的内置浏览器。"
+  default_prompt: "Use $browser-automation to operate or inspect the built-in browser that is visible in the right-side workspace."
+
+policy:
+  allow_implicit_invocation: true

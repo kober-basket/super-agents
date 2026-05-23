@@ -104,9 +104,10 @@ test("tools list icons use a softer darker treatment than the shared default", (
   const css = readSource("src/styles.css");
 
   assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium\s*{[^}]*border-radius:\s*14px;/s);
-  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium\s*{[^}]*rgba\(255,\s*255,\s*255,\s*0\.5\)/s);
+  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium\s*{[^}]*rgba\(255,\s*255,\s*255,\s*0\.28\)/s);
   assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium\s*{[^}]*#111827/s);
-  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium::before\s*{[^}]*opacity:\s*0\.58;/s);
+  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium::before\s*{[^}]*rgba\(255,\s*255,\s*255,\s*0\.18\)/s);
+  assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium::before\s*{[^}]*opacity:\s*0\.46;/s);
 });
 
 test("tools page keeps tool descriptions compact and visually grouped", () => {

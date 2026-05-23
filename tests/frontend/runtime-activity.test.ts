@@ -13,7 +13,7 @@ function toolCall(title: string, status: ChatToolCall["status"] = "completed"): 
   };
 }
 
-test("runtime activity groups exploration and command work into Codex-style summaries", () => {
+test("runtime activity groups exploration and command work into compact summaries", () => {
   const items = buildRuntimeActivityItems([
     toolCall("read"),
     toolCall("grep"),

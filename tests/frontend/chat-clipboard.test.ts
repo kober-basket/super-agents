@@ -121,9 +121,22 @@ test("message copy hover target stays reachable while moving from the bubble to 
   assert.match(css, /\.message-actions\.assistant\s*{[^}]*right:\s*auto/s);
   assert.doesNotMatch(css, /\.message-actions\s*{[^}]*bottom:\s*-/s);
   assert.match(css, /\.message-actions::before\s*{[^}]*top:\s*-1[0-9]px[^}]*left:\s*-1[0-9]px/s);
+  assert.match(css, /\.message-usage-tooltip\s*{[^}]*display:\s*grid/s);
+  assert.match(css, /\.message-usage-tooltip\s*{[^}]*white-space:\s*normal/s);
+  assert.match(css, /\.message-usage-tooltip-row\s*{[^}]*grid-template-columns:\s*64px\s+minmax\(0,\s*1fr\)/s);
+  assert.match(css, /\.message-usage-tooltip-value\s*{[^}]*overflow-wrap:\s*anywhere/s);
+  assert.match(css, /\.message-usage-tooltip\s*{[^}]*background:\s*rgba\(31,\s*41,\s*55,\s*0\.96\)/s);
+  assert.match(css, /\.message-usage-tooltip\s*{[^}]*position:\s*fixed/s);
+  assert.match(css, /\.message-usage-tooltip\s*{[^}]*z-index:\s*1000/s);
+  assert.doesNotMatch(css, /\.message-usage-tooltip\s*{[^}]*overflow:\s*hidden/s);
+  assert.match(css, /\.message-usage-tooltip\.is-visible\s*{[^}]*opacity:\s*1/s);
+  assert.match(css, /\.message-usage-tooltip\[data-placement="bottom"\]::before\s*{[^}]*top:\s*-5px/s);
+  assert.match(css, /\.message-usage-tooltip\[data-placement="top"\]::before\s*{[^}]*bottom:\s*-5px/s);
+  assert.doesNotMatch(css, /\.message-usage:hover\s+\.message-usage-tooltip/s);
+  assert.doesNotMatch(css, /\.message-usage:focus-visible\s+\.message-usage-tooltip/s);
 });
 
-test("assistant message actions place copy before the timestamp", () => {
+test("assistant message actions place copy before usage tooltip and timestamp", () => {
   const localSourcePath = path.resolve(process.cwd(), "src/features/chat/ChatWorkspace.tsx");
   const sourcePath = existsSync(localSourcePath)
     ? localSourcePath
@@ -132,10 +145,33 @@ test("assistant message actions place copy before the timestamp", () => {
 
   assert.match(
     source,
-    /className=\{`message-actions[\s\S]*message\.role === "assistant"[\s\S]*<button[\s\S]*className=\{`message-action-button[\s\S]*<\/button>[\s\S]*<span className="message-usage"/,
+    /className=\{`message-actions[\s\S]*message\.role === "assistant"[\s\S]*<button[\s\S]*className=\{`message-action-button[\s\S]*<\/button>[\s\S]*<MessageUsageBadge/,
   );
+  assert.match(source, /className="message-usage"[\s\S]*data-placement=\{placement\}/);
   assert.match(
     source,
-    /<span className="message-usage"[\s\S]*<\/span>[\s\S]*<span className="message-time">/,
+    /const usageTooltipId = usageBadge \? `message-usage-tooltip-\$\{message\.id\}` : undefined;/,
+  );
+  assert.match(source, /chooseFloatingTooltipPlacement/);
+  assert.match(source, /createPortal\(/);
+  assert.match(source, /message-usage-tooltip-section/);
+  assert.match(source, /message-usage-tooltip-row/);
+  assert.match(source, /closest\("\.message-list"\)/);
+  assert.match(source, /boundaryBottom/);
+  assert.match(source, /onPointerEnter=\{showTooltip\}/);
+  assert.match(source, /onFocus=\{showTooltip\}/);
+  assert.match(source, /onPointerLeave=\{hideTooltip\}/);
+  assert.match(source, /onBlur=\{hideTooltip\}/);
+  assert.match(
+    source,
+    /<MessageUsageBadge[\s\S]*id=\{usageTooltipId\}[\s\S]*label=\{usageBadge\.label\}[\s\S]*title=\{usageBadge\.title\}[\s\S]*\/>[\s\S]*<span className="message-time">/,
+  );
+  assert.doesNotMatch(
+    source,
+    /<span className="message-usage"\s+title=/,
+  );
+  assert.doesNotMatch(
+    source,
+    /<span className="message-usage"\s+aria-label=\{usageBadge\.title\}/,
   );
 });

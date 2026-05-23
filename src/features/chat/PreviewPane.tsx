@@ -51,6 +51,7 @@ interface PreviewPaneProps {
   onOpenLink: (url: string, options?: { activate?: boolean }) => void;
   onOpenExternal: (payload: { path?: string; url?: string }) => void;
   onBrowserStateChange?: (state: { title?: string; url?: string; loading?: boolean }) => void;
+  onBrowserPageActive?: (webContentsId: number) => void;
   onBrowserWindowOpen?: (listener: (payload: WebviewWindowOpenPayload) => void) => () => void;
 }
 
@@ -153,6 +154,7 @@ export function PreviewPane({
   onOpenLink,
   onOpenExternal,
   onBrowserStateChange,
+  onBrowserPageActive,
   onBrowserWindowOpen,
 }: PreviewPaneProps) {
   const webviewRef = useRef<BrowserWebviewElement | null>(null);
@@ -166,12 +168,14 @@ export function PreviewPane({
   const [canGoForward, setCanGoForward] = useState(false);
   const browserMode = isBrowserPreview(preview);
   const onBrowserStateChangeRef = useRef(onBrowserStateChange);
+  const onBrowserPageActiveRef = useRef(onBrowserPageActive);
   const onOpenLinkRef = useRef(onOpenLink);
 
   useEffect(() => {
     onBrowserStateChangeRef.current = onBrowserStateChange;
+    onBrowserPageActiveRef.current = onBrowserPageActive;
     onOpenLinkRef.current = onOpenLink;
-  }, [onBrowserStateChange, onOpenLink]);
+  }, [onBrowserPageActive, onBrowserStateChange, onOpenLink]);
 
   useEffect(() => {
     if (!browserMode || !onBrowserWindowOpen) {
@@ -233,6 +237,9 @@ export function PreviewPane({
     const handleDomReady = () => {
       webviewReady = true;
       webContentsIdRef.current = webview.getWebContentsId?.() ?? null;
+      if (webContentsIdRef.current !== null) {
+        onBrowserPageActiveRef.current?.(webContentsIdRef.current);
+      }
       syncNavigationState();
     };
     const handleStartLoading = () => setBrowserLoading(true);

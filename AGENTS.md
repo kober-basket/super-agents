@@ -12,7 +12,8 @@
 - `electron/chat-orchestrator.ts`：聊天回合生命周期编排，把前端输入、workspace context 和 agent runtime 串起来。
 - `electron/chat/`：聊天侧 prompt context、runtime trace 映射和 turn event log 等编排辅助模块。
 - `electron/agent-core/`：原生 agent 能力层，包括 agent 定义、prompt 组合、工具注册、权限、会话和模型网关。
-- `electron/mail/`：本地邮件账号、授权、凭据存储和 OAuth/API/SMTP 辅助模块。
+- `electron/browser-automation-service.ts`：内置浏览器 webview 的 agent 自动化服务，负责页面注册、可访问快照、交互和截图。
+- `electron/mail/`：本地邮件账号、授权、凭据存储和 OAuth/API/IMAP/SMTP 辅助模块。
 - `electron/agent-core/openai/`：OpenAI-compatible 网关的消息映射、SSE 解析等 provider 辅助模块。
 - `electron/tool-catalog.ts`：内置工具与 MCP 工具汇总成工作区工具目录。
 - `electron/memory-service.ts`：本地长期记忆的结构化存储、搜索和 prompt context 构建。
@@ -33,10 +34,14 @@ npm install
 npm run dev
 npm run build
 npm run test:electron
+npm run cli -- --help
+npm run admin -- --help
 npm run runtime:check
 npm run package:runtime
 npm run preview
 ```
+
+- Super Agents self-admin CLI changes should keep `npm run cli -- --help` and `npm run admin -- --help` working and cover behavior in `tests/electron/super-agents-admin-cli.test.ts`.
 
 常用验证：
 
@@ -99,12 +104,14 @@ npm run preview
 - 同一 turn 内重复的同签名工具调用应复用已有结果或给出明确提示。
 - Coordinator/worker/specialist agent 应该通过清晰的任务边界协作，简单任务由当前 agent 直接完成。
 - MCP 是外部能力入口，内置工具是本地基础能力；两者在 UI 中统一展示，但实现边界不要混淆。
-- 邮件能力通过 Settings > Mail 配置账号；凭据存放在应用 userData 下的邮件凭据存储中，不进入 `AppConfig` 或前端 bootstrap 快照。读邮件使用 `mail`，写草稿和发送分别使用 `mail_draft`、`mail_send` 并保持审批边界。
+- 内置浏览器自动化要操控用户可见的右侧 Browser webview；`main` 进程通过 `did-attach-webview` 注册页面，agent 交互前应优先使用 `browser_snapshot` 获取 fresh uid，console/network 诊断通过同一服务采集并保持工具结果可截断。
+- 邮件能力通过 Settings > Mail 或会话内 `mail_auth` 私密授权表单配置账号；凭据存放在应用 userData 下的邮件凭据存储中，不进入 `AppConfig`、前端 bootstrap 快照或模型上下文。读邮件使用 `mail`（OAuth 账号走 Gmail/Microsoft API，授权码账号走 IMAP），写草稿和发送分别使用 `mail_draft`、`mail_send` 并保持审批边界。
 - Agent shell、终端命令和本地 MCP 启动都通过 `electron/runtime-support.ts` 注入应用私有 runtime PATH。不要直接在各调用点拼 PATH；新增子进程入口时复用 `createRuntimeProcessEnv()`。
 
 新增或调整 agent 能力时，优先补齐对应测试：
 
 - `tests/electron/agent-core.test.ts`
+- `tests/electron/browser-automation-service.test.ts`
 - `tests/electron/builtin-tools.test.ts`
 - `tests/electron/memory-service.test.ts`
 - `tests/electron/tool-catalog.test.ts`

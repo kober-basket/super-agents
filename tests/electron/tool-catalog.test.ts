@@ -11,11 +11,31 @@ test("built-in tool catalog exposes native model tools without workspace aliases
   assert.deepEqual(names, [
     "apply_patch",
     "bash",
+    "browser_click",
+    "browser_drag",
+    "browser_evaluate",
+    "browser_fill",
+    "browser_fill_form",
+    "browser_get_console_message",
+    "browser_get_network_request",
+    "browser_hover",
+    "browser_list_console_messages",
+    "browser_list_network_requests",
+    "browser_list_pages",
+    "browser_navigate",
+    "browser_press_key",
+    "browser_screenshot",
+    "browser_select_page",
+    "browser_snapshot",
+    "browser_type_text",
+    "browser_upload_file",
+    "browser_wait_for",
     "edit",
     "glob",
     "grep",
     "list",
     "mail",
+    "mail_auth",
     "mail_draft",
     "mail_send",
     "memory",
@@ -30,6 +50,9 @@ test("built-in tool catalog exposes native model tools without workspace aliases
   ]);
   assert.equal(tools.every((tool) => tool.source === "builtin"), true);
   assert.equal(names.some((name) => name.startsWith("workspace_")), false);
+  for (const tool of tools) {
+    assert.doesNotMatch(tool.description ?? "", /\bCodex\b/i, `${tool.name} should use product-neutral wording`);
+  }
 });
 
 test("workspace tool catalog combines built-in tools and concrete MCP tools only", () => {

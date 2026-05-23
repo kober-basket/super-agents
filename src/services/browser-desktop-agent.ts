@@ -11,6 +11,8 @@ import type {
   ChatSendInput,
   ChatSendResult,
   ChatTurnStartResult,
+  DesktopApprovalRequest,
+  DesktopApprovalResponse,
   DesktopWindowState,
   FileDropEntry,
   FilePreviewPayload,
@@ -43,6 +45,8 @@ import type {
   RuntimeSkill,
   SkillImportResult,
   TerminalCommandResult,
+  TerminalSessionEvent,
+  TerminalSessionSnapshot,
   WechatLoginStartResult,
   WechatLoginWaitResult,
   WorkspaceDirectoryListing,
@@ -211,6 +215,7 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
   const workspaceListeners = new Set<(payload: BootstrapPayload) => void>();
   const windowStateListeners = new Set<(payload: DesktopWindowState) => void>();
   const chatListeners = new Set<(event: ChatEvent) => void>();
+  const approvalListeners = new Set<(request: DesktopApprovalRequest) => void>();
 
   const getBootstrapPayload = (): BootstrapPayload => ({
     snapshotAt: now(),
@@ -395,6 +400,7 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
       unsupported("语音转写"),
     inspectMcpServer: async (_payload: McpInspectInput): Promise<McpServerToolsResult> => unsupported("MCP 服务检查"),
     debugMcpTool: async (_payload: McpToolDebugInput): Promise<McpToolDebugResult> => unsupported("MCP 工具调试"),
+    markBrowserPageActive: async () => undefined,
     listTools: async (): Promise<WorkspaceToolCatalog> => ({
       fetchedAt: now(),
       tools: [],
@@ -457,6 +463,91 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
       stderr: "",
       durationMs: 0,
     }),
+    createTerminalSession: async (payload): Promise<TerminalSessionSnapshot> => ({
+      terminalId: `mock-terminal-${now()}`,
+      cwd: payload.cwd ?? config.workspaceRoot,
+      shell: "Mock Shell",
+      output: "",
+      truncated: false,
+      status: "running",
+      exitCode: null,
+      signal: null,
+      columns: payload.columns ?? 100,
+      rows: payload.rows ?? 28,
+      createdAt: now(),
+      updatedAt: now(),
+    }),
+    writeTerminalInput: async (payload): Promise<TerminalSessionSnapshot> => ({
+      terminalId: payload.terminalId,
+      cwd: config.workspaceRoot,
+      shell: "Mock Shell",
+      output: `> ${payload.input.trim()}`,
+      truncated: false,
+      status: "running",
+      exitCode: null,
+      signal: null,
+      columns: 100,
+      rows: 28,
+      createdAt: now(),
+      updatedAt: now(),
+    }),
+    resizeTerminalSession: async (payload): Promise<TerminalSessionSnapshot> => ({
+      terminalId: payload.terminalId,
+      cwd: config.workspaceRoot,
+      shell: "Mock Shell",
+      output: "",
+      truncated: false,
+      status: "running",
+      exitCode: null,
+      signal: null,
+      columns: payload.columns,
+      rows: payload.rows,
+      createdAt: now(),
+      updatedAt: now(),
+    }),
+    clearTerminalSession: async (terminalId): Promise<TerminalSessionSnapshot> => ({
+      terminalId,
+      cwd: config.workspaceRoot,
+      shell: "Mock Shell",
+      output: "",
+      truncated: false,
+      status: "running",
+      exitCode: null,
+      signal: null,
+      columns: 100,
+      rows: 28,
+      createdAt: now(),
+      updatedAt: now(),
+    }),
+    stopTerminalSession: async (terminalId): Promise<TerminalSessionSnapshot> => ({
+      terminalId,
+      cwd: config.workspaceRoot,
+      shell: "Mock Shell",
+      output: "",
+      truncated: false,
+      status: "exited",
+      exitCode: 0,
+      signal: null,
+      columns: 100,
+      rows: 28,
+      createdAt: now(),
+      updatedAt: now(),
+    }),
+    restartTerminalSession: async (terminalId): Promise<TerminalSessionSnapshot> => ({
+      terminalId,
+      cwd: config.workspaceRoot,
+      shell: "Mock Shell",
+      output: "",
+      truncated: false,
+      status: "running",
+      exitCode: null,
+      signal: null,
+      columns: 100,
+      rows: 28,
+      createdAt: now(),
+      updatedAt: now(),
+    }),
+    releaseTerminalSession: async () => undefined,
     getWindowState: async (): Promise<DesktopWindowState> => ({
       platform: "win32",
       maximized: false,
@@ -474,6 +565,7 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
       return state;
     },
     closeWindow: async () => unsupported("窗口关闭"),
+    respondToApproval: async (_payload: DesktopApprovalResponse) => false,
     onWorkspaceChanged: (listener) => {
       workspaceListeners.add(listener);
       return () => workspaceListeners.delete(listener);
@@ -486,7 +578,12 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
       chatListeners.add(listener);
       return () => chatListeners.delete(listener);
     },
+    onApprovalRequest: (listener) => {
+      approvalListeners.add(listener);
+      return () => approvalListeners.delete(listener);
+    },
     onBrowserWindowOpen: () => () => undefined,
+    onTerminalEvent: (_listener: (event: TerminalSessionEvent) => void) => () => undefined,
   };
 
   return api;

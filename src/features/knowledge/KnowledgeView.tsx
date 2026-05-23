@@ -160,6 +160,15 @@ export function KnowledgeView({
   const [composerModal, setComposerModal] = useState<KnowledgeComposerModal>(null);
 
   const selectedBase = knowledgeBases.find((base) => base.id === selectedBaseId) ?? knowledgeBases[0] ?? null;
+  const knowledgeBaseCount = knowledgeBases.length;
+  const totalItemCount = useMemo(
+    () => knowledgeBases.reduce((sum, base) => sum + base.itemCount, 0),
+    [knowledgeBases],
+  );
+  const totalChunkCount = useMemo(
+    () => knowledgeBases.reduce((sum, base) => sum + base.chunkCount, 0),
+    [knowledgeBases],
+  );
 
   useEffect(() => {
     if (!selectedBaseId && knowledgeBases[0]?.id) {
@@ -184,6 +193,8 @@ export function KnowledgeView({
   }, [activeTab]);
 
   const currentType = TAB_ITEMS.find((item) => item.key === activeTab)?.itemType ?? "file";
+  const currentTypeLabel = formatItemType(currentType);
+  const activeTabMeta = getItemMeta(currentType);
   const embeddingProvider =
     modelProviders.find((provider) => provider.id === config.embeddingProviderId) ?? modelProviders[0] ?? null;
   const embeddingModels = useMemo(() => {
@@ -249,8 +260,10 @@ export function KnowledgeView({
 
   const controlsDisabled = knowledgeRefreshing || busyAction !== null;
   const refreshBusy = busyAction === "refresh" || (knowledgeRefreshing && busyAction === null);
-  const showToolbarActions = currentItems.length > 0 || itemQuery.trim().length > 0;
+  const isSearchActive = itemQuery.trim().length > 0;
+  const showToolbarActions = currentItems.length > 0 || isSearchActive;
   const hasFilteredItems = filteredItems.length > 0;
+  const showEmptyComposerStage = currentItems.length === 0 && !isSearchActive;
 
   async function runBusyAction<T>(action: KnowledgeBusyAction, task: () => Promise<T>) {
     if (knowledgeRefreshing || busyAction !== null) {
@@ -395,59 +408,94 @@ export function KnowledgeView({
   function renderComposerTrigger() {
     if (!selectedBase) return null;
 
-    if (activeTab === "file") {
+    const composerCopy: Record<
+      KnowledgeTabKey,
+      {
+        title: string;
+        emptyTitle: string;
+        action: string;
+        busyTitle?: string;
+        busyAction?: KnowledgeBusyAction;
+      }
+    > = {
+      file: {
+        title: "添加文件",
+        emptyTitle: "还没有文件",
+        action: "添加文件",
+        busyTitle: "正在导入文件…",
+        busyAction: "add-file",
+      },
+      note: { title: "添加笔记", emptyTitle: "还没有笔记", action: "新建笔记" },
+      directory: {
+        title: "导入目录",
+        emptyTitle: "还没有目录",
+        action: "选择目录",
+        busyTitle: "正在导入目录…",
+        busyAction: "add-directory",
+      },
+      url: { title: "添加网址", emptyTitle: "还没有网址", action: "添加网址" },
+      website: { title: "添加网站", emptyTitle: "还没有网站", action: "添加网站" },
+    };
+    const copy = composerCopy[activeTab];
+    const Icon = activeTab === "file" ? UploadCloud : activeTabMeta.icon;
+    const actionBusy = copy.busyAction ? busyAction === copy.busyAction : false;
+
+    function handleComposerAction() {
+      if (activeTab === "file") {
+        void handleAddFiles();
+        return;
+      }
+
+      if (activeTab === "directory") {
+        void handleAddDirectory();
+        return;
+      }
+
+      openComposerModal(activeTab as KnowledgeComposerModal);
+    }
+
+    if (showEmptyComposerStage) {
       return (
-        <div className={clsx("knowledge-empty-upload", busyAction === "add-file" && "busy")} aria-busy={busyAction === "add-file"}>
+        <div className={clsx("knowledge-empty-upload", actionBusy && "busy")} aria-busy={actionBusy}>
           <span className="knowledge-upload-illustration" aria-hidden="true">
-            {busyAction === "add-file" ? <LoaderCircle size={30} className="spin" /> : <UploadCloud size={34} />}
+            {actionBusy ? <LoaderCircle size={30} className="spin" /> : <Icon size={34} />}
           </span>
-          <strong>{busyAction === "add-file" ? "正在导入文件…" : "还没有添加任何文件"}</strong>
+          <div className="knowledge-empty-upload-copy">
+            <strong>{actionBusy ? (copy.busyTitle ?? "处理中…") : copy.emptyTitle}</strong>
+            <span>{selectedBase.name}</span>
+          </div>
           <button
             className="primary-button knowledge-upload-button"
-            onClick={() => void handleAddFiles()}
+            onClick={handleComposerAction}
             disabled={controlsDisabled}
             type="button"
           >
-            {busyAction === "add-file" ? <LoaderCircle size={15} className="spin" /> : <Plus size={15} />}
-            {busyAction === "add-file" ? "导入中…" : "添加文件"}
+            {actionBusy ? <LoaderCircle size={15} className="spin" /> : <Plus size={15} />}
+            {actionBusy ? "处理中…" : copy.action}
           </button>
         </div>
       );
     }
 
-    if (activeTab === "directory") {
-      return (
-        <div className={clsx("knowledge-composer-card", "compact", busyAction === "add-directory" && "busy")}>
-          <div className="knowledge-composer-copy">
-            <strong>导入目录</strong>
-          </div>
-          <button className="primary-button" onClick={() => void handleAddDirectory()} disabled={controlsDisabled}>
-            {busyAction === "add-directory" ? <LoaderCircle size={14} className="spin" /> : <Plus size={14} />}
-            {busyAction === "add-directory" ? "导入中…" : "选择目录"}
-          </button>
-        </div>
-      );
-    }
-
-    const triggerCopy: Record<Exclude<KnowledgeTabKey, "file" | "directory">, { title: string; action: string }> = {
-      note: { title: "添加笔记", action: "新建笔记" },
-      url: { title: "添加网址", action: "添加网址" },
-      website: { title: "添加网站", action: "添加网站" },
-    };
-
-    const copy = triggerCopy[activeTab as keyof typeof triggerCopy];
     return (
-      <div className="knowledge-composer-card compact trigger-only">
+      <div className={clsx("knowledge-composer-card", "compact", "trigger-only", actionBusy && "busy")}>
+        <span className="knowledge-composer-icon" aria-hidden="true">
+          {actionBusy ? <LoaderCircle size={16} className="spin" /> : <Icon size={16} />}
+        </span>
         <div className="knowledge-composer-copy">
           <strong>{copy.title}</strong>
+          <span>
+            {currentItems.length} 项{currentTypeLabel}
+          </span>
         </div>
         <button
           className="primary-button"
-          onClick={() => openComposerModal(activeTab as KnowledgeComposerModal)}
+          onClick={handleComposerAction}
           disabled={controlsDisabled}
+          type="button"
         >
-          <Plus size={14} />
-          {copy.action}
+          {actionBusy ? <LoaderCircle size={14} className="spin" /> : <Plus size={14} />}
+          {actionBusy ? "处理中…" : copy.action}
         </button>
       </div>
     );
@@ -547,6 +595,20 @@ export function KnowledgeView({
               </span>
               知识库
             </h2>
+            <div className="knowledge-sidebar-overview" aria-label="知识库概览">
+              <span>
+                <strong>{knowledgeBaseCount}</strong>
+                <em>库</em>
+              </span>
+              <span>
+                <strong>{totalItemCount}</strong>
+                <em>资料</em>
+              </span>
+              <span>
+                <strong>{totalChunkCount}</strong>
+                <em>切片</em>
+              </span>
+            </div>
           </header>
 
           <div className="knowledge-base-list">
@@ -579,6 +641,13 @@ export function KnowledgeView({
               placeholder="例如：产品文档"
               disabled={controlsDisabled}
             />
+            <textarea
+              value={draftBaseDescription}
+              onChange={(event) => setDraftBaseDescription(event.target.value)}
+              placeholder="可选描述"
+              disabled={controlsDisabled}
+              rows={3}
+            />
             <button
               type="button"
               className="primary-button knowledge-create-button"
@@ -596,49 +665,25 @@ export function KnowledgeView({
             {selectedBase ? (
               <div className="knowledge-detail">
                 <section className="knowledge-hero simple">
-                  <div className="knowledge-hero-main">
-                    <div className="knowledge-settings-strip">
-                      <label className="knowledge-setting-card">
-                        <span className="knowledge-setting-label">
-                          <Settings2 size={14} />
-                          提供商
-                        </span>
-                        <SurfaceSelect
-                          align="left"
-                          ariaLabel="选择 Embedding 提供商"
-                          className="knowledge-setting-select"
-                          disabled={controlsDisabled}
-                          emptyLabel="暂无提供商"
-                          fullWidth
-                          onChange={onChangeEmbeddingProvider}
-                          options={embeddingProviderOptions}
-                          value={embeddingProvider?.id ?? config.embeddingProviderId}
-                        />
-                      </label>
-
-                      <label className="knowledge-setting-card grow">
-                        <span className="knowledge-setting-label">模型</span>
-                        {embeddingModels.length > 0 ? (
-                          <SurfaceSelect
-                            align="left"
-                            ariaLabel="选择 Embedding 模型"
-                            className="knowledge-setting-select wide"
-                            disabled={controlsDisabled}
-                            emptyLabel="无可用的 Embedding 模型"
-                            fullWidth
-                            onChange={onChangeEmbeddingModel}
-                            options={embeddingModelOptions}
-                            value={activeEmbeddingModel?.id ?? config.embeddingModel}
-                          />
-                        ) : (
-                          <div
-                            className="knowledge-setting-empty"
-                            title={`${embeddingProvider?.name ?? "当前提供商"} 无可用的 Embedding 模型`}
-                          >
-                            <strong>无可用的 Embedding 模型</strong>
-                          </div>
-                        )}
-                      </label>
+                  <div className="knowledge-hero-head">
+                    <div className="knowledge-hero-copy">
+                      <span className="knowledge-kicker">当前知识库</span>
+                      <h3>{selectedBase.name}</h3>
+                      <p>{selectedBase.description?.trim() || `${selectedBase.itemCount} 条资料`}</p>
+                    </div>
+                    <div className="knowledge-hero-metrics" aria-label="当前知识库统计">
+                      <span className="knowledge-stat-card">
+                        <strong>{selectedBase.itemCount}</strong>
+                        <em>资料</em>
+                      </span>
+                      <span className="knowledge-stat-card">
+                        <strong>{selectedBase.chunkCount}</strong>
+                        <em>切片</em>
+                      </span>
+                      <span className="knowledge-stat-card">
+                        <strong>{formatRelativeTime(selectedBase.updatedAt)}</strong>
+                        <em>更新</em>
+                      </span>
                     </div>
                     <div className="knowledge-hero-actions">
                       <button
@@ -685,6 +730,52 @@ export function KnowledgeView({
                       )}
                     </div>
                   </div>
+
+                  <div className="knowledge-hero-main">
+                    <div className="knowledge-settings-strip">
+                      <label className="knowledge-setting-card">
+                        <span className="knowledge-setting-label">
+                          <Settings2 size={14} />
+                          提供商
+                        </span>
+                        <SurfaceSelect
+                          align="left"
+                          ariaLabel="选择 Embedding 提供商"
+                          className="knowledge-setting-select"
+                          disabled={controlsDisabled}
+                          emptyLabel="暂无提供商"
+                          fullWidth
+                          onChange={onChangeEmbeddingProvider}
+                          options={embeddingProviderOptions}
+                          value={embeddingProvider?.id ?? config.embeddingProviderId}
+                        />
+                      </label>
+
+                      <label className="knowledge-setting-card grow">
+                        <span className="knowledge-setting-label">模型</span>
+                        {embeddingModels.length > 0 ? (
+                          <SurfaceSelect
+                            align="left"
+                            ariaLabel="选择 Embedding 模型"
+                            className="knowledge-setting-select wide"
+                            disabled={controlsDisabled}
+                            emptyLabel="无可用的 Embedding 模型"
+                            fullWidth
+                            onChange={onChangeEmbeddingModel}
+                            options={embeddingModelOptions}
+                            value={activeEmbeddingModel?.id ?? config.embeddingModel}
+                          />
+                        ) : (
+                          <div
+                            className="knowledge-setting-empty"
+                            title={`${embeddingProvider?.name ?? "当前提供商"} 无可用的 Embedding 模型`}
+                          >
+                            <strong>无可用的 Embedding 模型</strong>
+                          </div>
+                        )}
+                      </label>
+                    </div>
+                  </div>
                 </section>
 
                 <section className="knowledge-content-toolbar compact">
@@ -714,7 +805,7 @@ export function KnowledgeView({
                         <input
                           value={itemQuery}
                           onChange={(event) => setItemQuery(event.target.value)}
-                          placeholder={`搜索${formatItemType(currentType)}`}
+                          placeholder={`搜索${currentTypeLabel}`}
                           disabled={controlsDisabled}
                         />
                       </label>
@@ -800,13 +891,20 @@ export function KnowledgeView({
                           );
                         })}
                       </div>
+                    ) : isSearchActive ? (
+                      <div className="knowledge-empty simple knowledge-search-empty">
+                        <strong>未找到匹配资料</strong>
+                        <span>{currentTypeLabel}</span>
+                      </div>
                     ) : null}
                   </div>
                 </div>
               </div>
             ) : (
               <div className="knowledge-empty wide knowledge-empty-stage simple">
+                <BookOpen size={34} />
                 <strong>还没有知识库</strong>
+                <span>0 库 · 0 资料</span>
               </div>
             )}
           </div>

@@ -7,24 +7,12 @@ const TOOLTIP_GAP = 10;
 const VIEWPORT_MARGIN = 12;
 const HOVER_DELAY_MS = 260;
 const FOCUS_DELAY_MS = 80;
-const ARIA_TOOLTIP_SELECTOR = [
-  "button[aria-label]",
-  "a[aria-label]",
-  "input[aria-label]",
-  "textarea[aria-label]",
-  "select[aria-label]",
-  "[role='button'][aria-label]",
-  "[role='menuitem'][aria-label]",
-  "[role='tab'][aria-label]",
-  "[tabindex][aria-label]",
-].join(", ");
-const TOOLTIP_SELECTOR = [`[${DATA_TOOLTIP}]`, "[title]", ARIA_TOOLTIP_SELECTOR].join(", ");
+const TOOLTIP_SELECTOR = `[${DATA_TOOLTIP}]`;
 
 type TooltipPlacement = "top" | "bottom";
 
 export interface TooltipCandidateElement {
   getAttribute(name: string): string | null;
-  matches(selector: string): boolean;
 }
 
 interface TooltipRect {
@@ -60,12 +48,7 @@ function normalizeTooltipLabel(value: string | null) {
 }
 
 export function readTooltipLabel(element: TooltipCandidateElement) {
-  return (
-    normalizeTooltipLabel(element.getAttribute(DATA_TOOLTIP)) ??
-    normalizeTooltipLabel(element.getAttribute("title")) ??
-    normalizeTooltipLabel(element.getAttribute(NATIVE_TITLE_CACHE)) ??
-    (element.matches(ARIA_TOOLTIP_SELECTOR) ? normalizeTooltipLabel(element.getAttribute("aria-label")) : null)
-  );
+  return normalizeTooltipLabel(element.getAttribute(DATA_TOOLTIP));
 }
 
 export function computeTooltipPosition(

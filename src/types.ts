@@ -536,6 +536,43 @@ export interface MailOAuthCodeExchangeInput extends MailOAuthAuthorizationInput 
   code: string;
 }
 
+export interface MailAuthApprovalMetadata {
+  email?: string;
+  provider?: string;
+  providerName?: string;
+  authType?: MailAuthType;
+  helpText?: string;
+  setup?: MailProviderSetup;
+}
+
+export interface MailAuthApprovalResultMetadata {
+  accountId?: string;
+  email?: string;
+  providerId?: string;
+  providerName?: string;
+  authType?: MailAuthType;
+  status?: MailAccountStatus;
+}
+
+export interface DesktopApprovalRequest {
+  approvalId: string;
+  kind: "mail_auth";
+  sessionId: string;
+  agentId: string;
+  toolCallId: string;
+  toolName: string;
+  reason: string;
+  createdAt: number;
+  metadata: MailAuthApprovalMetadata;
+}
+
+export interface DesktopApprovalResponse {
+  approvalId: string;
+  decision:
+    | { type: "allow"; metadata?: MailAuthApprovalResultMetadata }
+    | { type: "deny"; reason: string };
+}
+
 export interface AppConfig {
   workspaceRoot: string;
   bridgeUrl: string;
@@ -663,6 +700,46 @@ export interface TerminalCommandResult {
   stdout: string;
   stderr: string;
   durationMs: number;
+}
+
+export type TerminalSessionStatus = "starting" | "running" | "exited" | "failed";
+
+export interface TerminalSessionSnapshot {
+  terminalId: string;
+  cwd: string;
+  shell: string;
+  output: string;
+  truncated: boolean;
+  status: TerminalSessionStatus;
+  exitCode: number | null;
+  signal: string | null;
+  columns: number;
+  rows: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TerminalSessionCreateInput {
+  cwd?: string;
+  workspaceRoot?: string;
+  outputByteLimit?: number;
+  columns?: number;
+  rows?: number;
+}
+
+export interface TerminalSessionInput {
+  terminalId: string;
+  input: string;
+}
+
+export interface TerminalSessionResizeInput {
+  terminalId: string;
+  columns: number;
+  rows: number;
+}
+
+export interface TerminalSessionEvent {
+  terminal: TerminalSessionSnapshot;
 }
 
 export type ChatMessageRole = "user" | "assistant";

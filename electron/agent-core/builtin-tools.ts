@@ -5,6 +5,7 @@ import { TextDecoder } from "node:util";
 
 import { ToolPermissionDeniedError } from "./types";
 import type { ToolContext, ToolDefinition } from "./types";
+import { createBrowserToolDefinitions, type BrowserAutomationController } from "./builtin-tools/browser-tools";
 import { createInteractionToolDefinitions } from "./builtin-tools/interaction-tools";
 import { createMailToolDefinitions, type MailToolStore } from "./builtin-tools/mail-tools";
 import { createMemoryToolDefinition, type MemoryToolStore } from "./builtin-tools/memory-tool";
@@ -720,6 +721,7 @@ async function runShellCommand(command: string, cwd: string, timeoutMs: number, 
 export interface BuiltinToolDefinitionOptions {
   memoryStore?: MemoryToolStore | null;
   mailStore?: MailToolStore | null;
+  browserAutomation?: BrowserAutomationController | null;
 }
 
 export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptions = {}): ToolDefinition[] {
@@ -1065,7 +1067,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     },
     {
       name: "apply_patch",
-      description: "Apply a Codex-style patch with add, update, delete, and optional move file operations.",
+      description: "Apply a structured patch with add, update, delete, and optional move file operations.",
       risk: "write",
       inputSchema: {
         type: "object",
@@ -1145,6 +1147,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
     createMemoryToolDefinition(options.memoryStore),
     ...createTodoToolDefinitions(),
     ...createMailToolDefinitions(options.mailStore),
+    ...createBrowserToolDefinitions(options.browserAutomation ?? undefined),
     {
       name: "web_search",
       description:

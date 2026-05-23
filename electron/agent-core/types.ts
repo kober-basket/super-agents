@@ -125,7 +125,7 @@ export interface ToolApprovalRequest {
   agentId: string;
   toolCall: ToolCall;
   reason: string;
-  kind?: "tool" | "external_directory" | "question";
+  kind?: "tool" | "external_directory" | "question" | "mail_auth";
   targetPath?: string;
   metadata?: Record<string, unknown>;
 }

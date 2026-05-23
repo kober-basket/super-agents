@@ -39,6 +39,7 @@ import {
 } from "./chat/runtime-trace-recorder";
 import { ModelConversationTitleGenerator, type ConversationTitleGenerator } from "./chat-title-generator";
 import { ConversationService } from "./conversation-service";
+import type { BrowserAutomationService } from "./browser-automation-service";
 import { StreamingMessagePersister } from "./streaming-message-persister";
 import { WorkspaceService } from "./workspace-service";
 
@@ -129,6 +130,7 @@ function isToolBoundaryEvent(
 
 export class ChatOrchestrator {
   private readonly activeTurns = new Map<string, ActiveTurn>();
+  private readonly startingConversationIds = new Set<string>();
   private readonly agentCoreId = "native";
   private readonly defaultAgentId = DEFAULT_AGENT_ID;
   private readonly nativeCore: AgentCore;
@@ -139,11 +141,16 @@ export class ChatOrchestrator {
     private readonly workspaceService: WorkspaceService,
     private readonly emitEvent: (event: ChatEvent) => void,
     private readonly approvalHandler?: (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>,
+    private readonly browserAutomation?: BrowserAutomationService,
   ) {
     const agents = createDefaultAgentRegistry();
     const skills = new SkillRegistry();
     const tools = new ToolRegistry();
-    for (const tool of createBuiltinToolDefinitions({ memoryStore: this.workspaceService, mailStore: this.workspaceService })) {
+    for (const tool of createBuiltinToolDefinitions({
+      memoryStore: this.workspaceService,
+      mailStore: this.workspaceService,
+      browserAutomation: this.browserAutomation,
+    })) {
       tools.register(tool);
     }
     tools.register(createSkillToolDefinition(this.workspaceService));
@@ -170,13 +177,29 @@ export class ChatOrchestrator {
 
   async startTurnWithCompletion(input: ChatSendInput): Promise<ChatTurnExecution> {
     const existingConversationId = input.conversationId?.trim();
-    if (existingConversationId && this.activeTurns.has(existingConversationId)) {
+    if (
+      existingConversationId &&
+      (this.activeTurns.has(existingConversationId) ||
+        this.startingConversationIds.has(existingConversationId))
+    ) {
       throw new Error("This conversation is already running.");
     }
 
-    const started = await this.conversationService.startTurn(input, {
-      agentCore: this.agentCoreId,
-    });
+    if (existingConversationId) {
+      this.startingConversationIds.add(existingConversationId);
+    }
+
+    let started: Awaited<ReturnType<ConversationService["startTurn"]>>;
+    try {
+      started = await this.conversationService.startTurn(input, {
+        agentCore: this.agentCoreId,
+      });
+    } catch (error) {
+      if (existingConversationId) {
+        this.startingConversationIds.delete(existingConversationId);
+      }
+      throw error;
+    }
     const turnId = randomUUID();
     const baseConversation = {
       ...started.conversation,
@@ -233,6 +256,9 @@ export class ChatOrchestrator {
       });
 
       this.activeTurns.set(started.conversation.id, activeTurn);
+      if (existingConversationId) {
+        this.startingConversationIds.delete(existingConversationId);
+      }
 
       queueMicrotask(() => {
         void this.runPrompt(activeTurn, prepared);
@@ -250,6 +276,9 @@ export class ChatOrchestrator {
         completion: completion.promise,
       };
     } catch (error) {
+      if (existingConversationId) {
+        this.startingConversationIds.delete(existingConversationId);
+      }
       completion.reject(error);
       queueMicrotask(() => {
         this.emitEvent({
@@ -740,6 +769,7 @@ export class ChatOrchestrator {
     activeTurn.closed = true;
     activeTurn.messagePersister.cancel();
     activeTurn.unregisterSessionHandlers();
+    this.startingConversationIds.delete(activeTurn.conversationId);
     this.activeTurns.delete(activeTurn.conversationId);
   }
 

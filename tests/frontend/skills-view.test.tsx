@@ -104,7 +104,7 @@ test("skills view prefers openai interface metadata for skill labels", async () 
           name: "skill-creator",
           description: "Create or update a skill",
           displayName: "Skill Creator",
-          shortDescription: "Create and validate Codex skills",
+          shortDescription: "Create and validate agent skills",
           kind: "command",
           command: "Skill creator instructions",
           enabled: true,
@@ -126,7 +126,7 @@ test("skills view prefers openai interface metadata for skill labels", async () 
   );
 
   assert.match(html, /Skill Creator/);
-  assert.match(html, /Create and validate Codex skills/);
+  assert.match(html, /Create and validate agent skills/);
   assert.doesNotMatch(html, />skill-creator<\/strong>/);
   assert.doesNotMatch(html, /Create or update a skill/);
 });

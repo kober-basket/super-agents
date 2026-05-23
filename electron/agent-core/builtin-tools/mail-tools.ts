@@ -1,6 +1,7 @@
 import { inferMailSetup } from "../../mail/provider-presets";
 import type {
   MailAccountSummary,
+  MailAuthType,
   MailDraft,
   MailDraftCreateInput,
   MailMessage,
@@ -55,6 +56,77 @@ function requireStore(store: MailToolStore | null | undefined) {
     throw new Error("Mail store is not configured.");
   }
   return store;
+}
+
+function mailAuthHint(provider: string) {
+  const normalized = provider.trim().toLowerCase();
+  if (normalized === "qq" || normalized === "qq-mail" || normalized === "qqmail") {
+    return {
+      provider: "qq",
+      providerName: "QQ Mail",
+      authType: "password" as MailAuthType,
+      helpText: "Use the IMAP/SMTP authorization code generated in QQ Mail settings, not the QQ login password.",
+    };
+  }
+  if (normalized === "gmail" || normalized === "google") {
+    return {
+      provider: "gmail",
+      providerName: "Gmail",
+      authType: "oauth" as MailAuthType,
+      helpText: "Use Google OAuth when possible.",
+    };
+  }
+  if (normalized === "outlook" || normalized === "microsoft" || normalized === "hotmail") {
+    return {
+      provider: "microsoft",
+      providerName: "Microsoft Outlook",
+      authType: "oauth" as MailAuthType,
+      helpText: "Use Microsoft OAuth for Outlook, Hotmail, Live, and Microsoft 365 accounts.",
+    };
+  }
+  return {
+    provider: normalized || "auto",
+    providerName: provider.trim() || "Mail",
+    authType: "password" as MailAuthType,
+  };
+}
+
+function createMailAuthMetadata(input: unknown) {
+  const email = stringInput(input, "email").trim();
+  const provider = stringInput(input, "provider").trim();
+  const setup = email.includes("@") ? inferMailSetup(email) : null;
+  const hint = setup
+    ? {
+        provider: setup.providerId,
+        providerName: setup.providerName,
+        authType: setup.authType,
+        helpText: setup.helpText,
+      }
+    : mailAuthHint(provider);
+
+  return {
+    email: setup?.email ?? email,
+    provider: hint.provider,
+    providerName: hint.providerName,
+    authType: hint.authType,
+    helpText: hint.helpText,
+    setup: setup ?? undefined,
+  };
+}
+
+function sanitizeMailAuthDecisionMetadata(metadata: Record<string, unknown> | undefined) {
+  if (!isRecord(metadata)) {
+    return {};
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const key of ["accountId", "email", "providerId", "providerName", "authType", "status"] as const) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim()) {
+      sanitized[key] = value.trim();
+    }
+  }
+  return sanitized;
 }
 
 function formatSetup(setup: MailProviderSetup | Record<string, unknown>) {
@@ -132,6 +204,54 @@ function formatDraft(draft: MailDraft) {
 
 export function createMailToolDefinitions(store?: MailToolStore | null): ToolDefinition[] {
   return [
+    {
+      name: "mail_auth",
+      description:
+        "Open a private in-chat mail authorization form for adding or connecting an email account. Use this when the user asks to login, connect, add, or authorize a mailbox. The model never receives passwords, authorization codes, OAuth codes, or tokens.",
+      risk: "network",
+      inputSchema: {
+        type: "object",
+        properties: {
+          email: { type: "string", description: "Optional email address to prefill and infer provider settings." },
+          provider: {
+            type: "string",
+            description: "Optional provider hint such as qq, gmail, outlook, microsoft, 163, icloud, or custom.",
+          },
+        },
+        additionalProperties: false,
+      },
+      execute: async (input, context) => {
+        if (!context.requestApproval || !context.toolCall) {
+          throw new Error("mail_auth requires an interactive desktop approval handler.");
+        }
+
+        const metadata = createMailAuthMetadata(input);
+        const approval = await context.requestApproval({
+          sessionId: context.sessionId,
+          agentId: context.agentId,
+          toolCall: context.toolCall,
+          kind: "mail_auth",
+          reason:
+            "Open a private mail authorization form. Secrets typed in the form are saved locally and are not returned to the model.",
+          metadata,
+        });
+
+        if (approval.type === "deny") {
+          return {
+            content: `Mail authorization cancelled: ${approval.reason}`,
+            metadata: { cancelled: true },
+          };
+        }
+
+        const account = sanitizeMailAuthDecisionMetadata(approval.metadata);
+        const email = typeof account.email === "string" ? account.email : "mail account";
+        const providerName = typeof account.providerName === "string" ? account.providerName : "Mail";
+        return {
+          content: `Mail account connected: ${providerName} <${email}>. Credentials were saved locally and were not shared with the model.`,
+          metadata: account,
+        };
+      },
+    },
     {
       name: "mail",
       description:

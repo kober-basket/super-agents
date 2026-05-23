@@ -467,7 +467,7 @@ test("chat orchestrator emits message deltas before a native turn finishes", asy
   }
 });
 
-test("chat orchestrator emits Codex-style activity summaries for native tool events", async () => {
+test("chat orchestrator emits compact activity summaries for native tool events", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
   const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
   await conversationService.initialize();
@@ -681,6 +681,154 @@ test("chat orchestrator marks errored tool results as failed runtime tool calls"
     const assistantMessage = loaded.messages.find((message) => message.role === "assistant");
     assert.equal(assistantMessage?.runtimeTrace?.toolCalls[0]?.status, "failed");
   } finally {
+    await conversationService.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("chat orchestrator marks cancelled tool results as failed runtime tool calls", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
+  const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
+  await conversationService.initialize();
+
+  try {
+    const workspaceService = {
+      async getConfigSnapshot() {
+        return createConfig(tempDir);
+      },
+      async getEnabledSkillPromptContext() {
+        return "";
+      },
+      async searchKnowledgeBases() {
+        return { query: "", total: 0, results: [], searchedBases: [], warnings: [] };
+      },
+    } as unknown as WorkspaceService;
+
+    const events: ChatEvent[] = [];
+    const orchestrator = new ChatOrchestrator(conversationService, workspaceService, (event) => {
+      events.push(event);
+    });
+
+    (orchestrator as unknown as {
+      nativeCore: {
+        sendTurn(): AsyncIterable<AgentEvent>;
+      };
+    }).nativeCore = {
+      async *sendTurn() {
+        const mailAuthCall = { id: "tool-mail-auth", name: "mail_auth", input: { provider: "qq" } };
+        yield { type: "tool_call_started", sessionId: "s", agentId: "a", toolCall: mailAuthCall };
+        yield {
+          type: "tool_call_finished",
+          sessionId: "s",
+          agentId: "a",
+          toolCall: mailAuthCall,
+          result: {
+            content: "Mail authorization cancelled: User cancelled mail authorization.",
+            metadata: { cancelled: true },
+          },
+        };
+        yield { type: "turn_finished", sessionId: "s", agentId: "a", stopReason: "end_turn" };
+      },
+    };
+
+    const execution = await orchestrator.startTurnWithCompletion({ content: "login qq mail" });
+    await execution.completion;
+
+    const updated = events.find(
+      (event): event is Extract<ChatEvent, { type: "tool_call_updated" }> =>
+        event.type === "tool_call_updated" && event.toolCallId === "tool-mail-auth",
+    );
+    assert.equal(updated?.patch.status, "failed");
+
+    const loaded = await conversationService.getConversation(execution.result.conversation.id);
+    const assistantMessage = loaded.messages.find((message) => message.role === "assistant");
+    assert.equal(assistantMessage?.runtimeTrace?.toolCalls[0]?.status, "failed");
+  } finally {
+    await conversationService.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("chat orchestrator rejects overlapping starts while an existing conversation is preparing", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
+  const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
+  await conversationService.initialize();
+
+  let blockNextConfig = false;
+  let resolveBlockedConfig: ((config: AppConfig) => void) | null = null;
+  let blockedConfigReady: Promise<void> | null = null;
+  let resolveBlockedConfigReady: (() => void) | null = null;
+  let overlappingCompletion: Promise<unknown> | null = null;
+  const releaseBlockedConfig = () => {
+    resolveBlockedConfig?.(createConfig(tempDir));
+    resolveBlockedConfig = null;
+  };
+
+  try {
+    const workspaceService = {
+      async getConfigSnapshot() {
+        if (!blockNextConfig) {
+          return createConfig(tempDir);
+        }
+
+        blockNextConfig = false;
+        resolveBlockedConfigReady?.();
+        return await new Promise<AppConfig>((resolve) => {
+          resolveBlockedConfig = resolve;
+        });
+      },
+      async getEnabledSkillPromptContext() {
+        return "";
+      },
+      async searchKnowledgeBases() {
+        return { query: "", total: 0, results: [], searchedBases: [], warnings: [] };
+      },
+    } as unknown as WorkspaceService;
+
+    const orchestrator = new ChatOrchestrator(conversationService, workspaceService, () => undefined);
+    (orchestrator as unknown as {
+      nativeCore: {
+        sendTurn(): AsyncIterable<AgentEvent>;
+      };
+    }).nativeCore = {
+      async *sendTurn() {
+        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "Done." };
+        yield { type: "turn_finished", sessionId: "s", agentId: "a", stopReason: "end_turn" };
+      },
+    };
+
+    const initial = await orchestrator.startTurnWithCompletion({ content: "hello" });
+    await initial.completion;
+
+    blockedConfigReady = new Promise((resolve) => {
+      resolveBlockedConfigReady = resolve;
+    });
+    blockNextConfig = true;
+    const preparing = orchestrator.startTurnWithCompletion({
+      conversationId: initial.result.conversation.id,
+      content: "first follow-up",
+    });
+    await blockedConfigReady;
+
+    let rejectedOverlappingStart = false;
+    try {
+      const overlappingExecution = await orchestrator.startTurnWithCompletion({
+        conversationId: initial.result.conversation.id,
+        content: "second follow-up",
+      });
+      overlappingCompletion = overlappingExecution.completion;
+    } catch (error) {
+      rejectedOverlappingStart = true;
+      assert.match(error instanceof Error ? error.message : String(error), /already running/i);
+    }
+
+    releaseBlockedConfig();
+    const preparingExecution = await preparing;
+    await preparingExecution.completion;
+    assert.equal(rejectedOverlappingStart, true);
+  } finally {
+    releaseBlockedConfig();
+    await overlappingCompletion?.catch(() => undefined);
     await conversationService.shutdown();
     await rm(tempDir, { recursive: true, force: true });
   }

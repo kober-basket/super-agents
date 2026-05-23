@@ -12,6 +12,7 @@ interface BrowserWorkspacePaneProps {
   onClosePane: () => void;
   onOpenExternal: (payload: { path?: string; url?: string }) => void;
   onPagesChange: (pages: RightPaneBrowserPage[], activePageId: string) => void;
+  onBrowserPageActive?: (webContentsId: number) => void;
   onBrowserWindowOpen?: (listener: (payload: WebviewWindowOpenPayload) => void) => () => void;
 }
 
@@ -29,6 +30,7 @@ export function BrowserWorkspacePane({
   onClosePane,
   onOpenExternal,
   onPagesChange,
+  onBrowserPageActive,
   onBrowserWindowOpen,
 }: BrowserWorkspacePaneProps) {
   const fallbackPages = useMemo(() => [createBrowserPage()], []);
@@ -127,6 +129,7 @@ export function BrowserWorkspacePane({
         onClosePane={onClosePane}
         onOpenExternal={onOpenExternal}
         onOpenLink={(url, options) => openInternalTab(url, options)}
+        onBrowserPageActive={onBrowserPageActive}
         onBrowserStateChange={updateActivePage}
         onBrowserWindowOpen={onBrowserWindowOpen}
       />

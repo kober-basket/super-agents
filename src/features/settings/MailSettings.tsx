@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, KeyRound, Mail, Plus, Trash2, Unplug } from "lucide-react";
+import { ExternalLink, Mail, Plus, Trash2, Unplug } from "lucide-react";
 
 import type { MailAccountSummary, MailProviderSetup, MailServerConfig } from "../../types";
 import { workspaceClient } from "../../services/workspace-client";
@@ -17,11 +17,6 @@ function statusLabel(status: MailAccountSummary["status"]) {
   if (status === "connected") return "已连接";
   if (status === "error") return "异常";
   return "待授权";
-}
-
-function authLabel(setup: MailProviderSetup | null) {
-  if (!setup) return "自动识别";
-  return setup.authType === "oauth" ? "OAuth 授权" : "密码 / 授权码";
 }
 
 function serverDraftFromSetup(setup: MailProviderSetup | null): ServerDraft {
@@ -54,7 +49,7 @@ export function MailSettings() {
   const [password, setPassword] = useState("");
   const [setup, setSetup] = useState<MailProviderSetup | null>(null);
   const [serverDraft, setServerDraft] = useState<ServerDraft>(() => serverDraftFromSetup(null));
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [redirectUri, setRedirectUri] = useState("http://localhost");
@@ -67,7 +62,8 @@ export function MailSettings() {
 
   const emailReady = email.trim().includes("@");
   const currentAuthType = setup?.authType ?? "password";
-  const needsAdvanced = Boolean(setup?.advancedRequired || advancedOpen);
+  const showMoreSettings = moreOpen || Boolean(setup?.advancedRequired);
+  const showServerSettings = Boolean(setup?.advancedRequired);
 
   useEffect(() => {
     void refreshAccounts();
@@ -85,9 +81,9 @@ export function MailSettings() {
         const nextSetup = await workspaceClient.inferMailSetup(email);
         if (cancelled) return;
         setSetup(nextSetup);
-        setUsername((current) => current || nextSetup.email);
+        setUsername(nextSetup.email);
         setServerDraft(serverDraftFromSetup(nextSetup));
-        setAdvancedOpen(nextSetup.advancedRequired);
+        setMoreOpen(nextSetup.advancedRequired);
       } catch (reason) {
         if (!cancelled) {
           setError(reason instanceof Error ? reason.message : String(reason));
@@ -124,17 +120,18 @@ export function MailSettings() {
   async function savePasswordAccount() {
     await runAction(async () => {
       if (!setup) throw new Error("请先填写邮箱地址");
+      const accountUsername = showMoreSettings && username.trim() ? username.trim() : setup.email;
       const account = await workspaceClient.createMailAccount({
         email,
-        displayName,
+        displayName: showMoreSettings && displayName.trim() ? displayName.trim() : undefined,
         authType: "password",
-        username,
-        incoming: needsAdvanced ? serverFromDraft("incoming", serverDraft) : undefined,
-        outgoing: needsAdvanced ? serverFromDraft("outgoing", serverDraft) : undefined,
+        username: accountUsername,
+        incoming: setup.advancedRequired ? serverFromDraft("incoming", serverDraft) : undefined,
+        outgoing: setup.advancedRequired ? serverFromDraft("outgoing", serverDraft) : undefined,
       });
       await workspaceClient.saveMailPasswordCredentials({
         accountId: account.id,
-        username: username || account.email,
+        username: accountUsername || account.email,
         password,
       });
       setMessage("邮箱账号已保存");
@@ -149,9 +146,9 @@ export function MailSettings() {
       if (!clientId.trim()) throw new Error("请填写 OAuth Client ID");
       const account = await workspaceClient.createMailAccount({
         email,
-        displayName,
+        displayName: showMoreSettings && displayName.trim() ? displayName.trim() : undefined,
         authType: "oauth",
-        username: username || setup.email,
+        username: showMoreSettings && username.trim() ? username.trim() : setup.email,
       });
       const authorization = await workspaceClient.createMailOAuthAuthorization({
         accountId: account.id,
@@ -205,7 +202,6 @@ export function MailSettings() {
       <header className="settings-stage-header">
         <div className="settings-stage-heading">
           <h1>邮件</h1>
-          <p>为 agent 接入 Gmail、Outlook 或常见 IMAP/SMTP 邮箱。读取和发送能力会走内置工具权限。</p>
         </div>
       </header>
 
@@ -255,21 +251,7 @@ export function MailSettings() {
               <span>邮箱地址</span>
               <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" />
             </label>
-            <label>
-              <span>显示名称</span>
-              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="默认使用邮箱地址" />
-            </label>
           </div>
-
-          <div className="mail-setup-summary">
-            <KeyRound size={16} />
-            <div>
-              <strong>{setup?.providerName ?? "等待识别邮箱"}</strong>
-              <span>{authLabel(setup)}</span>
-            </div>
-          </div>
-
-          {setup?.helpText ? <p className="field-note">{setup.helpText}</p> : null}
 
           {currentAuthType === "oauth" ? (
             <div className="mail-auth-section">
@@ -295,12 +277,9 @@ export function MailSettings() {
               </div>
               {oauthUrl ? (
                 <div className="mail-oauth-callback">
-                  <p className="field-note">
-                    浏览器授权后，把回调地址里的 <code>code</code> 参数粘贴回来。当前账号：{oauthAccount?.email ?? oauthAccountId}
-                  </p>
                   <label>
                     <span>授权 code</span>
-                    <input value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} placeholder="粘贴 code= 后面的内容" />
+                    <input value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} placeholder={oauthAccount?.email ?? oauthAccountId} />
                   </label>
                   <button className="primary-button" disabled={busy || !oauthCode.trim()} onClick={() => void finishOAuth()} type="button">
                     保存 OAuth 授权
@@ -312,20 +291,31 @@ export function MailSettings() {
             <div className="mail-auth-section">
               <div className="provider-form-grid mail-form-grid">
                 <label>
-                  <span>用户名</span>
-                  <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="默认使用邮箱地址" />
-                </label>
-                <label>
                   <span>密码 / 授权码</span>
-                  <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="建议使用应用专用密码" type="password" />
+                  <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" />
                 </label>
               </div>
 
-              <button className="ghost-text-button mail-advanced-toggle" onClick={() => setAdvancedOpen((value) => !value)} type="button">
-                {needsAdvanced ? "收起高级服务器配置" : "展开高级服务器配置"}
-              </button>
+              {!showServerSettings ? (
+                <button className="ghost-text-button mail-advanced-toggle" onClick={() => setMoreOpen((value) => !value)} type="button">
+                  {showMoreSettings ? "收起更多设置" : "更多设置"}
+                </button>
+              ) : null}
 
-              {needsAdvanced ? (
+              {showMoreSettings ? (
+                <div className="provider-form-grid mail-form-grid mail-optional-grid">
+                  <label>
+                    <span>显示名</span>
+                    <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="可选" />
+                  </label>
+                  <label>
+                    <span>登录名</span>
+                    <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="默认同邮箱" />
+                  </label>
+                </div>
+              ) : null}
+
+              {showServerSettings ? (
                 <div className="mail-server-grid">
                   <label>
                     <span>IMAP Host</span>

@@ -339,13 +339,30 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
   try {
     const bootstrap = await service.bootstrap();
     const skillNames = bootstrap.config.skills.map((skill) => skill.name).sort();
+    const browserAutomation = bootstrap.config.skills.find((skill) => skill.id === "browser-automation");
     const emailAssistant = bootstrap.config.skills.find((skill) => skill.id === "email-assistant");
     const skillCreator = bootstrap.config.skills.find((skill) => skill.id === "skill-creator");
+    const superAgentsAdmin = bootstrap.config.skills.find((skill) => skill.id === "super-agents-admin");
     const wxCli = bootstrap.config.skills.find((skill) => skill.id === "wx-cli");
     const stockResearch = bootstrap.config.skills.find((skill) => skill.id === "stock-market-research-expert");
 
-    const expectedBuiltinSkillNames = ["email-assistant", "skill-creator", "stock-market-research-expert", "wx-cli"];
+    const expectedBuiltinSkillNames = [
+      "browser-automation",
+      "email-assistant",
+      "skill-creator",
+      "stock-market-research-expert",
+      "super-agents-admin",
+      "wx-cli",
+    ];
     assert.deepEqual(skillNames.filter((name) => expectedBuiltinSkillNames.includes(name)), expectedBuiltinSkillNames);
+    assert.ok(browserAutomation);
+    assert.equal(browserAutomation?.system, true);
+    assert.equal(browserAutomation?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "browser-automation"));
+    await access(path.join(browserAutomation?.sourcePath ?? "", "SKILL.md"));
+    await access(path.join(browserAutomation?.sourcePath ?? "", "agents", "openai.yaml"));
+    assert.equal(browserAutomation?.displayName, "内置浏览器自动化");
+    assert.match(browserAutomation?.command ?? "", /browser_snapshot/);
+    assert.match(browserAutomation?.defaultPrompt ?? "", /\$browser-automation/);
     assert.ok(emailAssistant);
     assert.equal(emailAssistant?.system, true);
     assert.equal(emailAssistant?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "email-assistant"));
@@ -362,8 +379,16 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     assert.match(skillCreator?.iconDataUrl ?? "", /^data:image\/svg\+xml;base64,/);
     assert.match(skillCreator?.command ?? "", /Anatomy of a Skill/);
     assert.equal(skillCreator?.displayName, "技能创建器");
-    assert.equal(skillCreator?.shortDescription, "创建、更新和验证 Codex 技能结构、资源与触发说明");
+    assert.equal(skillCreator?.shortDescription, "创建、更新和验证智能体技能结构、资源与触发说明");
     assert.match(skillCreator?.defaultPrompt ?? "", /\$skill-creator/);
+    assert.ok(superAgentsAdmin);
+    assert.equal(superAgentsAdmin?.system, true);
+    assert.equal(superAgentsAdmin?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "super-agents-admin"));
+    await access(path.join(superAgentsAdmin?.sourcePath ?? "", "SKILL.md"));
+    await access(path.join(superAgentsAdmin?.sourcePath ?? "", "agents", "openai.yaml"));
+    assert.equal(superAgentsAdmin?.displayName, "Super Agents 管理");
+    assert.match(superAgentsAdmin?.command ?? "", /super-agents-admin/);
+    assert.match(superAgentsAdmin?.defaultPrompt ?? "", /\$super-agents-admin/);
     assert.ok(wxCli);
     assert.equal(wxCli?.system, true);
     assert.equal(wxCli?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "wx-cli"));
@@ -376,7 +401,7 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     assert.match(wxCli?.defaultPrompt ?? "", /\$wx-cli/);
     assert.ok(stockResearch);
     assert.equal(stockResearch?.system, true);
-    assert.equal(stockResearch?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "股市调研专家"));
+    assert.equal(stockResearch?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "stock-expert"));
     await access(path.join(stockResearch?.sourcePath ?? "", "agents", "openai.yaml"));
     await access(path.join(stockResearch?.sourcePath ?? "", "assets", "icon.svg"));
     assert.match(stockResearch?.iconDataUrl ?? "", /^data:image\/svg\+xml;base64,/);
@@ -386,11 +411,23 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
 
     const context = await service.getEnabledSkillPromptContext();
     assert.match(context, /Available workspace skills for this turn:/);
+    assert.match(context, /- browser-automation:/);
     assert.match(context, /- email-assistant:/);
     assert.match(context, /- skill-creator:/);
     assert.match(context, /- stock-market-research-expert:/);
+    assert.match(context, /- super-agents-admin:/);
     assert.match(context, /- wx-cli:/);
     assert.doesNotMatch(context, /Anatomy of a Skill/);
+    for (const skill of bootstrap.config.skills.filter((item) => item.system)) {
+      const visibleText = [
+        skill.description,
+        skill.displayName,
+        skill.shortDescription,
+        skill.defaultPrompt,
+        skill.command,
+      ].join("\n");
+      assert.doesNotMatch(visibleText, /\bCodex\b/i, `${skill.id} should use product-neutral wording`);
+    }
   } finally {
     await service.shutdown();
     await rm(tempDir, { recursive: true, force: true });
@@ -415,8 +452,24 @@ test("workspace service serializes concurrent bootstrap skill syncs", async () =
         result.value.config.skills
           .map((skill) => skill.name)
           .sort()
-          .filter((name) => ["email-assistant", "skill-creator", "stock-market-research-expert", "wx-cli"].includes(name)),
-        ["email-assistant", "skill-creator", "stock-market-research-expert", "wx-cli"],
+          .filter((name) =>
+            [
+              "browser-automation",
+              "email-assistant",
+              "skill-creator",
+              "stock-market-research-expert",
+              "super-agents-admin",
+              "wx-cli",
+            ].includes(name),
+          ),
+        [
+          "browser-automation",
+          "email-assistant",
+          "skill-creator",
+          "stock-market-research-expert",
+          "super-agents-admin",
+          "wx-cli",
+        ],
       );
     }
   } finally {
@@ -524,11 +577,31 @@ test("workspace service lists built-in agent tools instead of runtime tools", as
     assert.deepEqual(names, [
       "apply_patch",
       "bash",
+      "browser_click",
+      "browser_drag",
+      "browser_evaluate",
+      "browser_fill",
+      "browser_fill_form",
+      "browser_get_console_message",
+      "browser_get_network_request",
+      "browser_hover",
+      "browser_list_console_messages",
+      "browser_list_network_requests",
+      "browser_list_pages",
+      "browser_navigate",
+      "browser_press_key",
+      "browser_screenshot",
+      "browser_select_page",
+      "browser_snapshot",
+      "browser_type_text",
+      "browser_upload_file",
+      "browser_wait_for",
       "edit",
       "glob",
       "grep",
       "list",
       "mail",
+      "mail_auth",
       "mail_draft",
       "mail_send",
       "memory",

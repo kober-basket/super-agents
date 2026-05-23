@@ -181,35 +181,46 @@ function formatCnyUnitPrice(value: number) {
   return `¥${value.toFixed(2)}`;
 }
 
-function formatModelUnitPrice(usage: ChatModelTokenUsage) {
+function formatModelUnitPriceLine(usage: ChatModelTokenUsage) {
   const price = getTokenPrice(usage);
   if (!price) {
-    return "未知";
+    return "单价：未知";
   }
 
   const cachedInputRate = price.cachedInputPerMillion ?? price.inputPerMillion;
-  return [
-    `输入 ${formatCnyUnitPrice(usdToCny(price.inputPerMillion))}/M`,
-    `缓存 ${formatCnyUnitPrice(usdToCny(cachedInputRate))}/M`,
-    `输出 ${formatCnyUnitPrice(usdToCny(price.outputPerMillion))}/M`,
-  ].join("、");
+  const parts = [
+    `输入 ${formatCnyUnitPrice(usdToCny(price.inputPerMillion))}`,
+    price.cachedInputPerMillion === undefined
+      ? null
+      : `缓存 ${formatCnyUnitPrice(usdToCny(cachedInputRate))}`,
+    `输出 ${formatCnyUnitPrice(usdToCny(price.outputPerMillion))}`,
+  ].filter((part): part is string => Boolean(part));
+
+  return `单价/百万：${parts.join(" · ")}`;
+}
+
+function formatModelUsageLine(usage: ChatModelTokenUsage) {
+  const cachedInputTokens = usage.cachedInputTokens ?? 0;
+  const reasoningOutputTokens = usage.reasoningOutputTokens ?? 0;
+  const parts = [
+    `输入 ${formatCompactTokenCount(usage.inputTokens)}`,
+    cachedInputTokens > 0 ? `缓存 ${formatCompactTokenCount(cachedInputTokens)}` : null,
+    `输出 ${formatCompactTokenCount(usage.outputTokens)}`,
+    reasoningOutputTokens > 0 ? `推理 ${formatCompactTokenCount(reasoningOutputTokens)}` : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return `用量：${parts.join(" · ")}`;
 }
 
 function formatModelUsageTitle(usage: ChatModelTokenUsage) {
   const modelName = usage.modelLabel || usage.modelId || usage.providerName || usage.providerId || "未知模型";
   const cost = estimateModelUsageCostCny(usage);
-  const unitPrice = formatModelUnitPrice(usage);
   const suffix = cost === null ? "价格未知" : `估算：${formatCnyAmount(cost)}`;
 
   return [
     modelName,
-    [
-      `用量：输入 ${formatCompactTokenCount(usage.inputTokens)}`,
-      `缓存 ${formatCompactTokenCount(usage.cachedInputTokens ?? 0)}`,
-      `输出 ${formatCompactTokenCount(usage.outputTokens)}`,
-      `推理 ${formatCompactTokenCount(usage.reasoningOutputTokens ?? 0)}`,
-    ].join("，"),
-    `单价：${unitPrice}`,
+    formatModelUsageLine(usage),
+    formatModelUnitPriceLine(usage),
     suffix,
   ].join("\n");
 }

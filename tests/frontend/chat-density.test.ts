@@ -109,6 +109,16 @@ test("runtime transcript typography uses the same restrained text colors", () =>
   assert.match(css, /\.message-text\s+code,\s*\.preview-markdown\s+code,\s*\.activity-markdown\s+code\s*{[^}]*color:\s*var\(--text\)[^}]*font-weight:\s*var\(--font-weight-medium\)/s);
 });
 
+test("runtime tool status badges use distinct success and failure affordances", () => {
+  const css = readStyles();
+  const workspaceSource = readSource("src/features/chat/ChatWorkspace.tsx");
+
+  assert.match(workspaceSource, /CircleCheckBig/);
+  assert.match(workspaceSource, /CircleX/);
+  assert.match(css, /\.activity-status-pill\.success\s*{[^}]*background:\s*rgba\(18,\s*183,\s*106,\s*0\.16\)[^}]*border:\s*1px\s+solid\s+rgba\(18,\s*183,\s*106,\s*0\.36\)[^}]*color:\s*#027a48/s);
+  assert.match(css, /\.activity-status-pill\.error\s*{[^}]*background:\s*rgba\(217,\s*45,\s*32,\s*0\.16\)[^}]*border:\s*1px\s+solid\s+rgba\(217,\s*45,\s*32,\s*0\.38\)[^}]*color:\s*#b42318/s);
+});
+
 test("chat transcript spacing keeps question-answer turns visually separated", () => {
   const css = readStyles();
 

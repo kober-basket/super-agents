@@ -1,11 +1,11 @@
 ---
 name: cli-anything
-description: Use when the user wants Codex to build, refine, test, or validate a CLI-Anything harness for a GUI application or source repository. Adapts the CLI-Anything methodology to Codex without changing the generated Python harness format.
+description: Use when the user wants the agent to build, refine, test, or validate a CLI-Anything harness for a GUI application or source repository. Adapts the CLI-Anything methodology without changing the generated Python harness format.
 ---
 
-# CLI-Anything for Codex
+# CLI-Anything
 
-Use this skill when the user wants Codex to act like the `CLI-Anything` builder.
+Use this skill when the user wants an agent to act like the `CLI-Anything` builder.
 
 If this skill is being used from inside the `CLI-Anything` repository, read `../cli-anything-plugin/HARNESS.md` before implementation. That file is the full methodology source of truth. If it is not available, follow the condensed rules below.
 

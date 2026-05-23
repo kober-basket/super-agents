@@ -28,6 +28,7 @@ npm run test:electron
 
 - Add Gmail helpers for OAuth token exchange, refresh, search, read, and send through the Gmail API.
 - Add Microsoft Graph helpers for OAuth token exchange, refresh, search, read, and send through Graph.
+- Add an IMAP client for password/app-password accounts so QQ, Tencent Exmail, NetEase, and custom IMAP providers can search and read messages.
 - Normalize provider responses into `MailMessageSummary` and `MailMessage`.
 - Keep all returned text bounded and metadata-rich.
 

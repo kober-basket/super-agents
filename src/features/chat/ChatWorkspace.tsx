@@ -1,10 +1,10 @@
 ﻿import {
-  AlertCircle,
   ArrowUp,
   BookOpen,
   Box,
   Check,
-  CheckCircle2,
+  CircleCheckBig,
+  CircleX,
   ChevronDown,
   Copy,
   LoaderCircle,
@@ -18,16 +18,19 @@
 } from "lucide-react";
 import {
   useEffect,
+  useCallback,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
   type UIEvent,
   type WheelEvent,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { parseChatMessageContent } from "../../lib/chat-visuals";
 import {
@@ -43,6 +46,7 @@ import {
 } from "../../lib/composer-slash-commands";
 import { formatBytes } from "../../lib/format";
 import { formatChatTokenUsageBadge } from "../../lib/token-cost";
+import { chooseFloatingTooltipPlacement, type FloatingTooltipPlacement } from "../../lib/tooltip-placement";
 import { shouldRenderRuntimeToolCard } from "../../lib/runtime-tool-visibility";
 import {
   buildRuntimeToolDiffs,
@@ -73,6 +77,7 @@ import { copyTextToClipboard } from "./clipboard";
 import { createComposerAttachmentsFromFiles } from "./attachment-files";
 import { buildConversationCopyMarkdown } from "./conversation-markdown";
 import { ComposerRichInput, type ComposerRichInputHandle } from "./ComposerRichInput";
+import { MailAuthRequestCard } from "./MailAuthRequestCard";
 import { RichMarkdown } from "../shared/RichMarkdown";
 import type {
   ChatConversation,
@@ -81,6 +86,8 @@ import type {
   ChatConversationRuntimeState,
   ChatRuntimeTimelineItem,
   ChatToolCall,
+  DesktopApprovalRequest,
+  DesktopApprovalResponse,
   FileDropEntry,
   KnowledgeBaseSummary,
   RuntimeModelOption,
@@ -125,6 +132,8 @@ interface ChatWorkspaceProps {
   voiceInputSupported: boolean;
   scrollToBottomRequest: number;
   onToast: (message: string) => void;
+  approvalRequests: DesktopApprovalRequest[];
+  onResolveApproval: (response: DesktopApprovalResponse) => void | Promise<void>;
 }
 
 function RuntimeTraceGroup({
@@ -379,6 +388,169 @@ function buildMessageCopyText(message: ChatMessage) {
   return blocks.join("\n\n").trim();
 }
 
+const MESSAGE_USAGE_TOOLTIP_GAP = 8;
+const MESSAGE_USAGE_TOOLTIP_PADDING = 12;
+
+function clampNumber(value: number, min: number, max: number) {
+  if (max < min) {
+    return min;
+  }
+
+  return Math.min(max, Math.max(min, value));
+}
+
+interface MessageUsageTooltipPosition {
+  arrowLeft: number;
+  left: number;
+  placement: FloatingTooltipPlacement;
+  top: number;
+}
+
+function splitMessageUsageTooltipSections(title: string) {
+  return title
+    .split(/\n{2,}/)
+    .map((section) => section.split("\n").map((line) => line.trim()).filter(Boolean))
+    .filter((section) => section.length > 0);
+}
+
+function renderMessageUsageTooltipLine(line: string, lineIndex: number, key: string) {
+  const separatorIndex = line.indexOf("：");
+  if (lineIndex === 0 || separatorIndex <= 0) {
+    return (
+      <span key={key} className={lineIndex === 0 ? "message-usage-tooltip-heading" : "message-usage-tooltip-note"}>
+        {line}
+      </span>
+    );
+  }
+
+  return (
+    <span key={key} className="message-usage-tooltip-row">
+      <span className="message-usage-tooltip-key">{line.slice(0, separatorIndex)}</span>
+      <span className="message-usage-tooltip-value">{line.slice(separatorIndex + 1)}</span>
+    </span>
+  );
+}
+
+function MessageUsageBadge({ id, label, title }: { id: string; label: string; title: string }) {
+  const badgeRef = useRef<HTMLSpanElement | null>(null);
+  const tooltipRef = useRef<HTMLSpanElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState<MessageUsageTooltipPosition | null>(null);
+  const tooltipSections = useMemo(() => splitMessageUsageTooltipSections(title), [title]);
+
+  const updateTooltipPosition = useCallback(() => {
+    const badge = badgeRef.current;
+    const tooltip = tooltipRef.current;
+    if (!badge || !tooltip) {
+      return;
+    }
+
+    const badgeRect = badge.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const messageList = badge.closest(".message-list");
+    const boundaryBottom =
+      messageList instanceof HTMLElement ? messageList.getBoundingClientRect().bottom : undefined;
+    const placement = chooseFloatingTooltipPlacement({
+      anchorBottom: badgeRect.bottom,
+      anchorTop: badgeRect.top,
+      boundaryBottom,
+      tooltipHeight: tooltipRect.height,
+      viewportHeight: window.innerHeight,
+    });
+    const anchorCenter = badgeRect.left + badgeRect.width / 2;
+    const maxLeft = window.innerWidth - tooltipRect.width - MESSAGE_USAGE_TOOLTIP_PADDING;
+    const left = clampNumber(
+      anchorCenter - tooltipRect.width / 2,
+      MESSAGE_USAGE_TOOLTIP_PADDING,
+      maxLeft,
+    );
+    const usableBottom = Math.min(window.innerHeight, boundaryBottom ?? window.innerHeight);
+    const preferredTop =
+      placement === "bottom"
+        ? badgeRect.bottom + MESSAGE_USAGE_TOOLTIP_GAP
+        : badgeRect.top - tooltipRect.height - MESSAGE_USAGE_TOOLTIP_GAP;
+    const maxTop =
+      placement === "bottom"
+        ? usableBottom - tooltipRect.height - MESSAGE_USAGE_TOOLTIP_PADDING
+        : window.innerHeight - tooltipRect.height - MESSAGE_USAGE_TOOLTIP_PADDING;
+    const top = clampNumber(preferredTop, MESSAGE_USAGE_TOOLTIP_PADDING, maxTop);
+    const arrowLeft = clampNumber(
+      anchorCenter - left,
+      MESSAGE_USAGE_TOOLTIP_PADDING,
+      tooltipRect.width - MESSAGE_USAGE_TOOLTIP_PADDING,
+    );
+
+    setTooltipPosition({ arrowLeft, left, placement, top });
+  }, []);
+  const showTooltip = useCallback(() => {
+    setOpen(true);
+  }, []);
+  const hideTooltip = useCallback(() => {
+    setOpen(false);
+    setTooltipPosition(null);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    updateTooltipPosition();
+    const handleViewportChange = () => updateTooltipPosition();
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [open, title, updateTooltipPosition]);
+
+  const placement = tooltipPosition?.placement ?? "bottom";
+  const tooltipStyle = {
+    left: tooltipPosition?.left ?? 0,
+    top: tooltipPosition?.top ?? 0,
+    visibility: tooltipPosition ? "visible" : "hidden",
+    "--message-usage-arrow-left": tooltipPosition ? `${tooltipPosition.arrowLeft}px` : "50%",
+  } as CSSProperties;
+
+  return (
+    <span
+      ref={badgeRef}
+      className="message-usage"
+      data-placement={placement}
+      aria-describedby={id}
+      onBlur={hideTooltip}
+      onFocus={showTooltip}
+      onPointerEnter={showTooltip}
+      onPointerLeave={hideTooltip}
+      tabIndex={0}
+    >
+      <span>{label}</span>
+      {open && typeof document !== "undefined"
+        ? createPortal(
+            <span
+              ref={tooltipRef}
+              className={`message-usage-tooltip ${tooltipPosition ? "is-visible" : ""}`}
+              data-placement={placement}
+              id={id}
+              role="tooltip"
+              style={tooltipStyle}
+            >
+              {tooltipSections.map((section, sectionIndex) => (
+                <span key={`section-${sectionIndex}`} className="message-usage-tooltip-section">
+                  {section.map((line, lineIndex) =>
+                    renderMessageUsageTooltipLine(line, lineIndex, `${sectionIndex}-${lineIndex}`),
+                  )}
+                </span>
+              ))}
+            </span>,
+            document.body,
+          )
+        : null}
+    </span>
+  );
+}
+
 export function ChatWorkspace({
   activeConversation,
   activeModel,
@@ -414,6 +586,8 @@ export function ChatWorkspace({
   voiceInputSupported,
   scrollToBottomRequest,
   onToast,
+  approvalRequests,
+  onResolveApproval,
 }: ChatWorkspaceProps) {
   const composerInputRef = useRef<ComposerRichInputHandle | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -1472,8 +1646,8 @@ export function ChatWorkspace({
           </div>
           <div className="activity-summary-side">
             <span className={`activity-status-pill ${statusClassName(toolCall.status)}`}>
-              {toolCall.status === "completed" ? <CheckCircle2 size={12} /> : null}
-              {toolCall.status === "failed" ? <AlertCircle size={12} /> : null}
+              {toolCall.status === "completed" ? <CircleCheckBig size={12} strokeWidth={2.6} /> : null}
+              {toolCall.status === "failed" ? <CircleX size={12} strokeWidth={2.6} /> : null}
               {(toolCall.status === "pending" || toolCall.status === "in_progress") ? (
                 <LoaderCircle size={12} className="spin" />
               ) : null}
@@ -1588,7 +1762,7 @@ export function ChatWorkspace({
                 {terminal.exitCode === null && terminal.signal === null ? (
                   <LoaderCircle size={12} className="spin" />
                 ) : (
-                  <CheckCircle2 size={12} />
+                  <CircleCheckBig size={12} strokeWidth={2.6} />
                 )}
                 <span className="activity-status-text">
                   {terminal.exitCode === null && terminal.signal === null ? "执行中" : "结束"}
@@ -1832,6 +2006,7 @@ export function ChatWorkspace({
     const copied = copiedMessageId === message.id;
     const usageBadge =
       message.role === "assistant" ? formatChatTokenUsageBadge(message.runtimeTrace?.usage) : null;
+    const usageTooltipId = usageBadge ? `message-usage-tooltip-${message.id}` : undefined;
 
     return (
       <div key={message.id} className={`message-row ${message.role === "user" ? "user" : ""}`}>
@@ -1896,9 +2071,7 @@ export function ChatWorkspace({
                 {copied ? <Check size={15} /> : <Copy size={15} />}
               </button>
               {usageBadge ? (
-                <span className="message-usage" title={usageBadge.title}>
-                  {usageBadge.label}
-                </span>
+                <MessageUsageBadge id={usageTooltipId} label={usageBadge.label} title={usageBadge.title} />
               ) : null}
               <span className="message-time">{formatMessageTime(message.createdAt)}</span>
             </div>
@@ -1979,6 +2152,16 @@ export function ChatWorkspace({
       <div className="chat-composer-frame">
         {renderSlashCommandSuggestions()}
         {renderSkillSuggestions()}
+        {approvalRequests
+          .filter((request) => request.kind === "mail_auth")
+          .map((request) => (
+            <MailAuthRequestCard
+              key={request.approvalId}
+              request={request}
+              onResolve={onResolveApproval}
+              onToast={onToast}
+            />
+          ))}
         <div className="chat-composer-card">
           {renderAttachmentList(attachments, true)}
           {renderActiveKnowledgeChips()}

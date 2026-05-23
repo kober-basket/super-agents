@@ -68,6 +68,79 @@ test("question asks for user input through approval handler and returns answers"
   }
 });
 
+test("mail_auth opens a private mail authorization request and returns sanitized account metadata", async () => {
+  const mailAuth = toolByName("mail_auth");
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-mail-auth-"));
+
+  try {
+    let requestedKind = "";
+    const result = await mailAuth.execute(
+      {
+        provider: "qq",
+      },
+      {
+        ...createContext(tempDir, "mail-auth-session"),
+        toolCall: { id: "mail-auth-call", name: "mail_auth", input: { provider: "qq" } },
+        requestApproval: async (request) => {
+          requestedKind = request.kind ?? "";
+          assert.equal(request.metadata?.provider, "qq");
+          assert.equal(request.metadata?.authType, "password");
+          assert.doesNotMatch(JSON.stringify(request.metadata), /secret|authorization-code/i);
+          return {
+            type: "allow",
+            metadata: {
+              accountId: "account-1",
+              email: "owner@qq.com",
+              providerName: "QQ Mail",
+              status: "connected",
+            },
+          };
+        },
+      },
+    );
+
+    assert.equal(requestedKind, "mail_auth");
+    assert.match(result.content, /owner@qq\.com/);
+    assert.match(result.content, /QQ Mail/);
+    assert.doesNotMatch(result.content, /secret|authorization-code/i);
+    assert.deepEqual(result.metadata, {
+      accountId: "account-1",
+      email: "owner@qq.com",
+      providerName: "QQ Mail",
+      status: "connected",
+    });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("mail_auth reports cancellation without exposing credential fields", async () => {
+  const mailAuth = toolByName("mail_auth");
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-mail-auth-cancel-"));
+
+  try {
+    const result = await mailAuth.execute(
+      {
+        email: "owner@qq.com",
+      },
+      {
+        ...createContext(tempDir, "mail-auth-cancel-session"),
+        toolCall: { id: "mail-auth-cancel-call", name: "mail_auth", input: { email: "owner@qq.com" } },
+        requestApproval: async () => ({
+          type: "deny",
+          reason: "User cancelled mail authorization.",
+        }),
+      },
+    );
+
+    assert.match(result.content, /cancelled/i);
+    assert.equal(result.metadata?.cancelled, true);
+    assert.doesNotMatch(JSON.stringify(result), /password|authorizationCode|accessToken|refreshToken/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("todo_write stores session todos and todo_read returns them", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-todos-"));
 
@@ -315,6 +388,29 @@ test("web_search returns query results with URLs and snippets", async () => {
   }
 });
 
+test("browser screenshot resolves relative output paths inside the workspace", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-browser-output-"));
+  const calls: Array<{ filePath?: string }> = [];
+  const tools = createBuiltinToolDefinitions({
+    browserAutomation: {
+      takeScreenshot: async (input: { filePath?: string }) => {
+        calls.push(input);
+        return { content: "screenshot saved" };
+      },
+    } as any,
+  });
+  const screenshot = tools.find((item) => item.name === "browser_screenshot");
+  assert.ok(screenshot);
+
+  try {
+    await screenshot.execute({ filePath: "shots/page.png" }, createContext(tempDir));
+
+    assert.equal(calls[0]?.filePath, path.join(tempDir, "shots", "page.png"));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("mail tools are registered with conservative risk boundaries", async () => {
   const tools = createBuiltinToolDefinitions({
     mailStore: {
@@ -336,9 +432,11 @@ test("mail tools are registered with conservative risk boundaries", async () => 
   });
 
   const mail = tools.find((item) => item.name === "mail");
+  const mailAuth = tools.find((item) => item.name === "mail_auth");
   const mailDraft = tools.find((item) => item.name === "mail_draft");
   const mailSend = tools.find((item) => item.name === "mail_send");
 
+  assert.equal(mailAuth?.risk, "network");
   assert.equal(mail?.risk, "network");
   assert.equal(mailDraft?.risk, "write");
   assert.equal(mailSend?.risk, "write");

@@ -1,7 +1,7 @@
 interface:
   display_name: "技能创建器"
-  short_description: "创建、更新和验证 Codex 技能结构、资源与触发说明"
-  default_prompt: "Use $skill-creator to create or update a Codex skill with concise instructions, resources, validation, and openai.yaml metadata."
+  short_description: "创建、更新和验证智能体技能结构、资源与触发说明"
+  default_prompt: "Use $skill-creator to create or update an agent skill with concise instructions, resources, validation, and openai.yaml metadata."
 
 policy:
   allow_implicit_invocation: true

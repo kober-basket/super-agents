@@ -3,15 +3,15 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $skillDir = Split-Path -Parent $scriptDir
 
-$codexHome = if ($env:CODEX_HOME) {
-    $env:CODEX_HOME
+$superAgentsHome = if ($env:SUPER_AGENTS_HOME) {
+    $env:SUPER_AGENTS_HOME
 } elseif ($env:USERPROFILE) {
-    Join-Path $env:USERPROFILE ".codex"
+    Join-Path $env:USERPROFILE ".super-agents"
 } else {
-    throw "CODEX_HOME is not set and USERPROFILE is unavailable."
+    throw "SUPER_AGENTS_HOME is not set and USERPROFILE is unavailable."
 }
 
-$destRoot = Join-Path $codexHome "skills"
+$destRoot = Join-Path $superAgentsHome "skills"
 $destDir = Join-Path $destRoot "cli-anything"
 
 New-Item -ItemType Directory -Path $destRoot -Force | Out-Null
@@ -22,5 +22,5 @@ if (Test-Path $destDir) {
 
 Copy-Item -Path $skillDir -Destination $destDir -Recurse
 
-Write-Host "Installed Codex skill to: $destDir"
-Write-Host "Restart Codex to pick up the new skill."
+Write-Host "Installed Super Agents skill to: $destDir"
+Write-Host "Restart Super Agents to pick up the new skill."

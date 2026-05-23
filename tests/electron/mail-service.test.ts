@@ -25,6 +25,14 @@ test("infers OAuth and password mail setup from the email domain", () => {
   assert.equal(qq.incoming.host, "imap.qq.com");
   assert.equal(qq.outgoing.host, "smtp.qq.com");
 
+  const exmail = inferMailSetup("person@exmail.qq.com");
+  assert.equal(exmail.providerId, "qq-exmail");
+  assert.equal(exmail.incoming.host, "imap.exmail.qq.com");
+
+  const neteaseVip = inferMailSetup("person@vip.163.com");
+  assert.equal(neteaseVip.providerId, "netease-vip-163");
+  assert.equal(neteaseVip.outgoing.host, "smtp.vip.163.com");
+
   const custom = inferMailSetup("person@example.org");
   assert.equal(custom.providerId, "custom");
   assert.equal(custom.authType, "password");
@@ -90,6 +98,66 @@ test("mail service stores account summaries separately from credentials and crea
     assert.equal(draft.accountId, account.id);
     assert.deepEqual(draft.to, ["friend@example.com"]);
     assert.match(draft.preview, /A short draft body/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("password mailboxes search and read through the IMAP client", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-mail-imap-"));
+  const seen: string[] = [];
+  const fakeImapClient = {
+    searchMessages: async ({ account, credential, query, limit }: any) => {
+      seen.push(`search:${account.email}:${credential.username}:${query}:${limit}`);
+      return [
+        {
+          id: "42",
+          accountId: account.id,
+          subject: "验证码",
+          from: "service@example.com",
+          to: [account.email],
+          date: "2026-05-23T10:00:00.000Z",
+          snippet: "Your code is 123456",
+          unread: true,
+        },
+      ];
+    },
+    readMessage: async ({ account, credential, messageId }: any) => {
+      seen.push(`read:${account.email}:${credential.username}:${messageId}`);
+      return {
+        id: messageId,
+        accountId: account.id,
+        subject: "验证码",
+        from: "service@example.com",
+        to: [account.email],
+        date: "2026-05-23T10:00:00.000Z",
+        snippet: "Your code is 123456",
+        unread: true,
+        body: "Your code is 123456.",
+      };
+    },
+  };
+  const service = new MailService(tempDir, { imapClient: fakeImapClient } as any);
+
+  try {
+    const account = await service.createAccount({ email: "owner@qq.com" });
+    await service.savePasswordCredentials({
+      accountId: account.id,
+      username: "owner@qq.com",
+      password: "mail-app-password",
+    });
+
+    const messages = await service.searchMessages({ accountId: account.id, query: "验证码", limit: 2 });
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0]?.id, "42");
+    assert.equal(messages[0]?.unread, true);
+
+    const message = await service.readMessage({ accountId: account.id, messageId: "42" });
+    assert.equal(message.body, "Your code is 123456.");
+    assert.deepEqual(seen, [
+      "search:owner@qq.com:owner@qq.com:验证码:2",
+      "read:owner@qq.com:owner@qq.com:42",
+    ]);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

@@ -73,12 +73,13 @@ function renderKnowledgeView() {
   );
 }
 
-test("knowledge view removes explanatory sidebar copy and centers the empty file action", () => {
+test("knowledge view keeps sidebar copy compact and centers the empty file action", () => {
   const html = renderKnowledgeView();
 
   assert.doesNotMatch(html, /集中管理文件、笔记、目录和网页资料。/);
   assert.match(html, /class="knowledge-empty-upload/);
-  assert.match(html, />还没有添加任何文件</);
+  assert.match(html, />还没有文件</);
+  assert.match(html, /class="knowledge-sidebar-overview"/);
   assert.match(html, /class="primary-button knowledge-upload-button"/);
 });
 

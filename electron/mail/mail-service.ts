@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { readJsonFile, writeJsonFile } from "../store";
 import { EncryptedCredentialStore } from "./credential-store";
+import { createDefaultImapClient, type MailImapClient } from "./imap-client";
 import { getOAuthScopes, inferMailSetup } from "./provider-presets";
 import type {
   MailAccountCreateInput,
@@ -28,6 +29,7 @@ import type {
 
 interface MailServiceOptions {
   fetch?: typeof fetch;
+  imapClient?: MailImapClient;
 }
 
 interface TokenResponse {
@@ -214,12 +216,14 @@ export class MailService {
   private readonly draftsPath: string;
   private readonly credentials: EncryptedCredentialStore;
   private readonly fetchImpl: typeof fetch;
+  private readonly imapClient: MailImapClient;
 
   constructor(private readonly rootPath: string, options: MailServiceOptions = {}) {
     this.accountsPath = path.join(rootPath, "accounts.json");
     this.draftsPath = path.join(rootPath, "drafts.json");
     this.credentials = new EncryptedCredentialStore(rootPath);
     this.fetchImpl = options.fetch ?? fetch;
+    this.imapClient = options.imapClient ?? createDefaultImapClient();
   }
 
   inferSetup(email: string) {
@@ -422,7 +426,12 @@ export class MailService {
     const credential = await this.requireCredential(account);
     const limit = Math.min(Math.max(1, input.limit ?? DEFAULT_SEARCH_LIMIT), MAX_SEARCH_LIMIT);
     if (credential.kind !== "oauth") {
-      throw new Error("Searching password mailboxes is not available yet. OAuth Gmail and Outlook accounts are supported.");
+      return await this.imapClient.searchMessages({
+        account,
+        credential,
+        query: input.query ?? "",
+        limit,
+      });
     }
     const accessToken = await this.getAccessToken(account, credential);
     if (account.oauthProvider === "google") {
@@ -438,7 +447,11 @@ export class MailService {
     const account = await this.requireSelectedAccount(input.accountId);
     const credential = await this.requireCredential(account);
     if (credential.kind !== "oauth") {
-      throw new Error("Reading password mailboxes is not available yet. OAuth Gmail and Outlook accounts are supported.");
+      return await this.imapClient.readMessage({
+        account,
+        credential,
+        messageId: input.messageId,
+      });
     }
     const accessToken = await this.getAccessToken(account, credential);
     if (account.oauthProvider === "google") {

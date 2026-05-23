@@ -72,6 +72,7 @@ export const workspaceClient = {
     desktopAgent.inspectMcpServer(payload),
   debugMcpTool: (payload: Parameters<typeof desktopAgent.debugMcpTool>[0]) =>
     desktopAgent.debugMcpTool(payload),
+  markBrowserPageActive: (webContentsId: number) => desktopAgent.markBrowserPageActive(webContentsId),
   listTools: () => desktopAgent.listTools(),
   selectFiles: () => desktopAgent.selectFiles(),
   prepareAttachments: (filePaths: string[]) => desktopAgent.prepareAttachments(filePaths),
@@ -82,20 +83,37 @@ export const workspaceClient = {
     desktopAgent.readPreview(payload),
   runTerminalCommand: (payload: Parameters<typeof desktopAgent.runTerminalCommand>[0]) =>
     desktopAgent.runTerminalCommand(payload),
+  createTerminalSession: (payload: Parameters<typeof desktopAgent.createTerminalSession>[0]) =>
+    desktopAgent.createTerminalSession(payload),
+  writeTerminalInput: (payload: Parameters<typeof desktopAgent.writeTerminalInput>[0]) =>
+    desktopAgent.writeTerminalInput(payload),
+  resizeTerminalSession: (payload: Parameters<typeof desktopAgent.resizeTerminalSession>[0]) =>
+    desktopAgent.resizeTerminalSession(payload),
+  clearTerminalSession: (terminalId: string) => desktopAgent.clearTerminalSession(terminalId),
+  stopTerminalSession: (terminalId: string) => desktopAgent.stopTerminalSession(terminalId),
+  restartTerminalSession: (terminalId: string) => desktopAgent.restartTerminalSession(terminalId),
+  releaseTerminalSession: (terminalId: string) => desktopAgent.releaseTerminalSession(terminalId),
   openPreviewTarget: (payload: Parameters<typeof desktopAgent.openPreviewTarget>[0]) =>
     desktopAgent.openPreviewTarget(payload),
+  writeClipboardText: (text: string) => desktopAgent.writeClipboardText(text),
   openWorkspaceFolder: () => desktopAgent.openWorkspaceFolder(),
   openFolder: (targetPath: string) => desktopAgent.openFolder(targetPath),
   getWindowState: () => desktopAgent.getWindowState(),
   minimizeWindow: () => desktopAgent.minimizeWindow(),
   toggleMaximizeWindow: () => desktopAgent.toggleMaximizeWindow(),
   closeWindow: () => desktopAgent.closeWindow(),
+  respondToApproval: (payload: Parameters<typeof desktopAgent.respondToApproval>[0]) =>
+    desktopAgent.respondToApproval(payload),
   onWorkspaceChanged: (listener: Parameters<typeof desktopAgent.onWorkspaceChanged>[0]) =>
     desktopAgent.onWorkspaceChanged(listener),
   onWindowStateChanged: (listener: Parameters<typeof desktopAgent.onWindowStateChanged>[0]) =>
     desktopAgent.onWindowStateChanged(listener),
   onChatEvent: (listener: Parameters<typeof desktopAgent.onChatEvent>[0]) =>
     desktopAgent.onChatEvent(listener),
+  onApprovalRequest: (listener: Parameters<typeof desktopAgent.onApprovalRequest>[0]) =>
+    desktopAgent.onApprovalRequest(listener),
   onBrowserWindowOpen: (listener: Parameters<typeof desktopAgent.onBrowserWindowOpen>[0]) =>
     desktopAgent.onBrowserWindowOpen(listener),
+  onTerminalEvent: (listener: Parameters<typeof desktopAgent.onTerminalEvent>[0]) =>
+    desktopAgent.onTerminalEvent(listener),
 };

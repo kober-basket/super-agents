@@ -9,15 +9,18 @@ Use the built-in mail tools for practical email work while keeping the user in c
 
 ## Setup
 
-- If no account is configured, ask the user to open Settings > Mail and add an account.
+- If the user asks to login, connect, add, authorize, or configure a mailbox, call `mail_auth` first. Do not ask for passwords, authorization codes, OAuth codes, or tokens in chat.
+- For QQ Mail login requests, call `mail_auth` with `{ "provider": "qq" }` unless the user already provided a QQ email address.
+- If no account is configured for a mail-reading task, use `mail_auth` instead of giving manual Settings instructions.
 - Prefer OAuth accounts for Gmail and Microsoft/Outlook.
-- For IMAP/SMTP accounts, remind the user to use app passwords or mailbox authorization codes.
+- For QQ Mail, Tencent Exmail, NetEase, iCloud, Yahoo, Fastmail, Sina, Sohu, and custom IMAP/SMTP accounts, remind the user to use app passwords or mailbox authorization codes.
 - Never ask the user to paste passwords or OAuth tokens into chat.
 
 ## Tool Flow
 
 - Use `mail` with `list_accounts` before accessing mail.
-- Use `mail` with `search` for targeted inbox lookup; keep queries narrow.
+- Use `mail_auth` to open the private in-chat authorization form. The form stores secrets locally and returns only sanitized account metadata to the model.
+- Use `mail` with `search` for targeted inbox lookup; keep queries narrow. Password/authorization-code accounts use IMAP search.
 - Use `mail` with `read` only for messages that are relevant to the task.
 - Use `mail_draft` to create a local draft when composing or replying.
 - Use `mail_send` only when the user explicitly asks to send or confirms the exact draft.
@@ -36,6 +39,12 @@ Find messages:
 
 ```text
 mail { "action": "search", "query": "from:alice@example.com project update", "limit": 5 }
+```
+
+Connect QQ Mail:
+
+```text
+mail_auth { "provider": "qq" }
 ```
 
 Read one message:

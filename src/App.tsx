@@ -20,6 +20,8 @@ import type {
   ChatMessage,
   ChatConversationRuntimeState,
   ChatConversationSummary,
+  DesktopApprovalRequest,
+  DesktopApprovalResponse,
   DesktopWindowState,
   FileDropEntry,
   FilePreviewPayload,
@@ -174,6 +176,10 @@ function formatConversationPreview(value: string | undefined) {
 
 function isConversationNotFoundError(error: unknown) {
   return error instanceof Error && error.message.includes("Conversation not found");
+}
+
+function isConversationAlreadyRunningError(error: unknown) {
+  return error instanceof Error && /conversation is already running/i.test(error.message);
 }
 
 function describeMessagePreview(message: Pick<ChatMessage, "content" | "visuals"> | null | undefined) {
@@ -394,6 +400,7 @@ export default function App() {
   >({});
   const streamingPreviewByMessageRef = useRef<Record<string, string>>({});
   const [startingChatTurn, setStartingChatTurn] = useState(false);
+  const chatTurnStartInFlightRef = useRef(false);
   const [exportingConversationFormat, setExportingConversationFormat] =
     useState<ChatConversationExportFormat | null>(null);
   const [draftMessage, setDraftMessage] = useState("");
@@ -405,6 +412,7 @@ export default function App() {
   const [rightPaneMounted, setRightPaneMounted] = useState(false);
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(RIGHT_FILES_TAB_ID);
   const [toast, setToast] = useState<string | null>(null);
+  const [approvalRequests, setApprovalRequests] = useState<DesktopApprovalRequest[]>([]);
   const [skillQuery, setSkillQuery] = useState("");
   const [skillsRefreshing, setSkillsRefreshing] = useState(false);
   const [tools, setTools] = useState<WorkspaceTool[]>([]);
@@ -1218,6 +1226,30 @@ export default function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    return workspaceClient.onApprovalRequest((request) => {
+      setApprovalRequests((current) => [
+        ...current.filter((item) => item.approvalId !== request.approvalId),
+        request,
+      ]);
+      if (request.kind === "mail_auth") {
+        setView("chat");
+      }
+    });
+  }, []);
+
+  async function resolveApproval(response: DesktopApprovalResponse) {
+    setApprovalRequests((current) => current.filter((item) => item.approvalId !== response.approvalId));
+    try {
+      const accepted = await workspaceClient.respondToApproval(response);
+      if (!accepted) {
+        setToast("授权请求已过期");
+      }
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "提交授权结果失败");
+    }
+  }
 
   function updateInstalledSkill(skillId: string, patch: Partial<SkillConfig>) {
     const skills = config.skills.map((item) => (item.id === skillId ? { ...item, ...patch } : item));
@@ -2189,6 +2221,10 @@ export default function App() {
     const pendingAttachments = attachments.map((attachment) => ({ ...attachment }));
     const selectedKnowledgeBaseIds = activeKnowledgeBaseIds;
     if (!content && pendingAttachments.length === 0) return;
+    if (chatTurnStartInFlightRef.current || activeConversationBusy) {
+      return;
+    }
+    chatTurnStartInFlightRef.current = true;
 
     voiceRequestTokenRef.current += 1;
     voiceShouldCommitRef.current = false;
@@ -2272,6 +2308,7 @@ export default function App() {
         [result.conversation.id]: createConversationRuntimeState("running"),
       }));
     } catch (error) {
+      const alreadyRunning = isConversationAlreadyRunningError(error);
       if (previousConversation) {
         setActiveConversation(previousConversation);
         setActiveConversationId(previousConversationId);
@@ -2284,6 +2321,17 @@ export default function App() {
       setView("chat");
       setDraftMessage(content);
       setAttachments(pendingAttachments);
+      if (alreadyRunning && previousConversationId) {
+        setConversationRuntimeStates((current) => ({
+          ...current,
+          [previousConversationId]: {
+            ...(current[previousConversationId] ?? createConversationRuntimeState()),
+            status: "running",
+            error: undefined,
+            stopReason: undefined,
+          },
+        }));
+      }
       /*
       setToast(error instanceof Error ? error.message : "发送消息失败");
       legacy fallback
@@ -2291,8 +2339,15 @@ export default function App() {
       fallback continued
       setToast(error instanceof Error ? error.message : "发送消息失败");
       */
-      setToast(error instanceof Error ? error.message : "发送消息失败");
+      setToast(
+        alreadyRunning
+          ? "当前对话仍在生成，请等待或停止后再发送"
+          : error instanceof Error
+            ? error.message
+            : "发送消息失败",
+      );
     } finally {
+      chatTurnStartInFlightRef.current = false;
       setStartingChatTurn(false);
     }
   }
@@ -2756,6 +2811,8 @@ export default function App() {
           selectedKnowledgeBaseIds={activeKnowledgeBaseIds}
           skills={config.skills}
           scrollToBottomRequest={messageScrollRequest}
+          approvalRequests={approvalRequests}
+          onResolveApproval={resolveApproval}
           onToast={(message) => setToast(message)}
         />
       );
@@ -2994,6 +3051,7 @@ export default function App() {
                           onClosePane={() => setRightPaneOpen(false)}
                           onOpenExternal={openPreviewExternally}
                           onPagesChange={(pages, activePageId) => updateBrowserTabState(tab.id, pages, activePageId)}
+                          onBrowserPageActive={workspaceClient.markBrowserPageActive}
                           onBrowserWindowOpen={workspaceClient.onBrowserWindowOpen}
                         />
                       );
@@ -3003,7 +3061,15 @@ export default function App() {
                       return (
                         <TerminalPane
                           cwd={activeConversationWorkspaceRoot}
-                          onRunCommand={workspaceClient.runTerminalCommand}
+                          onClearSession={workspaceClient.clearTerminalSession}
+                          onCopyText={workspaceClient.writeClipboardText}
+                          onCreateSession={workspaceClient.createTerminalSession}
+                          onReleaseSession={workspaceClient.releaseTerminalSession}
+                          onResizeSession={workspaceClient.resizeTerminalSession}
+                          onRestartSession={workspaceClient.restartTerminalSession}
+                          onStopSession={workspaceClient.stopTerminalSession}
+                          onTerminalEvent={workspaceClient.onTerminalEvent}
+                          onWriteInput={workspaceClient.writeTerminalInput}
                         />
                       );
                     }
@@ -3016,6 +3082,7 @@ export default function App() {
                         onClosePane={() => setRightPaneOpen(false)}
                         onOpenExternal={openPreviewExternally}
                         onOpenLink={openPreviewLink}
+                        onBrowserPageActive={workspaceClient.markBrowserPageActive}
                         onBrowserWindowOpen={workspaceClient.onBrowserWindowOpen}
                       />
                     );
