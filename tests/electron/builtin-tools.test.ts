@@ -99,6 +99,28 @@ test("todo_write stores session todos and todo_read returns them", async () => {
   }
 });
 
+test(
+  "bash tool decodes Windows shell output from the local code page",
+  { skip: process.platform !== "win32" ? "Windows shell output code pages are platform-specific" : false },
+  async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-shell-encoding-"));
+
+    try {
+      const bash = toolByName("bash");
+      const result = await bash.execute(
+        {
+          command: 'node -e "process.stdout.write(Buffer.from([0xb5,0xb1,0xc7,0xb0]))"',
+        },
+        createContext(tempDir),
+      );
+
+      assert.equal(result.content, "当前");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  },
+);
+
 test("multi_edit applies multiple replacements atomically", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-multi-edit-"));
   const target = path.join(tempDir, "sample.txt");

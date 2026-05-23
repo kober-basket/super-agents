@@ -1,6 +1,6 @@
 import clsx from "clsx";
-import { Boxes, FolderOpen, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Boxes, FilePlus2, FolderOpen, Import as ImportIcon, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { workspaceClient } from "../../services/workspace-client";
 import type { SkillConfig } from "../../types";
@@ -49,6 +49,8 @@ export function SkillsView({
   const [activeSkill, setActiveSkill] = useState<SkillModalState | null>(null);
   const [modalMarkdown, setModalMarkdown] = useState("");
   const [modalLoading, setModalLoading] = useState(false);
+  const [skillActionsOpen, setSkillActionsOpen] = useState(false);
+  const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const activeSkillFolder = activeSkill ? resolveSkillFolderPath(activeSkill) : "";
   const builtinSkills = filteredInstalledSkills.filter((skill) => skill.system);
   const userSkills = filteredInstalledSkills.filter((skill) => !skill.system);
@@ -90,6 +92,26 @@ export function SkillsView({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeSkill]);
 
+  useEffect(() => {
+    if (!skillActionsOpen) return undefined;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (actionsMenuRef.current?.contains(event.target as Node)) return;
+      setSkillActionsOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setSkillActionsOpen(false);
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [skillActionsOpen]);
+
   return (
     <section className="skills-page">
       <div className="skills-inner">
@@ -108,24 +130,58 @@ export function SkillsView({
               />
             </label>
 
-            <button className="secondary-button" onClick={() => void onRefresh()} disabled={skillsRefreshing}>
-              <RefreshCw size={14} className={skillsRefreshing ? "spin" : undefined} />
-              刷新
-            </button>
-
             <button
-              className="secondary-button"
-              onClick={() => void onImportLocalSkill()}
-              disabled={skillsImporting}
+              aria-label="刷新技能"
+              className="secondary-button skill-toolbar-icon-button"
+              disabled={skillsRefreshing}
+              onClick={() => void onRefresh()}
+              title="刷新"
+              type="button"
             >
-              <Plus size={16} />
-              {skillsImporting ? "导入中..." : "导入本地技能"}
+              <RefreshCw size={16} className={skillsRefreshing ? "spin" : undefined} />
             </button>
 
-            <button className="primary-button" onClick={() => onPrepareSkillDraft()}>
-              <Plus size={16} />
-              新建技能
-            </button>
+            <div className="skill-actions-menu-wrap" ref={actionsMenuRef}>
+              <button
+                aria-expanded={skillActionsOpen}
+                aria-haspopup="menu"
+                aria-label="添加技能"
+                className="secondary-button skill-toolbar-icon-button"
+                onClick={() => setSkillActionsOpen((open) => !open)}
+                title="添加技能"
+                type="button"
+              >
+                <Plus size={18} />
+              </button>
+
+              {skillActionsOpen ? (
+                <div className="skill-actions-menu" role="menu">
+                  <button
+                    disabled={skillsImporting}
+                    onClick={() => {
+                      setSkillActionsOpen(false);
+                      void onImportLocalSkill();
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    {skillsImporting ? <LoaderCircle size={16} className="spin" /> : <ImportIcon size={16} />}
+                    <span>{skillsImporting ? "导入中..." : "导入技能"}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSkillActionsOpen(false);
+                      onPrepareSkillDraft();
+                    }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <FilePlus2 size={16} />
+                    <span>新建技能</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </header>
 

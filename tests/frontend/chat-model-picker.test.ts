@@ -27,7 +27,7 @@ test("chat model picker options use single-line restrained selection styling", (
   assert.match(workspaceSource, /className="chat-model-option-provider"/);
   assert.doesNotMatch(workspaceSource, /chat-model-option-check/);
   assert.doesNotMatch(css, /\.chat-model-option-check/);
-  assert.match(css, /\.chat-model-panel\s*{[^}]*width:\s*min\(360px,\s*calc\(100vw - 40px\)\)/s);
+  assert.match(css, /\.chat-model-panel\s*{[^}]*width:\s*min\(300px,\s*calc\(100vw - 40px\)\)/s);
   assert.match(
     css,
     /\.chat-model-option\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto[^}]*min-height:\s*44px/s,

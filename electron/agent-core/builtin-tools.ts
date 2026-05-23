@@ -1,6 +1,7 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { TextDecoder } from "node:util";
 
 import { ToolPermissionDeniedError } from "./types";
 import type { ToolContext, ToolDefinition } from "./types";
@@ -32,6 +33,8 @@ const NODE_SEARCH_SKIPPED_DIRECTORIES = new Set([
   "node_modules",
   "release",
 ]);
+
+let cachedWindowsShellEncoding: string | undefined;
 
 interface TextEdit {
   oldString: string;
@@ -561,6 +564,88 @@ async function runNodeGrep(input: {
   return { lines, truncated: false };
 }
 
+function supportedTextEncoding(label: string) {
+  try {
+    new TextDecoder(label);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function windowsCodePageToEncoding(codePage: string) {
+  switch (codePage) {
+    case "65001":
+      return "utf-8";
+    case "936":
+      return "gbk";
+    case "54936":
+      return "gb18030";
+    case "950":
+      return "big5";
+    case "932":
+      return "shift_jis";
+    case "949":
+      return "euc-kr";
+    case "866":
+      return "ibm866";
+    case "1250":
+    case "1251":
+    case "1252":
+    case "1253":
+    case "1254":
+    case "1255":
+    case "1256":
+    case "1257":
+    case "1258":
+      return `windows-${codePage}`;
+    default:
+      return "gbk";
+  }
+}
+
+function getWindowsShellEncoding() {
+  if (cachedWindowsShellEncoding) {
+    return cachedWindowsShellEncoding;
+  }
+
+  let encoding = "gbk";
+  try {
+    const result = spawnSync("cmd.exe", ["/d", "/s", "/c", "chcp"], {
+      windowsHide: true,
+      encoding: "buffer",
+    });
+    const output = Buffer.concat([
+      Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from([]),
+      Buffer.isBuffer(result.stderr) ? result.stderr : Buffer.from([]),
+    ]).toString("ascii");
+    const codePage = output.match(/(\d+)/)?.[1];
+    if (codePage) {
+      encoding = windowsCodePageToEncoding(codePage);
+    }
+  } catch {
+    encoding = "gbk";
+  }
+
+  cachedWindowsShellEncoding = supportedTextEncoding(encoding) ? encoding : "utf-8";
+  return cachedWindowsShellEncoding;
+}
+
+function decodeShellOutputBytes(buffer: Buffer) {
+  if (buffer.length === 0) {
+    return "";
+  }
+  if (process.platform !== "win32") {
+    return buffer.toString("utf8");
+  }
+
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    return new TextDecoder(getWindowsShellEncoding()).decode(buffer);
+  }
+}
+
 async function runShellCommand(command: string, cwd: string, timeoutMs: number, maxOutputBytes: number) {
   return await new Promise<{
     stdout: string;
@@ -576,23 +661,29 @@ async function runShellCommand(command: string, cwd: string, timeoutMs: number, 
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let outputBytes = 0;
     let truncated = false;
     let timedOut = false;
 
-    const append = (stream: "stdout" | "stderr", current: string, chunk: Buffer) => {
-      if (truncated) return current;
-      const next = current + chunk.toString("utf8");
-      const totalBytes = Buffer.byteLength(
-        stream === "stdout" ? next + stderr : stdout + next,
-        "utf8",
-      );
-      if (totalBytes <= maxOutputBytes) return next;
+    const append = (stream: "stdout" | "stderr", chunk: Buffer) => {
+      if (truncated) return;
+      const remainingBytes = maxOutputBytes - outputBytes;
+      if (remainingBytes <= 0) {
+        truncated = true;
+        return;
+      }
+      const target = stream === "stdout" ? stdoutChunks : stderrChunks;
+      if (chunk.byteLength <= remainingBytes) {
+        target.push(chunk);
+        outputBytes += chunk.byteLength;
+        return;
+      }
+
+      target.push(chunk.subarray(0, remainingBytes));
+      outputBytes += remainingBytes;
       truncated = true;
-      const previousTotalBytes = Buffer.byteLength(stdout + stderr, "utf8");
-      const remainingBytes = Math.max(0, maxOutputBytes - previousTotalBytes);
-      return current + chunk.subarray(0, remainingBytes).toString("utf8");
     };
 
     const timeout = setTimeout(() => {
@@ -601,10 +692,10 @@ async function runShellCommand(command: string, cwd: string, timeoutMs: number, 
     }, timeoutMs);
 
     child.stdout?.on("data", (chunk) => {
-      stdout = append("stdout", stdout, chunk);
+      append("stdout", chunk);
     });
     child.stderr?.on("data", (chunk) => {
-      stderr = append("stderr", stderr, chunk);
+      append("stderr", chunk);
     });
     child.once("error", (error) => {
       clearTimeout(timeout);
@@ -612,6 +703,8 @@ async function runShellCommand(command: string, cwd: string, timeoutMs: number, 
     });
     child.once("exit", (exitCode, signal) => {
       clearTimeout(timeout);
+      const stdout = decodeShellOutputBytes(Buffer.concat(stdoutChunks));
+      const stderr = decodeShellOutputBytes(Buffer.concat(stderrChunks));
       resolve({ stdout, stderr, exitCode, signal, timedOut, truncated });
     });
   });

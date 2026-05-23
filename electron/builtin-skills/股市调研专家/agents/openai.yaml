@@ -1,0 +1,8 @@
+interface:
+  display_name: "股市调研专家"
+  short_description: "多源行情、新闻、财务、量化与组合风控调研"
+  brand_color: "#0F766E"
+  default_prompt: "Use $stock-market-research-expert to research a stock, sector, commodity, portfolio, or market event with fresh evidence, source timestamps, risk guardrails, and a dashboard/timeline-style structured report."
+
+policy:
+  allow_implicit_invocation: true

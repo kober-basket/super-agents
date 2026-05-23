@@ -140,6 +140,59 @@ test("skills view keeps skill rows simple with status only", async () => {
   assert.doesNotMatch(html, /skill-tile-folder/);
 });
 
+test("skills toolbar keeps creation actions behind one add menu trigger", async () => {
+  (globalThis as any).window = {};
+  const { SkillsView } = await import("../../src/features/skills/SkillsView.js");
+  const css = readSource("src/styles.css");
+
+  const html = renderToStaticMarkup(
+    <SkillsView
+      filteredInstalledSkills={[
+        {
+          id: "skill-creator",
+          name: "skill-creator",
+          description: "Create or update a skill",
+          kind: "command",
+          command: "Skill creator instructions",
+          enabled: true,
+          system: true,
+          sourcePath: "/app/electron/builtin-skills/skill-creator",
+          location: "内置技能",
+        },
+      ]}
+      hasResults={true}
+      skillQuery=""
+      skillsImporting={false}
+      skillsRefreshing={false}
+      onImportLocalSkill={() => undefined}
+      onPrepareSkillDraft={() => undefined}
+      onRefresh={() => undefined}
+      onSkillQueryChange={() => undefined}
+      onUninstallSkill={() => undefined}
+      onUpdateInstalledSkill={() => undefined}
+    />,
+  );
+
+  assert.match(html, /placeholder="搜索技能"/);
+  assert.match(html, /aria-label="刷新技能"/);
+  assert.match(html, /aria-label="添加技能"/);
+  assert.match(html, /aria-haspopup="menu"/);
+  assert.match(css, /\.skills-toolbar-actions\s*{[^}]*--skill-toolbar-control-size:\s*56px;[^}]*flex-wrap:\s*nowrap;/s);
+  assert.match(css, /\.skill-search-field\s*{[^}]*min-width:\s*0;[^}]*flex:\s*1\s+1\s+390px;/s);
+  assert.match(
+    css,
+    /\.skills-toolbar-actions\s+\.search-field input\s*{[^}]*min-height:\s*var\(--skill-toolbar-control-size\);[^}]*border-radius:\s*var\(--skill-toolbar-control-radius\);/s,
+  );
+  assert.match(
+    css,
+    /\.skills-toolbar-actions\s+\.skill-toolbar-icon-button\s*{[^}]*width:\s*var\(--skill-toolbar-control-size\);[^}]*height:\s*var\(--skill-toolbar-control-size\);[^}]*border-radius:\s*var\(--skill-toolbar-control-radius\);/s,
+  );
+  assert.equal((html.match(/class="secondary-button skill-toolbar-icon-button"/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /导入本地技能/);
+  assert.doesNotMatch(html, />刷新</);
+  assert.doesNotMatch(html, />新建技能</);
+});
+
 test("skills view uses a two-column skill list and silent refresh success", () => {
   const appSource = readSource("src/App.tsx");
   const css = readSource("src/styles.css");
@@ -149,4 +202,9 @@ test("skills view uses a two-column skill list and silent refresh success", () =
     css,
     /\.skills-list\s*{\s*display:\s*grid;\s*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,
   );
+  assert.match(css, /\.skill-list-row\.skill-tile\s*{[^}]*align-items:\s*center;/s);
+  assert.match(css, /\.skill-list-row\s+\.skill-icon-shell\s*{[^}]*width:\s*44px;[^}]*height:\s*44px;/s);
+  assert.match(css, /\.skill-list-row\s+\.skill-tile-copy\s*{[^}]*gap:\s*4px;/s);
+  assert.doesNotMatch(css, /\.skill-list-row\s+\.skill-tile-copy\s*{[^}]*min-height:\s*36px/s);
+  assert.doesNotMatch(css, /\.skill-list-row\s+\.skill-tile-copy p\s*{[^}]*line-height:\s*17px/s);
 });

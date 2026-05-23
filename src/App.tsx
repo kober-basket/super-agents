@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Suspense, lazy } from "react";
+import type { CSSProperties } from "react";
 import clsx from "clsx";
 import { FolderOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import {
@@ -74,6 +75,7 @@ import {
   type RightPaneTab,
 } from "./lib/right-pane-tabs";
 import { resolveRightPanePresentation } from "./lib/workspace-layout";
+import { resolveToastFeedback } from "./lib/toast-feedback";
 
 const RightWorkspacePane = lazy(async () => {
   const module = await import("./features/chat/RightWorkspacePane");
@@ -181,6 +183,7 @@ const PREVIEW_PANE_WIDTH_STORAGE_KEY = "super-agents:preview-pane-width";
 const SIDEBAR_DEFAULT_WIDTH = 208;
 const SETTINGS_SIDEBAR_DEFAULT_WIDTH = 344;
 const PREVIEW_PANE_DEFAULT_WIDTH = 760;
+const RIGHT_PANE_TRANSITION_MS = 500;
 const SIDEBAR_MIN_WIDTH = 172;
 const SIDEBAR_MAX_WIDTH = 360;
 const SETTINGS_SIDEBAR_MIN_WIDTH = 260;
@@ -190,6 +193,9 @@ const PREVIEW_PANE_MAX_WIDTH = 980;
 
 type ResizeTarget = "sidebar" | "settings-sidebar" | "preview";
 type RemoteControlChannelKey = keyof AppConfig["remoteControl"];
+type AppShellStyle = CSSProperties & {
+  "--right-pane-inline-width"?: string;
+};
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -359,6 +365,7 @@ export default function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("assistant");
   const [rightTabs, setRightTabs] = useState<RightPaneTab[]>(() => [createFileSystemRightPaneTab()]);
   const [rightPaneOpen, setRightPaneOpen] = useState(false);
+  const [rightPaneMounted, setRightPaneMounted] = useState(false);
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(RIGHT_FILES_TAB_ID);
   const [toast, setToast] = useState<string | null>(null);
   const [skillQuery, setSkillQuery] = useState("");
@@ -449,6 +456,7 @@ export default function App() {
       ),
     [configuredSkills, skillQuery],
   );
+  const toastFeedback = useMemo(() => resolveToastFeedback(toast), [toast]);
   useEffect(() => {
     if (!toast) return undefined;
     const timer = window.setTimeout(() => setToast(null), 1800);
@@ -1300,7 +1308,7 @@ export default function App() {
     } satisfies AppConfig;
   }
 
-  function commitModelProviders(modelProviders: ModelProviderConfig[], message = "设置已保存") {
+  function commitModelProviders(modelProviders: ModelProviderConfig[], message?: string) {
     void commitConfig(buildConfigWithModelProviders(modelProviders), message);
   }
 
@@ -1348,7 +1356,7 @@ export default function App() {
     const nextProvider = getNextModelProvider(config.modelProviders, providerId);
     const modelProviders = [...config.modelProviders, nextProvider];
     setSelectedModelProviderId(nextProvider.id);
-    commitModelProviders(modelProviders, "宸叉坊鍔犳彁渚涙柟");
+    commitModelProviders(modelProviders);
   }
 
   function addModelProvider() {
@@ -1369,7 +1377,7 @@ export default function App() {
       ...config.modelProviders,
     ];
     setSelectedModelProviderId(providerId);
-    commitModelProviders(modelProviders, "已添加提供方");
+    commitModelProviders(modelProviders);
   }
 
   function reorderModelProviders(providerId: string, targetProviderId: string) {
@@ -1392,10 +1400,7 @@ export default function App() {
       return;
     }
     const modelProviders = config.modelProviders.filter((item) => item.id !== providerId);
-    commitModelProviders(
-      modelProviders,
-      target ? `已移除 ${target.name || "提供方"} 配置` : "已移除提供方配置",
-    );
+    commitModelProviders(modelProviders);
   }
 
   function setDefaultProviderModel(providerId: string, modelId: string) {
@@ -1413,7 +1418,6 @@ export default function App() {
 
     void commitConfig(
       buildConfigWithModelProviders(modelProviders, createRuntimeModelId(providerId, modelId)),
-      "默认模型已更新",
     );
   }
 
@@ -1464,7 +1468,7 @@ export default function App() {
         delete next[providerId];
         return next;
       });
-      commitModelProviders(modelProviders, `${provider.name} 模型已同步`);
+      commitModelProviders(modelProviders);
     } catch (error) {
       setProviderRefreshErrors((current) => ({
         ...current,
@@ -1481,12 +1485,8 @@ export default function App() {
   }
 
   function removeMcpServer(serverId: string) {
-    const target = config.mcpServers.find((item) => item.id === serverId);
     const mcpServers = config.mcpServers.filter((item) => item.id !== serverId);
-    void commitConfig(
-      { ...cloneConfig(config), mcpServers },
-      target ? `已移除 ${target.name || "MCP"} 配置` : "已移除 MCP 配置",
-    );
+    void commitConfig({ ...cloneConfig(config), mcpServers });
   }
 
   function addMcpServer() {
@@ -1505,7 +1505,7 @@ export default function App() {
         timeoutMs: 30000,
       },
     ];
-    void commitConfig({ ...cloneConfig(config), mcpServers }, "已添加 MCP 服务");
+    void commitConfig({ ...cloneConfig(config), mcpServers });
   }
 
   async function refreshSkillsView() {
@@ -1595,9 +1595,6 @@ export default function App() {
         });
       }
 
-      if (!options?.silent) {
-        setToast("知识库已刷新");
-      }
     } catch (error) {
       setToast(error instanceof Error ? error.message : "刷新知识库失败");
     } finally {
@@ -1610,9 +1607,6 @@ export default function App() {
     try {
       const payload = await workspaceClient.getRemoteControlStatus();
       setRemoteStatus(payload);
-      if (!options?.silent) {
-        setToast("远程控制状态已刷新");
-      }
     } catch (error) {
       setToast(error instanceof Error ? error.message : "刷新远程控制状态失败");
     } finally {
@@ -1778,7 +1772,6 @@ export default function App() {
         description: trimmedDescription,
       });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast(`已创建知识库「${trimmedName}」`);
       const createdBase =
         payload.knowledgeBases.find((item) => !previousBaseIds.has(item.id)) ??
         payload.knowledgeBases.find(
@@ -1805,7 +1798,6 @@ export default function App() {
         enabled: config.knowledgeBase.selectedBaseIds.some((item) => item !== baseId),
         selectedBaseIds: config.knowledgeBase.selectedBaseIds.filter((item) => item !== baseId),
       });
-      setToast("知识库已删除");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "删除知识库失败");
     } finally {
@@ -1842,7 +1834,6 @@ export default function App() {
         content: content.trim(),
       });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("笔记已添加");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "添加笔记失败");
     } finally {
@@ -1857,7 +1848,6 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeDirectory({ baseId, directoryPath });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("目录已添加");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "添加目录失败");
     } finally {
@@ -1870,7 +1860,6 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeUrl({ baseId, url });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("链接已添加");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "添加链接失败");
     } finally {
@@ -1883,7 +1872,6 @@ export default function App() {
       setKnowledgeRefreshing(true);
       const payload = await workspaceClient.addKnowledgeWebsite({ baseId, url });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("网站已添加");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "添加网站失败");
     } finally {
@@ -1896,7 +1884,6 @@ export default function App() {
     try {
       const payload = await workspaceClient.deleteKnowledgeItem({ baseId, itemId });
       setKnowledgeBases(payload.knowledgeBases);
-      setToast("知识项已删除");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "删除知识项失败");
     } finally {
@@ -2282,7 +2269,6 @@ export default function App() {
           }
 
           setDraftMessage((current) => mergeTranscriptIntoDraft(current, result.text));
-          setToast("语音已转成文字");
         } catch (error) {
           if (activeToken !== voiceRequestTokenRef.current) {
             return;
@@ -2299,7 +2285,6 @@ export default function App() {
 
     recorder.start();
     setVoiceInputState("recording");
-    setToast("正在录音，点击麦克风结束");
   }
 
   async function toggleVoiceInput() {
@@ -2387,16 +2372,32 @@ export default function App() {
   const canResizePanels = viewportWidth > 840;
   const showInlineRightPane = rightPanePresentation === "inline";
   const showOverlayRightPane = rightPanePresentation === "overlay";
+  const shouldRenderRightPaneContent = showRightPane || rightPaneMounted;
   const activeSidebarWidth = view === "settings" ? settingsSidebarWidth : sidebarWidth;
-  const appShellStyle =
+  const appShellStyle: AppShellStyle | undefined =
     canResizePanels
       ? {
-          gridTemplateColumns: showInlineRightPane
-            ? `${activeSidebarWidth}px minmax(0, 1fr) ${previewPaneWidth}px`
-            : `${activeSidebarWidth}px minmax(0, 1fr)`,
+          ...(view === "chat" ? { "--right-pane-inline-width": `${previewPaneWidth}px` } : {}),
+          gridTemplateColumns:
+            view === "chat"
+              ? `${activeSidebarWidth}px minmax(0, 1fr) ${showInlineRightPane ? "var(--right-pane-inline-width)" : "0px"}`
+              : `${activeSidebarWidth}px minmax(0, 1fr)`,
         }
       : undefined;
   const canCreateBrowserTab = !hasBrowserRightPaneTab(rightTabs);
+
+  useEffect(() => {
+    if (showRightPane) {
+      setRightPaneMounted(true);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setRightPaneMounted(false);
+    }, RIGHT_PANE_TRANSITION_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [showRightPane]);
 
   function renderRightPaneToggleButton(extraClassName?: string) {
     return (
@@ -2646,7 +2647,6 @@ export default function App() {
             mcpServers={config.mcpServers}
             mcpStatusMap={mcpStatusMap}
             tools={tools}
-            toolsRefreshing={toolsRefreshing}
             onAddMcpServer={addMcpServer}
             onDebugTool={(server, toolName, argumentsJson) =>
               workspaceClient.debugMcpTool({
@@ -2662,7 +2662,6 @@ export default function App() {
                 workspaceRoot: config.workspaceRoot,
               })
             }
-            onRefresh={refreshToolsView}
             onRefreshMcp={refreshMcpView}
             onRemoveMcpServer={removeMcpServer}
             onToggleAdvanced={() => setMcpAdvancedOpen((value) => !value)}
@@ -2795,69 +2794,82 @@ export default function App() {
           />
         ) : null}
 
-        {showRightPane ? (
-          <Suspense fallback={<LazyViewFallback />}>
-            <RightWorkspacePane
-              activeTabId={activeRightTabId}
-              canCreateBrowserTab={canCreateBrowserTab}
-              tabs={rightTabs}
-              onCloseTab={closeRightTab}
-              onCreateBrowserTab={createBrowserTab}
-              onCreateTerminalTab={createTerminalTab}
-              onSelectTab={setActiveRightTabId}
-              renderTabContent={(tab) => {
-                if (tab.kind === "files") {
-                  return (
-                    <WorkspaceFileExplorer
-                      workspaceRoot={activeConversationWorkspaceRoot}
-                      onListDirectory={workspaceClient.listWorkspaceDirectory}
-                      onReadPreview={workspaceClient.readPreview}
-                      onOpenExternal={openPreviewExternally}
-                      onOpenLink={openPreviewLink}
-                    />
-                  );
-                }
+        {view === "chat" ? (
+          <div
+            aria-hidden={!showRightPane}
+            className={clsx(
+              "right-workspace-slot",
+              showRightPane && "is-open",
+              showOverlayRightPane && "is-overlay",
+            )}
+          >
+            {shouldRenderRightPaneContent ? (
+              <Suspense fallback={<LazyViewFallback />}>
+                <RightWorkspacePane
+                  activeTabId={activeRightTabId}
+                  canCreateBrowserTab={canCreateBrowserTab}
+                  tabs={rightTabs}
+                  onCloseTab={closeRightTab}
+                  onCreateBrowserTab={createBrowserTab}
+                  onCreateTerminalTab={createTerminalTab}
+                  onSelectTab={setActiveRightTabId}
+                  renderTabContent={(tab) => {
+                    if (tab.kind === "files") {
+                      return (
+                        <WorkspaceFileExplorer
+                          workspaceRoot={activeConversationWorkspaceRoot}
+                          onListDirectory={workspaceClient.listWorkspaceDirectory}
+                          onReadPreview={workspaceClient.readPreview}
+                          onOpenExternal={openPreviewExternally}
+                          onOpenLink={openPreviewLink}
+                        />
+                      );
+                    }
 
-                if (tab.kind === "browser") {
-                  return (
-                    <BrowserWorkspacePane
-                      activePageId={tab.activeBrowserTabId}
-                      initialPages={tab.browserTabs}
-                      onClosePane={() => setRightPaneOpen(false)}
-                      onOpenExternal={openPreviewExternally}
-                      onPagesChange={(pages, activePageId) => updateBrowserTabState(tab.id, pages, activePageId)}
-                      onBrowserWindowOpen={workspaceClient.onBrowserWindowOpen}
-                    />
-                  );
-                }
+                    if (tab.kind === "browser") {
+                      return (
+                        <BrowserWorkspacePane
+                          activePageId={tab.activeBrowserTabId}
+                          initialPages={tab.browserTabs}
+                          onClosePane={() => setRightPaneOpen(false)}
+                          onOpenExternal={openPreviewExternally}
+                          onPagesChange={(pages, activePageId) => updateBrowserTabState(tab.id, pages, activePageId)}
+                          onBrowserWindowOpen={workspaceClient.onBrowserWindowOpen}
+                        />
+                      );
+                    }
 
-                if (tab.kind === "terminal") {
-                  return (
-                    <TerminalPane
-                      cwd={activeConversationWorkspaceRoot}
-                      onRunCommand={workspaceClient.runTerminalCommand}
-                    />
-                  );
-                }
+                    if (tab.kind === "terminal") {
+                      return (
+                        <TerminalPane
+                          cwd={activeConversationWorkspaceRoot}
+                          onRunCommand={workspaceClient.runTerminalCommand}
+                        />
+                      );
+                    }
 
-                return (
-                  <PreviewPane
-                    embedded
-                    preview={tab.preview}
-                    onClearPreview={() => closeRightTab(tab.id)}
-                    onClosePane={() => setRightPaneOpen(false)}
-                    onOpenExternal={openPreviewExternally}
-                    onOpenLink={openPreviewLink}
-                    onBrowserWindowOpen={workspaceClient.onBrowserWindowOpen}
-                  />
-                );
-              }}
-            />
-          </Suspense>
+                    return (
+                      <PreviewPane
+                        embedded
+                        preview={tab.preview}
+                        onClearPreview={() => closeRightTab(tab.id)}
+                        onClosePane={() => setRightPaneOpen(false)}
+                        onOpenExternal={openPreviewExternally}
+                        onOpenLink={openPreviewLink}
+                        onBrowserWindowOpen={workspaceClient.onBrowserWindowOpen}
+                      />
+                    );
+                  }}
+                />
+              </Suspense>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
-      {toast ? <div className="toast">{toast}</div> : null}
+      {toastFeedback ? (
+        <div className={`toast ${toastFeedback.tone}`}>{toastFeedback.message}</div>
+      ) : null}
     </div>
   );
 }

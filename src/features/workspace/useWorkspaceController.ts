@@ -148,13 +148,10 @@ export function useWorkspaceController({ onToast }: UseWorkspaceControllerOption
   }
 
   function updateConfigField<K extends keyof AppConfig>(field: K, value: AppConfig[K]) {
-    void commitConfig(
-      {
-        ...cloneConfig(config),
-        [field]: value,
-      },
-      "设置已保存",
-    );
+    void commitConfig({
+      ...cloneConfig(config),
+      [field]: value,
+    });
   }
 
   async function appendAttachments(files: FileDropEntry[]) {

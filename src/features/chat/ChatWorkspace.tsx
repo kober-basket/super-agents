@@ -808,7 +808,6 @@ export function ChatWorkspace({
     try {
       await copyTextToClipboard(text);
       setCopiedMessageId(message.id);
-      onToast("已复制");
       window.setTimeout(() => {
         setCopiedMessageId((current) => (current === message.id ? null : current));
       }, 1200);
@@ -826,7 +825,6 @@ export function ChatWorkspace({
     try {
       await copyTextToClipboard(buildConversationCopyMarkdown(activeConversation));
       setThreadActionMenuOpen(false);
-      onToast("已复制 Markdown");
     } catch {
       onToast("复制失败");
     }
@@ -840,7 +838,6 @@ export function ChatWorkspace({
       }
 
       await onAddAttachments(normalizedFiles);
-      onToast(`已添加 ${normalizedFiles.length} 个附件`);
     } catch {
       onToast("粘贴附件失败");
     }
@@ -1988,11 +1985,6 @@ export function ChatWorkspace({
       <div className="chat-column chat-workspace-shell">
         {isHome ? (
             <div className="chat-home chat-home-upgraded">
-              {workspaceFolderControl ? (
-                <div className="chat-home-folder-control">
-                  {workspaceFolderControl}
-                </div>
-              ) : null}
               <div className="chat-home-stage">
                 <div className="chat-home-center-copy">
                   <h1>开始新的对话</h1>
@@ -2006,6 +1998,11 @@ export function ChatWorkspace({
           renderThread()
         )}
       </div>
+      {isHome && workspaceFolderControl ? (
+        <div className="chat-home-folder-control">
+          {workspaceFolderControl}
+        </div>
+      ) : null}
       {rightPaneControl ? (
         <div className="chat-fixed-right-pane-control">
           {rightPaneControl}
