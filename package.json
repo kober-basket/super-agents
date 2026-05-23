@@ -20,6 +20,7 @@
     "package": "npm run build && electron-builder --dir",
     "package:runtime": "npm run runtime:check && npm run build && electron-builder",
     "runtime:check": "node scripts/check-runtime.mjs",
+    "runtime:install": "node scripts/install-runtime.mjs",
     "cli": "node scripts/super-agents.mjs",
     "admin": "node scripts/super-agents-admin.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4173"

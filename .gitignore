@@ -9,6 +9,7 @@ temp-smoke/
 .test-dist/
 vendor/runtime/*
 !vendor/runtime/README.md
+!vendor/runtime/manifest.json
 !vendor/runtime/win32-x64/
 vendor/runtime/win32-x64/*
 !vendor/runtime/win32-x64/bin/

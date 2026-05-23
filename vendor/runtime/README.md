@@ -2,6 +2,8 @@
 
 This directory is copied into Electron `resources/runtime` by electron-builder.
 It is intentionally not populated in source control with large runtime binaries.
+Pinned runtime versions, download URLs, and SHA256 checksums live in
+`vendor/runtime/manifest.json`.
 
 Expected layout for release builds:
 
@@ -41,4 +43,5 @@ vendor/runtime/
 ```
 
 Set `SUPER_AGENTS_RUNTIME_ROOT` to test another runtime directory locally.
-Run `npm run runtime:check` before `npm run package:runtime`.
+Run `npm run runtime:install` after cloning or when refreshing runtime binaries.
+Then run `npm run runtime:check` before `npm run package:runtime`.
