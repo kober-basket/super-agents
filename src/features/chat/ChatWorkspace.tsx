@@ -448,7 +448,9 @@ export function ChatWorkspace({
         return (
           skill.name.toLowerCase().includes(query) ||
           skill.id.toLowerCase().includes(query) ||
-          skill.description.toLowerCase().includes(query)
+          skill.description.toLowerCase().includes(query) ||
+          (skill.displayName ?? "").toLowerCase().includes(query) ||
+          (skill.shortDescription ?? "").toLowerCase().includes(query)
         );
       })
       .slice(0, 6);
@@ -766,8 +768,8 @@ export function ChatWorkspace({
             aria-selected={index === activeSkillSuggestionIndex}
             type="button"
           >
-            <span className="chat-skill-suggestion-name">${skill.name}</span>
-            <span className="chat-skill-suggestion-desc">{skill.description || "工作区技能"}</span>
+            <span className="chat-skill-suggestion-name">{skill.displayName || `$${skill.name}`}</span>
+            <span className="chat-skill-suggestion-desc">{skill.shortDescription || skill.description || "工作区技能"}</span>
           </button>
         ))}
       </div>

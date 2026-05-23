@@ -61,6 +61,11 @@ import {
 import { stripComposerSkillMentions } from "./lib/composer-skills";
 import { BROWSER_HOME_URL, buildBrowserPreview } from "./lib/browser-target";
 import {
+  BROWSER_WORKSPACE_STATE_STORAGE_KEY,
+  parseBrowserWorkspaceTab,
+  serializeBrowserWorkspaceTab,
+} from "./lib/browser-workspace-state";
+import {
   closeRightPaneTab,
   createBrowserRightPaneTab,
   createFileSystemRightPaneTab,
@@ -217,6 +222,26 @@ function readStoredWidth(key: string, fallback: number, legacyValues: number[] =
   );
 
   return isLegacyValue ? fallback : parsedValue;
+}
+
+function readStoredBrowserWorkspaceTab() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return parseBrowserWorkspaceTab(window.localStorage.getItem(BROWSER_WORKSPACE_STATE_STORAGE_KEY));
+}
+
+function writeStoredBrowserWorkspaceTab(tab: Extract<RightPaneTab, { kind: "browser" }>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(BROWSER_WORKSPACE_STATE_STORAGE_KEY, serializeBrowserWorkspaceTab(tab));
+  } catch {
+    // Browser state is a convenience cache; losing it should not block the chat workspace.
+  }
 }
 
 function LazyViewFallback() {
@@ -452,7 +477,13 @@ export default function App() {
   const filteredInstalledSkills = useMemo(
     () =>
       configuredSkills.filter((skill) =>
-        matchQuery(skillQuery, [skill.name, skill.description, skill.location]),
+        matchQuery(skillQuery, [
+          skill.name,
+          skill.description,
+          skill.displayName,
+          skill.shortDescription,
+          skill.location,
+        ]),
       ),
     [configuredSkills, skillQuery],
   );
@@ -547,6 +578,15 @@ export default function App() {
       String(clamp(previewPaneWidth, PREVIEW_PANE_MIN_WIDTH, PREVIEW_PANE_MAX_WIDTH)),
     );
   }, [previewPaneWidth]);
+
+  useEffect(() => {
+    const browserTab = rightTabs.find(
+      (tab): tab is Extract<RightPaneTab, { kind: "browser" }> => tab.kind === "browser",
+    );
+    if (browserTab) {
+      writeStoredBrowserWorkspaceTab(browserTab);
+    }
+  }, [rightTabs]);
 
   useEffect(() => {
     if (!resizeTarget) {
@@ -1196,12 +1236,30 @@ export default function App() {
     };
   }
 
+  function createBrowserRightTabFromStoredState(target = BROWSER_HOME_URL) {
+    const restoredTab = readStoredBrowserWorkspaceTab();
+    if (!restoredTab) {
+      return createBrowserRightPaneTab(RIGHT_BROWSER_TAB_ID, target);
+    }
+
+    if (target === BROWSER_HOME_URL) {
+      return restoredTab;
+    }
+
+    const nextPage = createBrowserPage(target);
+    return {
+      ...restoredTab,
+      browserTabs: [...restoredTab.browserTabs, nextPage],
+      activeBrowserTabId: nextPage.id,
+    };
+  }
+
   function openBrowserTab(target = BROWSER_HOME_URL) {
     setRightPaneOpen(true);
     setRightTabs((currentTabs) => {
       const browserTab = currentTabs.find((tab) => tab.kind === "browser");
       if (!browserTab) {
-        const nextTab = createBrowserRightPaneTab(RIGHT_BROWSER_TAB_ID, target);
+        const nextTab = createBrowserRightTabFromStoredState(target);
         setActiveRightTabId(nextTab.id);
         return [...currentTabs, nextTab];
       }

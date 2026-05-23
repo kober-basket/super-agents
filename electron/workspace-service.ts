@@ -66,6 +66,14 @@ interface PersistedWorkspaceState {
   config: AppConfig;
 }
 
+interface SkillOpenAiMetadata {
+  displayName?: string;
+  shortDescription?: string;
+  brandColor?: string;
+  defaultPrompt?: string;
+  allowImplicitInvocation?: boolean;
+}
+
 const LEGACY_DEFAULT_PROVIDER_BASE_URL = "https://oneapi.iflyrpa.com/v1";
 const LEGACY_DEFAULT_PROVIDER_MODEL_IDS = [
   "azure/gpt-5",
@@ -627,6 +635,72 @@ function parseSkillFrontmatter(content: string) {
   };
 }
 
+function parseOpenAiYamlScalar(rawValue: string) {
+  const trimmed = rawValue.trim();
+  if (!trimmed) return "";
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+
+  const quote = trimmed[0];
+  if ((quote === '"' || quote === "'") && trimmed.endsWith(quote)) {
+    const inner = trimmed.slice(1, -1);
+    return quote === '"'
+      ? inner.replace(/\\"/g, '"').replace(/\\\\/g, "\\")
+      : inner.replace(/''/g, "'");
+  }
+
+  return trimmed.replace(/\s+#.*$/, "").trim();
+}
+
+function parseSkillOpenAiMetadata(content: string): SkillOpenAiMetadata {
+  const metadata: SkillOpenAiMetadata = {};
+  let section = "";
+
+  for (const rawLine of content.replace(/\r\n/g, "\n").split("\n")) {
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const topLevelMatch = rawLine.match(/^([A-Za-z_][\w-]*):\s*$/);
+    if (topLevelMatch?.[1]) {
+      section = topLevelMatch[1];
+      continue;
+    }
+
+    const fieldMatch = rawLine.match(/^\s+([A-Za-z_][\w-]*):\s*(.*?)\s*$/);
+    if (!fieldMatch?.[1] || !section) continue;
+
+    const key = fieldMatch[1];
+    const value = parseOpenAiYamlScalar(fieldMatch[2] ?? "");
+    if (section === "interface" && typeof value === "string" && value.trim()) {
+      if (key === "display_name") metadata.displayName = value.trim();
+      if (key === "short_description") metadata.shortDescription = value.trim();
+      if (key === "brand_color") metadata.brandColor = value.trim();
+      if (key === "default_prompt") metadata.defaultPrompt = value.trim();
+    }
+    if (section === "policy" && key === "allow_implicit_invocation" && typeof value === "boolean") {
+      metadata.allowImplicitInvocation = value;
+    }
+  }
+
+  return metadata;
+}
+
+function readSkillOpenAiMetadataSync(skillRoot: string): SkillOpenAiMetadata {
+  try {
+    return parseSkillOpenAiMetadata(readFileSync(path.join(skillRoot, "agents", "openai.yaml"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+async function readSkillOpenAiMetadata(skillRoot: string): Promise<SkillOpenAiMetadata> {
+  try {
+    return parseSkillOpenAiMetadata(await readFile(path.join(skillRoot, "agents", "openai.yaml"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
 function stripSkillFrontmatter(content: string, skillName?: string) {
   let next = content.replace(/\r\n/g, "\n").trim();
   if (!next) {
@@ -675,6 +749,7 @@ function readBuiltinSkillConfigs(): SkillConfig[] {
           id: sanitizeModelProviderId(name),
           name,
           description: parsed.description || "Built-in skill",
+          ...readSkillOpenAiMetadataSync(skillRoot),
           kind: "command" as const,
           command: stripSkillFrontmatter(content, name),
           enabled: true,
@@ -718,6 +793,11 @@ function normalizeSkillList(rawSkills: unknown, builtinSkills: SkillConfig[] = D
         id,
         name,
         description: String(item?.description ?? ""),
+        displayName: typeof item?.displayName === "string" ? item.displayName : undefined,
+        shortDescription: typeof item?.shortDescription === "string" ? item.shortDescription : undefined,
+        brandColor: typeof item?.brandColor === "string" ? item.brandColor : undefined,
+        defaultPrompt: typeof item?.defaultPrompt === "string" ? item.defaultPrompt : undefined,
+        allowImplicitInvocation: typeof item?.allowImplicitInvocation === "boolean" ? item.allowImplicitInvocation : undefined,
         kind: "command",
         command: String(item?.command ?? ""),
         enabled: item?.enabled !== false,
@@ -736,10 +816,12 @@ async function readLocalSkill(skillRoot: string): Promise<SkillConfig | null> {
     const parsed = parseSkillFrontmatter(content);
     const name = parsed.name || path.basename(skillRoot);
     const body = stripSkillFrontmatter(content, name);
+    const metadata = await readSkillOpenAiMetadata(skillRoot);
     return {
       id: sanitizeModelProviderId(name),
       name,
       description: parsed.description || "Local skill",
+      ...metadata,
       kind: "command",
       command: body,
       enabled: true,
@@ -755,10 +837,12 @@ async function readRuntimeSkill(skillRoot: string, location: string): Promise<Ru
     const content = await readFile(path.join(skillRoot, "SKILL.md"), "utf8");
     const parsed = parseSkillFrontmatter(content);
     const name = parsed.name || path.basename(skillRoot);
+    const metadata = await readSkillOpenAiMetadata(skillRoot);
     return {
       id: sanitizeModelProviderId(name),
       name,
       description: parsed.description || "Local skill",
+      ...metadata,
       location,
       content,
     };
@@ -871,9 +955,9 @@ async function syncManagedBuiltinSkills(statePath: string) {
       const folderName = path.basename(sourcePath) || skill.id;
       const targetPath = path.join(builtinRoot, folderName);
       const existingSkillFile = await stat(path.join(targetPath, "SKILL.md")).catch(() => null);
-      if (existingSkillFile?.isFile()) return;
-
-      await rm(targetPath, { recursive: true, force: true }).catch(() => undefined);
+      if (!existingSkillFile?.isFile()) {
+        await rm(targetPath, { recursive: true, force: true }).catch(() => undefined);
+      }
       await cp(sourcePath, targetPath, {
         recursive: true,
         force: true,

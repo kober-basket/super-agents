@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { createRuntimeModelId } from "../../src/lib/model-config";
+import { findEnabledSkill } from "../../electron/chat/skill-invocation";
 import { getAudioTranscriptionModelCandidates, WorkspaceService } from "../../electron/workspace-service";
 
 test("audio transcription candidates prefer configured speech models before fallbacks", () => {
@@ -340,23 +341,38 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     const skillNames = bootstrap.config.skills.map((skill) => skill.name).sort();
     const skillCreator = bootstrap.config.skills.find((skill) => skill.id === "skill-creator");
     const wxCli = bootstrap.config.skills.find((skill) => skill.id === "wx-cli");
+    const stockResearch = bootstrap.config.skills.find((skill) => skill.id === "stock-market-research-expert");
 
-    assert.deepEqual(skillNames, ["skill-creator", "wx-cli"]);
+    assert.deepEqual(skillNames, ["skill-creator", "stock-market-research-expert", "wx-cli"]);
     assert.ok(skillCreator);
     assert.equal(skillCreator?.system, true);
     assert.equal(skillCreator?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "skill-creator"));
     await access(path.join(skillCreator?.sourcePath ?? "", "SKILL.md"));
+    await access(path.join(skillCreator?.sourcePath ?? "", "agents", "openai.yaml"));
     assert.match(skillCreator?.command ?? "", /Anatomy of a Skill/);
+    assert.equal(skillCreator?.displayName, "技能创建器");
+    assert.equal(skillCreator?.shortDescription, "创建、更新和验证 Codex 技能结构、资源与触发说明");
+    assert.match(skillCreator?.defaultPrompt ?? "", /\$skill-creator/);
     assert.ok(wxCli);
     assert.equal(wxCli?.system, true);
     assert.equal(wxCli?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "wx-cli"));
     await access(path.join(wxCli?.sourcePath ?? "", "SKILL.md"));
+    await access(path.join(wxCli?.sourcePath ?? "", "agents", "openai.yaml"));
     assert.match(wxCli?.command ?? "", /wx history/);
+    assert.equal(wxCli?.displayName, "微信本地检索");
+    assert.match(wxCli?.defaultPrompt ?? "", /\$wx-cli/);
+    assert.ok(stockResearch);
+    assert.equal(stockResearch?.system, true);
+    assert.equal(stockResearch?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "股市调研专家"));
+    await access(path.join(stockResearch?.sourcePath ?? "", "agents", "openai.yaml"));
+    assert.equal(stockResearch?.displayName, "股市调研专家");
+    assert.match(stockResearch?.defaultPrompt ?? "", /\$stock-market-research-expert/);
     assert.equal(bootstrap.config.skills.some((skill) => skill.id === "meeting-minutes"), false);
 
     const context = await service.getEnabledSkillPromptContext();
     assert.match(context, /Available workspace skills for this turn:/);
     assert.match(context, /- skill-creator:/);
+    assert.match(context, /- stock-market-research-expert:/);
     assert.match(context, /- wx-cli:/);
     assert.doesNotMatch(context, /Anatomy of a Skill/);
   } finally {
@@ -542,6 +558,55 @@ test("workspace service builds a skill index from enabled skills only", async ()
     assert.match(context, /- brief-writer: Turn notes into a brief/);
     assert.doesNotMatch(context, /Summarize notes/);
     assert.doesNotMatch(context, /disabled-skill/);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("workspace service reads openai skill metadata and implicit invocation policy", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
+  const workspaceRoot = path.join(tempDir, "workspace");
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const localSkillRoot = path.join(workspaceRoot, ".super-agents", "skills", "doc-helper");
+  const service = new WorkspaceService(statePath);
+
+  await mkdir(path.join(localSkillRoot, "agents"), { recursive: true });
+  await writeFile(
+    path.join(localSkillRoot, "SKILL.md"),
+    ["---", "name: doc-helper", "description: Helps draft docs", "---", "", "# doc-helper", "", "Document carefully."].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    path.join(localSkillRoot, "agents", "openai.yaml"),
+    [
+      "interface:",
+      '  display_name: "Docs Helper"',
+      '  short_description: "Draft concise project docs"',
+      '  default_prompt: "Use $doc-helper to draft a concise project document."',
+      "",
+      "policy:",
+      "  allow_implicit_invocation: false",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  try {
+    await service.updateConfig({ workspaceRoot });
+
+    const bootstrap = await service.bootstrap();
+    const skill = bootstrap.config.skills.find((item) => item.id === "doc-helper");
+
+    assert.ok(skill);
+    assert.equal(skill?.displayName, "Docs Helper");
+    assert.equal(skill?.shortDescription, "Draft concise project docs");
+    assert.equal(skill?.defaultPrompt, "Use $doc-helper to draft a concise project document.");
+    assert.equal(skill?.allowImplicitInvocation, false);
+    assert.equal(findEnabledSkill(bootstrap.config, "doc-helper")?.id, "doc-helper");
+
+    const context = await service.getEnabledSkillPromptContext();
+    assert.doesNotMatch(context, /doc-helper/);
   } finally {
     await service.shutdown();
     await rm(tempDir, { recursive: true, force: true });

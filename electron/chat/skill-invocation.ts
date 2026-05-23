@@ -103,7 +103,9 @@ export function buildLoadedSkillContent(
 }
 
 export function buildSkillIndexPrompt(config: AppConfig) {
-  const enabledSkills = config.skills.filter((skill) => skill.enabled && skill.kind === "command");
+  const enabledSkills = config.skills.filter(
+    (skill) => skill.enabled && skill.kind === "command" && skill.allowImplicitInvocation !== false,
+  );
   if (enabledSkills.length === 0) {
     return "";
   }

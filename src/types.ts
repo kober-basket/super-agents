@@ -119,6 +119,11 @@ export interface SkillConfig {
   id: string;
   name: string;
   description: string;
+  displayName?: string;
+  shortDescription?: string;
+  brandColor?: string;
+  defaultPrompt?: string;
+  allowImplicitInvocation?: boolean;
   kind: SkillKind;
   command: string;
   enabled: boolean;
@@ -130,6 +135,11 @@ export interface RuntimeSkill {
   id: string;
   name: string;
   description: string;
+  displayName?: string;
+  shortDescription?: string;
+  brandColor?: string;
+  defaultPrompt?: string;
+  allowImplicitInvocation?: boolean;
   location: string;
   content: string;
 }

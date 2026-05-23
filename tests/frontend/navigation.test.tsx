@@ -52,6 +52,10 @@ test("conversation rows swap time for delete in the same action slot on hover", 
   assert.match(css, /\.sidebar-conversation-action\s*{[^}]*position:\s*absolute/s);
   assert.match(css, /\.sidebar-conversation-action\s*{[^}]*width:\s*64px/s);
   assert.match(css, /\.sidebar-conversation-action\s*{[^}]*justify-items:\s*end/s);
+  assert.match(
+    css,
+    /\.sidebar-conversation-copy\s+strong,\s*\.sidebar-conversation-copy\s+span\s*{[^}]*display:\s*block/s,
+  );
   assert.match(css, /\.sidebar-conversation-time\s*{[^}]*max-width:\s*64px/s);
   assert.match(css, /\.sidebar-conversation-time\s*{[^}]*text-align:\s*right/s);
   assert.match(

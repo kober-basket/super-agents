@@ -1,0 +1,7 @@
+interface:
+  display_name: "微信本地检索"
+  short_description: "通过 wx-cli 只读检索本地微信聊天、联系人、公众号文章和附件线索"
+  default_prompt: "Use $wx-cli to search or inspect local WeChat data with small read-only wx-cli JSON queries and privacy guardrails."
+
+policy:
+  allow_implicit_invocation: true

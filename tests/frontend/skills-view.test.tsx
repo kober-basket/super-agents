@@ -92,6 +92,45 @@ test("skills view separates built-in and user installed skills", async () => {
   assert.ok(html.indexOf("skill-creator") < html.indexOf("local-helper"));
 });
 
+test("skills view prefers openai interface metadata for skill labels", async () => {
+  (globalThis as any).window = {};
+  const { SkillsView } = await import("../../src/features/skills/SkillsView.js");
+
+  const html = renderToStaticMarkup(
+    <SkillsView
+      filteredInstalledSkills={[
+        {
+          id: "skill-creator",
+          name: "skill-creator",
+          description: "Create or update a skill",
+          displayName: "Skill Creator",
+          shortDescription: "Create and validate Codex skills",
+          kind: "command",
+          command: "Skill creator instructions",
+          enabled: true,
+          system: true,
+          location: "Built-in skill",
+        },
+      ]}
+      hasResults={true}
+      skillQuery=""
+      skillsImporting={false}
+      skillsRefreshing={false}
+      onImportLocalSkill={() => undefined}
+      onPrepareSkillDraft={() => undefined}
+      onRefresh={() => undefined}
+      onSkillQueryChange={() => undefined}
+      onUninstallSkill={() => undefined}
+      onUpdateInstalledSkill={() => undefined}
+    />,
+  );
+
+  assert.match(html, /Skill Creator/);
+  assert.match(html, /Create and validate Codex skills/);
+  assert.doesNotMatch(html, />skill-creator<\/strong>/);
+  assert.doesNotMatch(html, /Create or update a skill/);
+});
+
 test("skills view keeps skill rows simple with status only", async () => {
   (globalThis as any).window = {};
   const { SkillsView } = await import("../../src/features/skills/SkillsView.js");

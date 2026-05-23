@@ -232,7 +232,7 @@ export function SkillsView({
                 </div>
                 <div className="skill-detail-title-copy">
                   <div className="skill-detail-title-row">
-                    <h3>{activeSkill.skill.name}</h3>
+                    <h3>{resolveSkillDisplayName(activeSkill.skill)}</h3>
                     {activeSkill.kind === "installed" ? (
                       <>
                         {activeSkill.skill.system ? <span className="skill-status-chip subtle">内置技能</span> : null}
@@ -242,7 +242,7 @@ export function SkillsView({
                       </>
                     ) : null}
                   </div>
-                  <p>{activeSkill.skill.description || "暂无描述"}</p>
+                  <p>{resolveSkillShortDescription(activeSkill.skill, "暂无描述")}</p>
                 </div>
               </div>
 
@@ -324,36 +324,40 @@ function SkillSection({ title, skills, emptyText, accentOffset, onSelectSkill }:
 
       {skills.length > 0 ? (
         <div className="skills-list">
-          {skills.map((skill, index) => (
-            <div
-              key={skill.id}
-              className="skill-list-row skill-tile"
-              onClick={() => onSelectSkill(skill)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onSelectSkill(skill);
-                }
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              <div className={clsx("skill-icon-shell", resolveAccent(accentOffset + index))}>
-                <Boxes size={20} />
+          {skills.map((skill, index) => {
+            const displayName = resolveSkillDisplayName(skill);
+            const description = resolveSkillShortDescription(skill, "暂无描述");
+            return (
+              <div
+                key={skill.id}
+                className="skill-list-row skill-tile"
+                onClick={() => onSelectSkill(skill)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectSkill(skill);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
+                <div className={clsx("skill-icon-shell", resolveAccent(accentOffset + index))}>
+                  <Boxes size={20} />
+                </div>
+                <div className="skill-tile-copy">
+                  <strong title={displayName}>{displayName}</strong>
+                  <p title={description}>
+                    {compactSkillDescription(description, "暂无描述")}
+                  </p>
+                </div>
+                <div className="skill-tile-status">
+                  <span className={clsx("skill-status-chip", skill.enabled ? "enabled" : "disabled")}>
+                    {skill.enabled ? "启用" : "停用"}
+                  </span>
+                </div>
               </div>
-              <div className="skill-tile-copy">
-                <strong title={skill.name}>{skill.name}</strong>
-                <p title={skill.description || "暂无描述"}>
-                  {compactSkillDescription(skill.description, "暂无描述")}
-                </p>
-              </div>
-              <div className="skill-tile-status">
-                <span className={clsx("skill-status-chip", skill.enabled ? "enabled" : "disabled")}>
-                  {skill.enabled ? "启用" : "停用"}
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="skills-empty-banner">
@@ -367,6 +371,14 @@ function SkillSection({ title, skills, emptyText, accentOffset, onSelectSkill }:
 function compactSkillDescription(description: string | undefined, fallback: string) {
   const text = (description || fallback).replace(/\s+/g, " ").trim();
   return text.length > 68 ? `${text.slice(0, 68).trim()}...` : text;
+}
+
+function resolveSkillDisplayName(skill: SkillConfig) {
+  return skill.displayName?.trim() || skill.name;
+}
+
+function resolveSkillShortDescription(skill: SkillConfig, fallback: string) {
+  return skill.shortDescription?.trim() || skill.description || fallback;
 }
 
 function resolveAccent(seed: number) {
@@ -385,7 +397,7 @@ async function resolveSkillMarkdown(activeSkill: SkillModalState) {
   if (activeSkill.skill.sourcePath) {
     const preview = await workspaceClient.readPreview({
       path: appendSkillFilePath(activeSkill.skill.sourcePath),
-      title: `${activeSkill.skill.name} 技能`,
+      title: `${resolveSkillDisplayName(activeSkill.skill)} 技能`,
     });
 
     return cleanSkillMarkdown(
@@ -397,9 +409,9 @@ async function resolveSkillMarkdown(activeSkill: SkillModalState) {
   if (activeSkill.skill.kind === "command" && activeSkill.skill.command) {
     return cleanSkillMarkdown(
       [
-      `# ${activeSkill.skill.name}`,
+      `# ${resolveSkillDisplayName(activeSkill.skill)}`,
       "",
-      activeSkill.skill.description || "暂无描述",
+      resolveSkillShortDescription(activeSkill.skill, "暂无描述"),
       "",
       "## 命令",
       "",
@@ -416,9 +428,9 @@ async function resolveSkillMarkdown(activeSkill: SkillModalState) {
 
 function fallbackMarkdown(activeSkill: SkillModalState) {
   return [
-    `# ${activeSkill.skill.name}`,
+    `# ${resolveSkillDisplayName(activeSkill.skill)}`,
     "",
-    activeSkill.skill.description || "暂无描述",
+    resolveSkillShortDescription(activeSkill.skill, "暂无描述"),
     "",
     "## 位置",
     "",

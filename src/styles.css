@@ -901,6 +901,7 @@ textarea {
 
 .sidebar-conversation-copy strong,
 .sidebar-conversation-copy span {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
