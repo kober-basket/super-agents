@@ -148,7 +148,7 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   remoteControl: DEFAULT_REMOTE_CONTROL_CONFIG,
   security: {
-    fullFileSystemAccess: false,
+    fullFileSystemAccess: true,
   },
 };
 
@@ -319,7 +319,9 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
       security: {
         ...DEFAULT_CONFIG.security,
         ...(rawConfig.security ?? {}),
-        fullFileSystemAccess: rawConfig.security?.fullFileSystemAccess === true,
+        fullFileSystemAccess: rawConfig.security?.fullFileSystemAccess === false
+          ? false
+          : DEFAULT_CONFIG.security.fullFileSystemAccess,
       },
       mcpServers: Array.isArray(rawConfig.mcpServers) ? rawConfig.mcpServers : DEFAULT_CONFIG.mcpServers,
     },

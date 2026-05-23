@@ -86,7 +86,7 @@ const EMPTY_CONFIG: AppConfig = {
     chunkOverlap: 160,
   },
   security: {
-    fullFileSystemAccess: false,
+    fullFileSystemAccess: true,
   },
   remoteControl: {
     dingtalk: {
@@ -274,7 +274,7 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
         lastMessageAt: userMessage.createdAt,
         preview: "",
         messageCount: 0,
-        workspaceRoot: config.workspaceRoot || "F:\\work\\github\\super-agents",
+        workspaceRoot: payload.workspaceRoot || config.workspaceRoot || "F:\\work\\github\\super-agents",
         selectedKnowledgeBaseIds,
         messages: [],
       };
@@ -332,6 +332,17 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
         conversations = [createMockConversation()];
       }
       return api.listConversations();
+    },
+    updateConversationWorkspaceRoot: async (payload: { conversationId: string; workspaceRoot: string; }) => {
+      const conversation = getConversationOrThrow(payload.conversationId);
+      const nextConversation = {
+        ...conversation,
+        workspaceRoot: payload.workspaceRoot,
+      };
+      conversations = conversations.map((item) =>
+        item.id === nextConversation.id ? nextConversation : item,
+      );
+      return nextConversation;
     },
     exportConversation: async (_payload): Promise<ChatConversationExportResult> => unsupported("会话导出"),
     writeClipboardText: async (text: string) => {

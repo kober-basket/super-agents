@@ -113,7 +113,6 @@ interface ChatWorkspaceProps {
   knowledgeRefreshing: boolean;
   runtimeState?: ChatConversationRuntimeState | null;
   workspaceFolderControl?: ReactNode;
-  rightPaneControl?: ReactNode;
   selectableModels: RuntimeModelOption[];
   selectedKnowledgeBaseIds: string[];
   skills: SkillConfig[];
@@ -392,6 +391,7 @@ function buildMessageCopyText(message: ChatMessage) {
 
 const MESSAGE_USAGE_TOOLTIP_GAP = 8;
 const MESSAGE_USAGE_TOOLTIP_PADDING = 12;
+const MESSAGE_USAGE_TOOLTIP_DELAY_MS = 1_500;
 
 function clampNumber(value: number, min: number, max: number) {
   if (max < min) {
@@ -436,6 +436,7 @@ function renderMessageUsageTooltipLine(line: string, lineIndex: number, key: str
 function MessageUsageBadge({ id, label, title }: { id: string; label: string; title: string }) {
   const badgeRef = useRef<HTMLSpanElement | null>(null);
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
+  const showTooltipTimerRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
   const [tooltipPosition, setTooltipPosition] = useState<MessageUsageTooltipPosition | null>(null);
   const tooltipSections = useMemo(() => splitMessageUsageTooltipSections(title), [title]);
@@ -484,13 +485,29 @@ function MessageUsageBadge({ id, label, title }: { id: string; label: string; ti
 
     setTooltipPosition({ arrowLeft, left, placement, top });
   }, []);
-  const showTooltip = useCallback(() => {
-    setOpen(true);
+  const clearPendingShowTooltip = useCallback(() => {
+    if (showTooltipTimerRef.current === null) {
+      return;
+    }
+    window.clearTimeout(showTooltipTimerRef.current);
+    showTooltipTimerRef.current = null;
   }, []);
+  const showTooltip = useCallback(() => {
+    clearPendingShowTooltip();
+    setOpen(true);
+  }, [clearPendingShowTooltip]);
+  const scheduleTooltip = useCallback(() => {
+    clearPendingShowTooltip();
+    showTooltipTimerRef.current = window.setTimeout(() => {
+      showTooltipTimerRef.current = null;
+      setOpen(true);
+    }, MESSAGE_USAGE_TOOLTIP_DELAY_MS);
+  }, [clearPendingShowTooltip]);
   const hideTooltip = useCallback(() => {
+    clearPendingShowTooltip();
     setOpen(false);
     setTooltipPosition(null);
-  }, []);
+  }, [clearPendingShowTooltip]);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -506,6 +523,8 @@ function MessageUsageBadge({ id, label, title }: { id: string; label: string; ti
       window.removeEventListener("scroll", handleViewportChange, true);
     };
   }, [open, title, updateTooltipPosition]);
+
+  useEffect(() => clearPendingShowTooltip, [clearPendingShowTooltip]);
 
   const placement = tooltipPosition?.placement ?? "bottom";
   const tooltipStyle = {
@@ -523,7 +542,7 @@ function MessageUsageBadge({ id, label, title }: { id: string; label: string; ti
       aria-describedby={id}
       onBlur={hideTooltip}
       onFocus={showTooltip}
-      onPointerEnter={showTooltip}
+      onPointerEnter={scheduleTooltip}
       onPointerLeave={hideTooltip}
       tabIndex={0}
     >
@@ -567,7 +586,6 @@ export function ChatWorkspace({
   knowledgeRefreshing,
   runtimeState,
   workspaceFolderControl,
-  rightPaneControl,
   selectableModels,
   selectedKnowledgeBaseIds,
   skills,
@@ -835,10 +853,11 @@ export function ChatWorkspace({
       return undefined;
     }
 
+    const scrollBehavior = conversationChanged || requestedManualScroll ? "auto" : "instant";
     const scrollToBottom = () => {
       autoScrollManuallyDetachedRef.current = false;
       autoScrollPinnedToBottomRef.current = true;
-      scrollMessageListToBottom(messageList);
+      scrollMessageListToBottom(messageList, { behavior: scrollBehavior });
       updateMessageListPinnedState(messageList);
     };
 
@@ -2353,11 +2372,6 @@ export function ChatWorkspace({
       {isHome && workspaceFolderControl ? (
         <div className="chat-home-folder-control">
           {workspaceFolderControl}
-        </div>
-      ) : null}
-      {rightPaneControl ? (
-        <div className="chat-fixed-right-pane-control">
-          {rightPaneControl}
         </div>
       ) : null}
     </section>

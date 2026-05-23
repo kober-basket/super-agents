@@ -9,23 +9,23 @@ Use the `super-agents` CLI as the primary harness when operating Super Agents it
 
 ## Entry Points
 
-From the Super Agents source repository:
+Inside Super Agents agent shell, terminal, or MCP-launched child processes, use the built-in command shim:
 
 ```bash
-npm run cli -- --json <command>
+super-agents --json <command>
 ```
 
 Compatibility entry point:
 
 ```bash
-npm run admin -- --json <command>
+super-agents-admin --json <command>
 ```
 
-Installed package bins:
+When developing from the Super Agents source repository and the built-in shim is unavailable:
 
 ```bash
-super-agents --json <command>
-super-agents-admin --json <command>
+npm run cli -- --json <command>
+npm run admin -- --json <command>
 ```
 
 Use `--user-data <path>` when the user points at a specific app data directory. Use `--state-path <path>` or `--db-path <path>` only when the exact file is known.
@@ -35,30 +35,30 @@ Use `--user-data <path>` when the user points at a specific app data directory. 
 1. Start with discovery:
 
 ```bash
-npm run cli -- --json status
-npm run cli -- --json tools list
-npm run cli -- --json skill list
+super-agents --json status
+super-agents --json tools list
+super-agents --json skill list
 ```
 
 2. Use a named CLI session for multi-step work:
 
 ```bash
-npm run cli -- --json session new --name "maintenance"
-npm run cli -- --session maintenance --json session status
+super-agents --json session new --name "maintenance"
+super-agents --session maintenance --json session status
 ```
 
 3. Prefer reversible config mutations:
 
 ```bash
-npm run cli -- --session maintenance --json config patch --set "contextTier=low"
-npm run cli -- --session maintenance --json session undo
-npm run cli -- --session maintenance --json session redo
+super-agents --session maintenance --json config patch --set "contextTier=low"
+super-agents --session maintenance --json session undo
+super-agents --session maintenance --json session redo
 ```
 
 4. For exploratory local control, run the REPL:
 
 ```bash
-npm run cli --
+super-agents
 ```
 
 Inside the REPL, commands are the same, for example `status --json` or `conversation list --json`.
@@ -68,7 +68,7 @@ Inside the REPL, commands are the same, for example `status --json` or `conversa
 Add or update an OpenAI-compatible model provider and select a model:
 
 ```bash
-npm run cli -- --json model provider add \
+super-agents --json model provider add \
   --id "openrouter" \
   --name "OpenRouter" \
   --base-url "https://openrouter.ai/api/v1" \
@@ -80,45 +80,45 @@ npm run cli -- --json model provider add \
 Add another model to an existing provider:
 
 ```bash
-npm run cli -- --json model add --provider openrouter --id "anthropic/claude-sonnet-4.5" --label "Claude Sonnet 4.5"
+super-agents --json model add --provider openrouter --id "anthropic/claude-sonnet-4.5" --label "Claude Sonnet 4.5"
 ```
 
 Enable or disable full filesystem access:
 
 ```bash
-npm run cli -- --json permission full-access on
-npm run cli -- --json permission full-access off
+super-agents --json permission full-access on
+super-agents --json permission full-access off
 ```
 
 List, inspect, rename, export, or delete conversations:
 
 ```bash
-npm run cli -- --json conversation list
-npm run cli -- --json conversation show --id "<conversation-id>"
-npm run cli -- --json conversation rename --id "<conversation-id>" --title "新的标题"
-npm run cli -- --json conversation export --id "<conversation-id>" --format markdown --out "./conversation.md"
-npm run cli -- --json conversation delete --id "<conversation-id>" --yes
+super-agents --json conversation list
+super-agents --json conversation show --id "<conversation-id>"
+super-agents --json conversation rename --id "<conversation-id>" --title "新的标题"
+super-agents --json conversation export --id "<conversation-id>" --format markdown --out "./conversation.md"
+super-agents --json conversation delete --id "<conversation-id>" --yes
 ```
 
 Manage local structured memory:
 
 ```bash
-npm run cli -- --json memory add --type project_context --title "CLI preference" --content "Use JSON output for agent automation."
-npm run cli -- --json memory search --query "JSON output"
-npm run cli -- --json memory delete --id "<memory-id>" --yes
+super-agents --json memory add --type project_context --title "CLI preference" --content "Use JSON output for agent automation."
+super-agents --json memory search --query "JSON output"
+super-agents --json memory delete --id "<memory-id>" --yes
 ```
 
 Manage MCP server config:
 
 ```bash
-npm run cli -- --json mcp add --id filesystem --name Files --command node --arg server.js --env FOO=bar
-npm run cli -- --json mcp disable --id filesystem
+super-agents --json mcp add --id filesystem --name Files --command node --arg server.js --env FOO=bar
+super-agents --json mcp disable --id filesystem
 ```
 
 Inspect current app config without leaking secrets:
 
 ```bash
-npm run cli -- --json config show
+super-agents --json config show
 ```
 
 ## Safety Rules

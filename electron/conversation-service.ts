@@ -83,6 +83,11 @@ function normalizeKnowledgeBaseIds(value: string[] | undefined): string[] {
   return Array.from(new Set(value.map((item) => String(item).trim()).filter(Boolean)));
 }
 
+function normalizeWorkspaceRoot(value: string | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? path.resolve(trimmed) : "";
+}
+
 function parseAttachments(value: string | null): FileDropEntry[] {
   if (!value) {
     return [];
@@ -403,6 +408,27 @@ export class ConversationService {
     return await this.listConversations();
   }
 
+  async updateConversationWorkspaceRoot(conversationId: string, workspaceRoot: string): Promise<ChatConversation> {
+    const normalizedWorkspaceRoot = normalizeWorkspaceRoot(workspaceRoot);
+    if (!normalizedWorkspaceRoot) {
+      throw new Error("Conversation workspace root is required");
+    }
+
+    const result = this.getDatabase()
+      .prepare(`
+        UPDATE conversations
+        SET workspace_root = ?
+        WHERE id = ?
+      `)
+      .run(normalizedWorkspaceRoot, conversationId);
+
+    if (result.changes === 0) {
+      throw new Error("Conversation not found");
+    }
+
+    return await this.getConversation(conversationId);
+  }
+
   async startTurn(
     input: ChatSendInput,
     options: { agentCore: string },
@@ -420,14 +446,16 @@ export class ConversationService {
     const now = Date.now();
     const conversationId = input.conversationId?.trim() || randomUUID();
     const createdConversation = !input.conversationId;
-    const workspaceRoot = createdConversation ? await this.createConversationWorkspaceRoot(conversationId) : "";
+    const workspaceRoot = createdConversation
+      ? normalizeWorkspaceRoot(input.workspaceRoot) || await this.createConversationWorkspaceRoot(conversationId)
+      : "";
     const title = buildConversationTitle(content, attachments);
     const preview = buildConversationPreview(content, attachments);
-      const attachmentsJson = JSON.stringify(attachments);
-      const emptyVisualsJson = "[]";
-      const emptyRuntimeTraceJson = JSON.stringify(createEmptyRuntimeTrace());
-      const userMessageId = randomUUID();
-      const assistantMessageId = randomUUID();
+    const attachmentsJson = JSON.stringify(attachments);
+    const emptyVisualsJson = "[]";
+    const emptyRuntimeTraceJson = JSON.stringify(createEmptyRuntimeTrace());
+    const userMessageId = randomUUID();
+    const assistantMessageId = randomUUID();
     let transactionStarted = false;
 
     try {
@@ -669,7 +697,9 @@ export class ConversationService {
     const now = Date.now();
     const conversationId = input.conversationId?.trim() || randomUUID();
     const createdConversation = !input.conversationId;
-    const workspaceRoot = createdConversation ? await this.createConversationWorkspaceRoot(conversationId) : "";
+    const workspaceRoot = createdConversation
+      ? normalizeWorkspaceRoot(input.workspaceRoot) || await this.createConversationWorkspaceRoot(conversationId)
+      : "";
     const title = buildConversationTitle(content, attachments);
     const assistantContent = buildAssistantReply(content, attachments);
     const preview = buildAssistantPreview(assistantContent, []);

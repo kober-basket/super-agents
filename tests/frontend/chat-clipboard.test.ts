@@ -158,7 +158,10 @@ test("assistant message actions place copy before usage tooltip and timestamp", 
   assert.match(source, /message-usage-tooltip-row/);
   assert.match(source, /closest\("\.message-list"\)/);
   assert.match(source, /boundaryBottom/);
-  assert.match(source, /onPointerEnter=\{showTooltip\}/);
+  assert.match(source, /const MESSAGE_USAGE_TOOLTIP_DELAY_MS = 1_500;/);
+  assert.match(source, /window\.setTimeout\(\(\) => \{\s*showTooltipTimerRef\.current = null;\s*setOpen\(true\);\s*\}, MESSAGE_USAGE_TOOLTIP_DELAY_MS\)/);
+  assert.match(source, /window\.clearTimeout\(showTooltipTimerRef\.current\)/);
+  assert.match(source, /onPointerEnter=\{scheduleTooltip\}/);
   assert.match(source, /onFocus=\{showTooltip\}/);
   assert.match(source, /onPointerLeave=\{hideTooltip\}/);
   assert.match(source, /onBlur=\{hideTooltip\}/);

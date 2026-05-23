@@ -6,9 +6,11 @@ import {
   APP_NAME,
   APP_WINDOW_TITLE,
   migrateLegacyAppData,
+  resolveGeneratedSupportDir,
 } from "./app-identity";
 import { ChatOrchestrator } from "./chat-orchestrator";
 import { BrowserAutomationService } from "./browser-automation-service";
+import { installCliShims } from "./cli-shims";
 import { exportConversationToFile } from "./conversation-export";
 import type { ToolApprovalDecision, ToolApprovalRequest } from "./agent-core";
 import { InteractiveTerminalManager } from "./interactive-terminal-manager";
@@ -517,6 +519,18 @@ async function renderPdfFromHtml(html: string) {
 
 app.whenReady().then(async () => {
   await migrateLegacyAppData(app.getPath("appData"));
+  const generatedRuntimeRoot = resolveGeneratedSupportDir(app.getPath("appData"));
+  process.env.SUPER_AGENTS_GENERATED_RUNTIME_ROOT = generatedRuntimeRoot;
+  process.env.SUPER_AGENTS_USER_DATA = app.getPath("userData");
+  try {
+    await installCliShims({
+      appPath: app.getAppPath(),
+      runtimeRoot: generatedRuntimeRoot,
+    });
+  } catch (error) {
+    console.warn("Failed to install Super Agents CLI shims.", error);
+  }
+
   const statePath = path.join(app.getPath("userData"), "workspace.json");
   const conversationDatabasePath = path.join(app.getPath("userData"), "data", "app.db");
   service = new WorkspaceService(statePath);
@@ -604,6 +618,22 @@ app.whenReady().then(async () => {
   ipcMain.handle("desktop:delete-conversation", async (_event, conversationId: string) => {
     return await conversationService!.deleteConversation(conversationId);
   });
+
+  ipcMain.handle(
+    "desktop:update-conversation-workspace-root",
+    async (_event, payload: { conversationId?: string; workspaceRoot?: string }) => {
+      const conversationId = String(payload?.conversationId ?? "").trim();
+      const workspaceRoot = String(payload?.workspaceRoot ?? "").trim();
+      if (!conversationId) {
+        throw new Error("缺少会话 ID");
+      }
+      if (!workspaceRoot) {
+        throw new Error("请选择工作区");
+      }
+
+      return await conversationService!.updateConversationWorkspaceRoot(conversationId, workspaceRoot);
+    },
+  );
 
   ipcMain.handle("desktop:export-conversation", async (_event, payload: { conversationId?: string; format?: unknown }) => {
     const conversationId = String(payload?.conversationId ?? "").trim();

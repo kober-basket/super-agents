@@ -69,6 +69,7 @@ declare global {
       cancelChatTurn: (conversationId: string) => Promise<void>;
       sendChatMessage: (payload: ChatSendInput) => Promise<ChatSendResult>;
       deleteConversation: (conversationId: string) => Promise<ChatConversationListPayload>;
+      updateConversationWorkspaceRoot: (payload: { conversationId: string; workspaceRoot: string; }) => Promise<ChatConversation>;
       exportConversation: (payload: ChatConversationExportInput) => Promise<ChatConversationExportResult>;
       writeClipboardText: (text: string) => Promise<void>;
       listKnowledgeBases: () => Promise<KnowledgeCatalogPayload>;

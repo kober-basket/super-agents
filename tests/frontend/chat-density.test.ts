@@ -165,7 +165,7 @@ test("chat thread title sits on the left with a compact actions menu", () => {
   );
   assert.match(css, /\.workspace-main\.is-thread\s+\.message-list\s*{[^}]*margin:\s*0 auto/s);
   assert.match(css, /\.chat-thread-actions\s*{[^}]*display:\s*flex/s);
-  assert.match(workspaceSource, /rightPaneControl/);
+  assert.doesNotMatch(workspaceSource, /rightPaneControl/);
   assert.match(workspaceSource, /MoreHorizontal/);
   assert.match(workspaceSource, /复制为 Markdown/);
   assert.doesNotMatch(workspaceSource, /<Download\b/);

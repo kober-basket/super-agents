@@ -2,7 +2,7 @@
 import { Suspense, lazy } from "react";
 import type { CSSProperties } from "react";
 import clsx from "clsx";
-import { FolderOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { FolderOpen, FolderPlus, PanelRightClose, PanelRightOpen } from "lucide-react";
 import {
   createRuntimeModelId,
   ensureActiveModelId,
@@ -41,6 +41,7 @@ import { AppTitleBar } from "./features/navigation/AppTitleBar";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
 import { useWorkspaceController } from "./features/workspace/useWorkspaceController";
+import { conversationWorkspaceLabel, workspaceLabel } from "./features/workspace/labels";
 import { fileKind } from "./features/shared/utils";
 import { ChatWorkspace } from "./features/chat/ChatWorkspace";
 import { BrowserWorkspacePane } from "./features/chat/BrowserWorkspacePane";
@@ -88,46 +89,70 @@ import {
 import { resolveRightPanePresentation } from "./lib/workspace-layout";
 import { resolveToastFeedback } from "./lib/toast-feedback";
 
-const RightWorkspacePane = lazy(async () => {
+const loadRightWorkspacePane = async () => {
   const module = await import("./features/chat/RightWorkspacePane");
   return { default: module.RightWorkspacePane };
-});
-const SkillsView = lazy(async () => {
+};
+const loadSkillsView = async () => {
   const module = await import("./features/skills/SkillsView");
   return { default: module.SkillsView };
-});
-const ToolsView = lazy(async () => {
+};
+const loadToolsView = async () => {
   const module = await import("./features/tools/ToolsView");
   return { default: module.ToolsView };
-});
-const MemoryView = lazy(async () => {
+};
+const loadMemoryView = async () => {
   const module = await import("./features/memory/MemoryView");
   return { default: module.MemoryView };
-});
-const KnowledgeView = lazy(async () => {
+};
+const loadKnowledgeView = async () => {
   const module = await import("./features/knowledge/KnowledgeView");
   return { default: module.KnowledgeView };
-});
-const AssistantSettings = lazy(async () => {
+};
+const loadAssistantSettings = async () => {
   const module = await import("./features/settings/AssistantSettings");
   return { default: module.AssistantSettings };
-});
-const AppearanceSettings = lazy(async () => {
+};
+const loadAppearanceSettings = async () => {
   const module = await import("./features/settings/AppearanceSettings");
   return { default: module.AppearanceSettings };
-});
-const RemoteControlSettings = lazy(async () => {
+};
+const loadRemoteControlSettings = async () => {
   const module = await import("./features/settings/RemoteControlSettings");
   return { default: module.RemoteControlSettings };
-});
-const PermissionsSettings = lazy(async () => {
+};
+const loadPermissionsSettings = async () => {
   const module = await import("./features/settings/PermissionsSettings");
   return { default: module.PermissionsSettings };
-});
-const MailSettings = lazy(async () => {
+};
+const loadMailSettings = async () => {
   const module = await import("./features/settings/MailSettings");
   return { default: module.MailSettings };
-});
+};
+
+const RightWorkspacePane = lazy(loadRightWorkspacePane);
+const SkillsView = lazy(loadSkillsView);
+const ToolsView = lazy(loadToolsView);
+const MemoryView = lazy(loadMemoryView);
+const KnowledgeView = lazy(loadKnowledgeView);
+const AssistantSettings = lazy(loadAssistantSettings);
+const AppearanceSettings = lazy(loadAppearanceSettings);
+const RemoteControlSettings = lazy(loadRemoteControlSettings);
+const PermissionsSettings = lazy(loadPermissionsSettings);
+const MailSettings = lazy(loadMailSettings);
+
+function preloadLazyViews() {
+  void loadRightWorkspacePane();
+  void loadSkillsView();
+  void loadToolsView();
+  void loadMemoryView();
+  void loadKnowledgeView();
+  void loadAssistantSettings();
+  void loadAppearanceSettings();
+  void loadRemoteControlSettings();
+  void loadPermissionsSettings();
+  void loadMailSettings();
+}
 
 function uid() {
   return Math.random().toString(36).slice(2);
@@ -218,6 +243,10 @@ type ResizeTarget = "sidebar" | "settings-sidebar" | "preview";
 type RemoteControlChannelKey = keyof AppConfig["remoteControl"];
 type AppShellStyle = CSSProperties & {
   "--right-pane-inline-width"?: string;
+};
+type IdleCallbackWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -405,6 +434,7 @@ export default function App() {
     useState<ChatConversationExportFormat | null>(null);
   const [draftMessage, setDraftMessage] = useState("");
   const [draftKnowledgeBaseIds, setDraftKnowledgeBaseIds] = useState<string[]>([]);
+  const [draftConversationWorkspaceRoot, setDraftConversationWorkspaceRoot] = useState("");
   const [messageScrollRequest, setMessageScrollRequest] = useState(0);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("assistant");
   const [rightTabs, setRightTabs] = useState<RightPaneTab[]>(() => [createFileSystemRightPaneTab()]);
@@ -511,6 +541,22 @@ export default function App() {
     [configuredSkills, skillQuery],
   );
   const toastFeedback = useMemo(() => resolveToastFeedback(toast), [toast]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const idleWindow = window as IdleCallbackWindow;
+    if (idleWindow.requestIdleCallback) {
+      const idleHandle = idleWindow.requestIdleCallback(preloadLazyViews, { timeout: 1600 });
+      return () => idleWindow.cancelIdleCallback?.(idleHandle);
+    }
+
+    const timer = window.setTimeout(preloadLazyViews, 360);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   useEffect(() => {
     if (!toast) return undefined;
     const timer = window.setTimeout(() => setToast(null), 1800);
@@ -2141,6 +2187,7 @@ export default function App() {
     setActiveConversationId(null);
     setDraftMessage("");
     setDraftKnowledgeBaseIds([]);
+    setDraftConversationWorkspaceRoot("");
     setAttachments([]);
   }
 
@@ -2148,6 +2195,7 @@ export default function App() {
     setView("chat");
     setActiveConversationId(conversationId);
     setDraftMessage("");
+    setDraftConversationWorkspaceRoot("");
     setAttachments([]);
     setActiveConversation(null);
 
@@ -2195,6 +2243,7 @@ export default function App() {
         setActiveConversationId(null);
         setDraftMessage("");
         setDraftKnowledgeBaseIds([]);
+        setDraftConversationWorkspaceRoot("");
         setAttachments([]);
       }
     } catch (error) {
@@ -2315,7 +2364,7 @@ export default function App() {
           lastMessageAt: now + 1,
           preview: optimisticPreview,
           messageCount: 2,
-          workspaceRoot: config.workspaceRoot,
+          workspaceRoot: draftConversationWorkspaceRoot || config.workspaceRoot,
           selectedKnowledgeBaseIds,
           messages: [optimisticUserMessage, optimisticAssistantMessage],
         };
@@ -2332,11 +2381,13 @@ export default function App() {
         content,
         attachments: pendingAttachments,
         selectedKnowledgeBaseIds,
+        workspaceRoot: activeConversationId ? undefined : draftConversationWorkspaceRoot.trim() || undefined,
       });
 
       syncConversationState(result.conversation, {
         replaceConversationId: nextConversationId.startsWith("temp-") ? nextConversationId : null,
       });
+      setDraftConversationWorkspaceRoot("");
       setConversationRuntimeStates((current) => ({
         ...current,
         [result.conversation.id]: createConversationRuntimeState("running"),
@@ -2598,6 +2649,7 @@ export default function App() {
   const showOverlayRightPane = rightPanePresentation === "overlay";
   const shouldRenderRightPaneContent = showRightPane || rightPaneMounted;
   const activeSidebarWidth = view === "settings" ? settingsSidebarWidth : sidebarWidth;
+  const workspaceTransitionKey = view === "settings" ? `settings:${settingsSection}` : view;
   const appShellStyle: AppShellStyle | undefined =
     canResizePanels
       ? {
@@ -2667,7 +2719,12 @@ export default function App() {
     );
   const activeConversationBusy =
     startingChatTurn || isConversationTurnActive(activeConversationRuntimeState?.status);
-  const activeConversationWorkspaceRoot = activeConversation?.workspaceRoot || config.workspaceRoot;
+
+  function resolveActiveConversationWorkspaceRoot() {
+    return activeConversation?.workspaceRoot || draftConversationWorkspaceRoot || config.workspaceRoot;
+  }
+
+  const activeConversationWorkspaceRoot = resolveActiveConversationWorkspaceRoot();
 
   async function openActiveWorkspaceFolder() {
     if (!activeConversationWorkspaceRoot.trim()) {
@@ -2682,17 +2739,57 @@ export default function App() {
     }
   }
 
+  async function selectConversationWorkspaceFolder() {
+    try {
+      const directoryPath = await workspaceClient.selectWorkspaceFolder();
+      if (!directoryPath) {
+        return;
+      }
+
+      if (!activeConversationId) {
+        setDraftConversationWorkspaceRoot(directoryPath);
+        setToast(`新对话工作区已设置为 ${workspaceLabel(directoryPath)}`);
+        return;
+      }
+
+      const conversation = await workspaceClient.updateConversationWorkspaceRoot({
+        conversationId: activeConversationId,
+        workspaceRoot: directoryPath,
+      });
+      syncConversationState(conversation);
+      setToast(`会话工作区已切换为 ${workspaceLabel(directoryPath)}`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "设置会话工作区失败");
+    }
+  }
+
   function renderWorkspaceFolderButton() {
+    const workspaceRoot = resolveActiveConversationWorkspaceRoot();
+    const workspaceName = conversationWorkspaceLabel(workspaceRoot, activeConversation?.id ?? activeConversationId);
+
     return (
-      <button
-        aria-label="打开当前工作目录"
-        className="right-pane-toggle workspace-folder-button"
-        onClick={() => void openActiveWorkspaceFolder()}
-        title="打开当前工作目录"
-        type="button"
-      >
-        <FolderOpen size={17} />
-      </button>
+      <div className="conversation-workspace-control" title={workspaceRoot || "未选择工作区"}>
+        <button
+          aria-label="设置当前会话工作区"
+          className="right-pane-toggle workspace-folder-button"
+          onClick={() => void selectConversationWorkspaceFolder()}
+          title="设置当前会话工作区"
+          type="button"
+        >
+          <FolderPlus size={17} />
+        </button>
+        <span className="conversation-workspace-label">{workspaceName}</span>
+        <button
+          aria-label="打开当前工作目录"
+          className="right-pane-toggle workspace-folder-button"
+          disabled={!workspaceRoot.trim()}
+          onClick={() => void openActiveWorkspaceFolder()}
+          title="打开当前工作目录"
+          type="button"
+        >
+          <FolderOpen size={17} />
+        </button>
+      </div>
     );
   }
 
@@ -2837,7 +2934,6 @@ export default function App() {
           onToggleKnowledgeBase={toggleKnowledgeBaseSelection}
           runtimeState={activeConversationRuntimeState}
           workspaceFolderControl={renderWorkspaceFolderButton()}
-          rightPaneControl={renderRightPaneToggleButton("in-thread")}
           onVoiceInput={toggleVoiceInput}
           voiceInputState={voiceInputState}
           voiceInputSupported={voiceInputSupported}
@@ -3022,7 +3118,9 @@ export default function App() {
         ) : null}
 
         <main className="workspace">
-          {renderMainView()}
+          <div className="workspace-view-transition" key={workspaceTransitionKey}>
+            {renderMainView()}
+          </div>
         </main>
 
         {showInlineRightPane ? (
@@ -3126,6 +3224,12 @@ export default function App() {
                 />
               </Suspense>
             ) : null}
+          </div>
+        ) : null}
+
+        {view === "chat" ? (
+          <div className="chat-fixed-right-pane-control">
+            {renderRightPaneToggleButton("in-thread")}
           </div>
         ) : null}
       </div>

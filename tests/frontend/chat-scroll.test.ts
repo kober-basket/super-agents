@@ -129,6 +129,38 @@ test("message list bypasses smooth scrolling when pinning to streaming output", 
   assert.equal(target.style.scrollBehavior, "smooth");
 });
 
+test("message list preserves CSS smooth scrolling for conversation switches", () => {
+  let assignedScrollBehavior = "";
+  let scrollToOptions: ScrollToOptions | null = null;
+  const target = {
+    scrollHeight: 1_200,
+    style: {
+      scrollBehavior: "smooth",
+    },
+    currentScrollTop: 0,
+    get scrollTop() {
+      return this.currentScrollTop;
+    },
+    set scrollTop(value: number) {
+      assignedScrollBehavior = this.style.scrollBehavior;
+      this.currentScrollTop = value;
+    },
+    scrollTo(options: ScrollToOptions) {
+      scrollToOptions = options;
+    },
+  };
+
+  (scrollMessageListToBottom as (
+    target: Parameters<typeof scrollMessageListToBottom>[0],
+    options?: { behavior?: ScrollBehavior },
+  ) => void)(target, { behavior: "auto" });
+
+  assert.deepEqual(scrollToOptions, { top: 1_200, behavior: "auto" });
+  assert.equal(assignedScrollBehavior, "");
+  assert.equal(target.scrollTop, 0);
+  assert.equal(target.style.scrollBehavior, "smooth");
+});
+
 test("message list releases auto-scroll as soon as the user wheels upward", () => {
   assert.equal(shouldReleaseAutoScrollOnWheel(-1), true);
   assert.equal(shouldReleaseAutoScrollOnWheel(0), false);

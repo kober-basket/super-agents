@@ -12,6 +12,8 @@ export const workspaceClient = {
   sendChatMessage: (payload: Parameters<typeof desktopAgent.sendChatMessage>[0]) =>
     desktopAgent.sendChatMessage(payload),
   deleteConversation: (conversationId: string) => desktopAgent.deleteConversation(conversationId),
+  updateConversationWorkspaceRoot: (payload: Parameters<typeof desktopAgent.updateConversationWorkspaceRoot>[0]) =>
+    desktopAgent.updateConversationWorkspaceRoot(payload),
   exportConversation: (payload: Parameters<typeof desktopAgent.exportConversation>[0]) =>
     desktopAgent.exportConversation(payload),
   listKnowledgeBases: () => desktopAgent.listKnowledgeBases(),

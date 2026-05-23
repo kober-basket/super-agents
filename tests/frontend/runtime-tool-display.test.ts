@@ -42,6 +42,14 @@ test("runtime tool display uses bash descriptions before commands", () => {
   assert.equal(display.command, "npm run test:electron");
 });
 
+test("runtime tool display summarizes skill calls by loaded skill name", () => {
+  const display = getRuntimeToolDisplay(toolCall({ name: "stock-expert" }, { title: "skill" }));
+
+  assert.equal(display.title, "skill");
+  assert.equal(display.detail, "加载 stock-expert 技能");
+  assert.equal(display.isKnownTool, true);
+});
+
 test("runtime tool display extracts edit diffs from tool input", () => {
   const diffs = buildRuntimeToolDiffs(
     toolCall(

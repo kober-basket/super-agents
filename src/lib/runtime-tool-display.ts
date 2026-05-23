@@ -22,6 +22,7 @@ const WRITE_TOOLS = new Set(["write", "workspace_write_file"]);
 const EDIT_TOOLS = new Set(["edit", "multi_edit", "apply_patch"]);
 const WEB_TOOLS = new Set(["web_fetch", "web_search"]);
 const TODO_TOOLS = new Set(["todo_read", "todo_write"]);
+const SKILL_TOOLS = new Set(["skill", "load_skill", "use_skill"]);
 const MAX_DISPLAY_TEXT = 40_000;
 
 function normalizeToolName(value: string) {
@@ -79,6 +80,9 @@ function inferKind(toolName: string): ChatToolKind {
     return "fetch";
   }
   if (TODO_TOOLS.has(toolName)) {
+    return "think";
+  }
+  if (SKILL_TOOLS.has(toolName)) {
     return "think";
   }
 
@@ -158,6 +162,9 @@ export function getRuntimeToolDisplay(
     detail = items > 0 ? `${items} 个任务` : "更新任务";
   } else if (toolName === "todo_read") {
     detail = "读取任务";
+  } else if (SKILL_TOOLS.has(toolName)) {
+    const skillName = stringField(record, "name");
+    detail = skillName ? `加载 ${skillName} 技能` : "加载技能";
   } else {
     detail = summarizeUnknownTool(toolCall);
     isKnownTool = false;

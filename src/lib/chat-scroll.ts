@@ -10,6 +10,7 @@ export interface MessageListScrollTarget {
   style?: {
     scrollBehavior: string;
   };
+  scrollTo?: (options: ScrollToOptions) => void;
 }
 
 export interface MessageListScrollRevisionInput {
@@ -63,7 +64,24 @@ export function buildMessageListScrollRevision(options: MessageListScrollRevisio
   ].join(":");
 }
 
-export function scrollMessageListToBottom(target: MessageListScrollTarget) {
+export function scrollMessageListToBottom(
+  target: MessageListScrollTarget,
+  options: { behavior?: ScrollBehavior | "instant" } = {},
+) {
+  const behavior = options.behavior ?? "instant";
+  if (behavior !== "instant") {
+    if (target.scrollTo) {
+      target.scrollTo({
+        top: target.scrollHeight,
+        behavior,
+      });
+      return;
+    }
+
+    target.scrollTop = target.scrollHeight;
+    return;
+  }
+
   if (!target.style) {
     target.scrollTop = target.scrollHeight;
     return;

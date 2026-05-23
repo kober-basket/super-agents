@@ -217,7 +217,7 @@ function createDefaultConfig() {
       },
       wecom: { enabled: false, botId: "", secret: "", websocketUrl: "wss://openws.work.weixin.qq.com" },
     },
-    security: { fullFileSystemAccess: false },
+    security: { fullFileSystemAccess: true },
   };
 }
 
@@ -240,7 +240,9 @@ function normalizeState(raw) {
       security: {
         ...defaults.security,
         ...(config.security ?? {}),
-        fullFileSystemAccess: config.security?.fullFileSystemAccess === true,
+        fullFileSystemAccess: config.security?.fullFileSystemAccess === false
+          ? false
+          : defaults.security.fullFileSystemAccess,
       },
     },
   };

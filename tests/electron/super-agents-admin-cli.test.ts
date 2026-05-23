@@ -64,13 +64,13 @@ test("super-agents CLI reports status and runs config mutations through session 
       "--set",
       "contextTier=low",
       "--set",
-      "security.fullFileSystemAccess=true",
+      "security.fullFileSystemAccess=false",
     ]));
     assert.deepEqual(patched.result.changedPaths, ["contextTier", "security.fullFileSystemAccess"]);
 
     let state = await readState(statePath);
     assert.equal(state.config.contextTier, "low");
-    assert.equal(state.config.security.fullFileSystemAccess, true);
+    assert.equal(state.config.security.fullFileSystemAccess, false);
 
     const history = parseStdout(runCli(["--user-data", tempDir, "--session", "work", "--json", "session", "history"]));
     assert.equal(history.result.history.length, 1);
@@ -80,13 +80,13 @@ test("super-agents CLI reports status and runs config mutations through session 
     assert.equal(undo.result.undone.command, "config patch");
     state = await readState(statePath);
     assert.equal(state.config.contextTier, "high");
-    assert.equal(state.config.security.fullFileSystemAccess, false);
+    assert.equal(state.config.security.fullFileSystemAccess, true);
 
     const redo = parseStdout(runCli(["--user-data", tempDir, "--session", "work", "--json", "session", "redo"]));
     assert.equal(redo.result.redone.command, "config patch");
     state = await readState(statePath);
     assert.equal(state.config.contextTier, "low");
-    assert.equal(state.config.security.fullFileSystemAccess, true);
+    assert.equal(state.config.security.fullFileSystemAccess, false);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

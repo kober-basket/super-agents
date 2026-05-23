@@ -38,7 +38,7 @@ const EMPTY_CONFIG: AppConfig = {
     chunkOverlap: 160,
   },
   security: {
-    fullFileSystemAccess: false,
+    fullFileSystemAccess: true,
   },
   remoteControl: {
     dingtalk: {

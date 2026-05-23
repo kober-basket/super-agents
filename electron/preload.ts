@@ -75,6 +75,8 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:send-chat-message", payload) as Promise<ChatSendResult>,
   deleteConversation: (conversationId: string) =>
     ipcRenderer.invoke("desktop:delete-conversation", conversationId) as Promise<ChatConversationListPayload>,
+  updateConversationWorkspaceRoot: (payload: { conversationId: string; workspaceRoot: string; }) =>
+    ipcRenderer.invoke("desktop:update-conversation-workspace-root", payload) as Promise<ChatConversation>,
   exportConversation: (payload: ChatConversationExportInput) =>
     ipcRenderer.invoke("desktop:export-conversation", payload) as Promise<ChatConversationExportResult>,
   writeClipboardText: (text: string) => {

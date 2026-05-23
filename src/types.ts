@@ -1000,6 +1000,7 @@ export interface ChatSendInput {
   content: string;
   attachments?: FileDropEntry[];
   selectedKnowledgeBaseIds?: string[];
+  workspaceRoot?: string;
 }
 
 export interface ChatSendResult {

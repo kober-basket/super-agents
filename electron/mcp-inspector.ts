@@ -350,6 +350,10 @@ async function runInstaller(command: string, args: string[], cwd: string) {
 }
 
 function getGeneratedConfigDir() {
+  const explicitRoot = process.env.SUPER_AGENTS_GENERATED_RUNTIME_ROOT?.trim();
+  if (explicitRoot) {
+    return explicitRoot;
+  }
   const appDataRoot = process.env.APPDATA || path.join(os.homedir(), ".config");
   return resolveGeneratedSupportDir(appDataRoot);
 }

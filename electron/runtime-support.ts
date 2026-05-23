@@ -5,6 +5,7 @@ type EnvRecord = Record<string, string | undefined>;
 
 export interface RuntimeSupportOptions {
   runtimeRoot?: string;
+  generatedRuntimeRoot?: string;
   platform?: NodeJS.Platform;
   arch?: string;
 }
@@ -36,6 +37,12 @@ export function getRuntimeSupportRoot(options: RuntimeSupportOptions = {}) {
   return path.resolve(process.cwd(), "vendor", "runtime");
 }
 
+export function getGeneratedRuntimeSupportRoot(options: RuntimeSupportOptions = {}) {
+  const explicitRoot =
+    options.generatedRuntimeRoot?.trim() || process.env.SUPER_AGENTS_GENERATED_RUNTIME_ROOT?.trim();
+  return explicitRoot ? path.resolve(explicitRoot) : "";
+}
+
 async function isDirectory(directoryPath: string) {
   try {
     return (await stat(directoryPath)).isDirectory();
@@ -55,9 +62,21 @@ function runtimeBinCandidates(runtimeRoot: string, options: RuntimeSupportOption
   ];
 }
 
+function generatedRuntimeBinCandidates(runtimeRoot: string, options: RuntimeSupportOptions = {}) {
+  const platformRoot = path.join(runtimeRoot, runtimePlatformKey(options));
+  return [
+    path.join(platformRoot, "bin"),
+    path.join(runtimeRoot, "common", "bin"),
+  ];
+}
+
 export async function getRuntimeSupportBinDirs(options: RuntimeSupportOptions = {}) {
   const runtimeRoot = getRuntimeSupportRoot(options);
-  const candidates = runtimeBinCandidates(runtimeRoot, options);
+  const generatedRuntimeRoot = getGeneratedRuntimeSupportRoot(options);
+  const candidates = [
+    ...(generatedRuntimeRoot ? generatedRuntimeBinCandidates(generatedRuntimeRoot, options) : []),
+    ...runtimeBinCandidates(runtimeRoot, options),
+  ];
   const existing: string[] = [];
   for (const candidate of candidates) {
     if (await isDirectory(candidate)) {
@@ -110,6 +129,10 @@ export async function createRuntimeProcessEnv(
   }
   removeDuplicateWindowsPathKeys(env, pathKey, platform);
   env.SUPER_AGENTS_RUNTIME_ROOT = getRuntimeSupportRoot(options);
+  const generatedRuntimeRoot = getGeneratedRuntimeSupportRoot(options);
+  if (generatedRuntimeRoot) {
+    env.SUPER_AGENTS_GENERATED_RUNTIME_ROOT = generatedRuntimeRoot;
+  }
   return compactEnv(env);
 }
 

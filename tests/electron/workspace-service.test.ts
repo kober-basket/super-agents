@@ -317,14 +317,14 @@ test("audio transcription tries the next speech provider after a connection fail
   }
 });
 
-test("workspace service keeps full filesystem access disabled by default", async () => {
+test("workspace service keeps full filesystem access enabled by default", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
   const statePath = path.join(tempDir, "data", "workspace.json");
   const service = new WorkspaceService(statePath);
 
   try {
     const bootstrap = await service.bootstrap();
-    assert.equal(bootstrap.config.security.fullFileSystemAccess, false);
+    assert.equal(bootstrap.config.security.fullFileSystemAccess, true);
   } finally {
     await service.shutdown();
     await rm(tempDir, { recursive: true, force: true });
@@ -484,7 +484,7 @@ test("workspace service serializes concurrent bootstrap skill syncs", async () =
   }
 });
 
-test("workspace service persists full filesystem access setting", async () => {
+test("workspace service persists disabled full filesystem access setting", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
   const statePath = path.join(tempDir, "data", "workspace.json");
   const service = new WorkspaceService(statePath);
@@ -492,13 +492,13 @@ test("workspace service persists full filesystem access setting", async () => {
   try {
     await service.updateConfig({
       security: {
-        fullFileSystemAccess: true,
+        fullFileSystemAccess: false,
       },
     });
 
     const nextService = new WorkspaceService(statePath);
     const bootstrap = await nextService.bootstrap();
-    assert.equal(bootstrap.config.security.fullFileSystemAccess, true);
+    assert.equal(bootstrap.config.security.fullFileSystemAccess, false);
     await nextService.shutdown();
   } finally {
     await service.shutdown();

@@ -15,6 +15,7 @@
 - `electron/browser-automation-service.ts`：内置浏览器 webview 的 agent 自动化服务，负责页面注册、可访问快照、交互和截图。
 - `electron/mail/`：本地邮件账号、授权、凭据存储和 OAuth/API/IMAP/SMTP 辅助模块。
 - `electron/agent-core/openai/`：OpenAI-compatible 网关的消息映射、SSE 解析等 provider 辅助模块。
+- `electron/cli-shims.ts`：把随应用打包的 `super-agents` CLI 复制到用户数据 runtime-support，并生成 agent shell 可直接调用的命令 shim。
 - `electron/tool-catalog.ts`：内置工具与 MCP 工具汇总成工作区工具目录，并维护内置工具分类元数据。
 - `electron/memory-service.ts`：本地长期记忆的结构化存储、搜索和 prompt context 构建。
 - `electron/builtin-skills/`：随应用打包的内置技能。
@@ -106,7 +107,7 @@ npm run preview
 - MCP 是外部能力入口，内置工具是本地基础能力；两者在 UI 中统一展示，但实现边界不要混淆。
 - 内置浏览器自动化要操控用户可见的右侧 Browser webview；`main` 进程通过 `did-attach-webview` 注册页面，agent 交互前应优先使用 `browser_snapshot` 获取 fresh uid，console/network 诊断通过同一服务采集并保持工具结果可截断。
 - 邮件能力通过 Settings > Mail 或会话内 `mail_auth` 私密授权表单配置账号；凭据存放在应用 userData 下的邮件凭据存储中，不进入 `AppConfig`、前端 bootstrap 快照或模型上下文。读邮件使用 `mail`（OAuth 账号走 Gmail/Microsoft API，授权码账号走 IMAP），写草稿和发送分别使用 `mail_draft`、`mail_send` 并保持审批边界。
-- Agent shell、终端命令和本地 MCP 启动都通过 `electron/runtime-support.ts` 注入应用私有 runtime PATH。不要直接在各调用点拼 PATH；新增子进程入口时复用 `createRuntimeProcessEnv()`。
+- Agent shell、终端命令和本地 MCP 启动都通过 `electron/runtime-support.ts` 注入应用私有 runtime PATH。不要直接在各调用点拼 PATH；新增子进程入口时复用 `createRuntimeProcessEnv()`。应用启动时会把内置 `super-agents` / `super-agents-admin` CLI 复制到用户数据 `runtime-support` 并生成 PATH shim，agent 管理应用自身时应优先调用这些内置命令，不要依赖源码仓库绝对路径。
 
 新增或调整 agent 能力时，优先补齐对应测试：
 

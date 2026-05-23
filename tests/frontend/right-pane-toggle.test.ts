@@ -17,11 +17,20 @@ test("right pane toggle does not render a numeric tab counter", () => {
   assert.doesNotMatch(css, /\.right-pane-toggle\s+span\s*{/);
 });
 
-test("new chat home renders a fixed right pane toggle inside the chat workspace", () => {
+test("chat view renders a fixed right pane toggle from the app shell", () => {
+  const appSource = readSource("src/App.tsx");
   const chatWorkspaceSource = readSource("src/features/chat/ChatWorkspace.tsx");
   const css = readSource("src/styles.css");
+  const rightWorkspaceSlotIndex = appSource.indexOf('"right-workspace-slot"');
+  const fixedToggleIndex = appSource.indexOf('<div className="chat-fixed-right-pane-control">');
 
-  assert.match(chatWorkspaceSource, /chat-fixed-right-pane-control/);
+  assert.ok(rightWorkspaceSlotIndex >= 0);
+  assert.ok(fixedToggleIndex > rightWorkspaceSlotIndex);
+  assert.match(
+    appSource,
+    /<div className="chat-fixed-right-pane-control">\s*\{renderRightPaneToggleButton\("in-thread"\)\}\s*<\/div>/s,
+  );
+  assert.doesNotMatch(chatWorkspaceSource, /rightPaneControl/);
   assert.match(css, /\.chat-fixed-right-pane-control\s*{/);
 });
 
@@ -45,10 +54,8 @@ test("workspace folder follows chat area while top controls stay on one row", ()
     chatWorkspaceSource,
     /<\/div>\s*\{isHome && workspaceFolderControl \? \(\s*<div className="chat-home-folder-control">/s,
   );
-  assert.match(
-    chatWorkspaceSource,
-    /<div className="chat-fixed-right-pane-control">\s*\{rightPaneControl\}\s*<\/div>/s,
-  );
+  assert.doesNotMatch(appSource, /rightPaneControl=\{renderRightPaneToggleButton/);
+  assert.doesNotMatch(chatWorkspaceSource, /rightPaneControl/);
   assert.doesNotMatch(chatWorkspaceSource, /chat-fixed-folder-control/);
   assert.doesNotMatch(chatWorkspaceSource, /chat-fixed-right-controls/);
   assert.match(

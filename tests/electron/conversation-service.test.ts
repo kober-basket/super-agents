@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -133,6 +133,69 @@ test("conversation service creates a persisted workspace directory for new conve
 
     const loaded = await service.getConversation(started.conversation.id);
     assert.equal(loaded.workspaceRoot, workspaceRoot);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("conversation service uses a requested workspace directory for new conversations", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-conversations-"));
+  const service = new ConversationService(path.join(tempDir, "data", "app.db"));
+  const selectedWorkspace = path.join(tempDir, "selected-workspace");
+
+  await mkdir(selectedWorkspace, { recursive: true });
+  await service.initialize();
+
+  try {
+    const started = await service.startTurn(
+      {
+        content: "Start this conversation in the selected project",
+        workspaceRoot: selectedWorkspace,
+      },
+      { agentCore: "native" },
+    );
+
+    assert.equal(started.conversation.workspaceRoot, selectedWorkspace);
+
+    const listed = await service.listConversations();
+    assert.equal(listed.conversations[0]?.workspaceRoot, selectedWorkspace);
+
+    const loaded = await service.getConversation(started.conversation.id);
+    assert.equal(loaded.workspaceRoot, selectedWorkspace);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("conversation service updates the workspace directory for existing conversations", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-conversations-"));
+  const service = new ConversationService(path.join(tempDir, "data", "app.db"));
+  const selectedWorkspace = path.join(tempDir, "existing-workspace");
+
+  await mkdir(selectedWorkspace, { recursive: true });
+  await service.initialize();
+
+  try {
+    const started = await service.startTurn(
+      {
+        content: "Start with the generated workspace",
+      },
+      { agentCore: "native" },
+    );
+
+    const updated = await service.updateConversationWorkspaceRoot(started.conversation.id, selectedWorkspace);
+
+    assert.equal(updated.workspaceRoot, selectedWorkspace);
+    assert.equal(updated.updatedAt, started.conversation.updatedAt);
+    assert.equal(updated.lastMessageAt, started.conversation.lastMessageAt);
+
+    const listed = await service.listConversations();
+    assert.equal(listed.conversations[0]?.workspaceRoot, selectedWorkspace);
+
+    const loaded = await service.getConversation(started.conversation.id);
+    assert.equal(loaded.workspaceRoot, selectedWorkspace);
   } finally {
     await service.shutdown();
     await rm(tempDir, { recursive: true, force: true });
