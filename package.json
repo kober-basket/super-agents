@@ -19,7 +19,13 @@
     "test:electron": "tsc -p tsconfig.test.json && node -e \"const { spawnSync } = require('node:child_process'); const result = spawnSync(process.execPath, ['--test'], { cwd: '.test-dist', stdio: 'inherit' }); process.exit(result.status ?? 1);\"",
     "package": "npm run build && electron-builder --dir",
     "package:runtime": "npm run runtime:check && npm run build && electron-builder",
+    "package:runtime:win": "npm run runtime:check:win && npm run build && electron-builder --win --x64 && electron-builder --win --arm64",
+    "package:runtime:win:x64": "npm run runtime:check:win:x64 && npm run build && electron-builder --win --x64",
+    "package:runtime:win:arm64": "npm run runtime:check:win:arm64 && npm run build && electron-builder --win --arm64",
     "runtime:check": "node scripts/check-runtime.mjs",
+    "runtime:check:win": "npm run runtime:check:win:x64 && npm run runtime:check:win:arm64",
+    "runtime:check:win:x64": "cross-env SUPER_AGENTS_RUNTIME_PLATFORM=win32 SUPER_AGENTS_RUNTIME_ARCH=x64 node scripts/check-runtime.mjs",
+    "runtime:check:win:arm64": "cross-env SUPER_AGENTS_RUNTIME_PLATFORM=win32 SUPER_AGENTS_RUNTIME_ARCH=arm64 node scripts/check-runtime.mjs",
     "runtime:install": "node scripts/install-runtime.mjs",
     "cli": "node scripts/super-agents.mjs",
     "admin": "node scripts/super-agents-admin.mjs",
@@ -88,17 +94,19 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "node_modules/node-pty/**"
+      "node_modules/node-pty/**",
+      "electron/builtin-skills/**"
     ],
     "npmRebuild": false,
     "win": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "target": [
         "nsis"
       ],
       "extraResources": [
         {
-          "from": "vendor/runtime/win32-x64",
-          "to": "runtime/win32-x64",
+          "from": "vendor/runtime/win32-${arch}",
+          "to": "runtime/win32-${arch}",
           "filter": [
             "**/*"
           ]
@@ -106,6 +114,7 @@
       ]
     },
     "mac": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "target": [
         "dmg"
       ],

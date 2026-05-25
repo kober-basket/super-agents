@@ -24,6 +24,21 @@ vendor/runtime/
       python.exe
       python*.zip
       DLLs/...
+  win32-arm64/
+    bin/
+      python3.cmd
+      uv.exe
+      uvx.exe
+      uvw.exe
+    node/
+      node.exe
+      npm.cmd
+      npx.cmd
+      node_modules/npm/...
+    python/
+      python.exe
+      python*.zip
+      DLLs/...
   darwin-arm64/
     bin/
       uv
@@ -45,3 +60,5 @@ vendor/runtime/
 Set `SUPER_AGENTS_RUNTIME_ROOT` to test another runtime directory locally.
 Run `npm run runtime:install` after cloning or when refreshing runtime binaries.
 Then run `npm run runtime:check` before `npm run package:runtime`.
+For Windows release builds, run `npm run runtime:check:win` before
+`npm run package:runtime:win` to verify and package both x64 and arm64.

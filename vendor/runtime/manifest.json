@@ -48,6 +48,19 @@
       "executablePaths": ["node.exe", "npm.cmd", "npx.cmd"]
     },
     {
+      "id": "node-win32-arm64",
+      "kind": "node",
+      "platform": "win32",
+      "arch": "arm64",
+      "version": "24.15.0",
+      "url": "https://nodejs.org/dist/v24.15.0/node-v24.15.0-win-arm64.zip",
+      "sha256": "c9eb7402eda26e2ba7e44b6727fc85a8de56c5095b1f71ebd3062892211aa116",
+      "archive": "zip",
+      "stripComponents": 1,
+      "destination": "win32-arm64/node",
+      "executablePaths": ["node.exe", "npm.cmd", "npx.cmd"]
+    },
+    {
       "id": "python-win32-x64",
       "kind": "python",
       "platform": "win32",
@@ -58,6 +71,19 @@
       "archive": "zip",
       "stripComponents": 0,
       "destination": "win32-x64/python",
+      "executablePaths": ["python.exe", "pythonw.exe"]
+    },
+    {
+      "id": "python-win32-arm64",
+      "kind": "python",
+      "platform": "win32",
+      "arch": "arm64",
+      "version": "3.14.5",
+      "url": "https://www.python.org/ftp/python/3.14.5/python-3.14.5-embed-arm64.zip",
+      "sha256": "0c078f7646c3b13c2dce0bb690994e431ed5269788803deffb459ee9e78b684e",
+      "archive": "zip",
+      "stripComponents": 0,
+      "destination": "win32-arm64/python",
       "executablePaths": ["python.exe", "pythonw.exe"]
     }
   ]

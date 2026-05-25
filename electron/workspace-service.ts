@@ -778,7 +778,11 @@ function stripSkillFrontmatter(content: string, skillName?: string) {
 }
 
 function resolveBuiltinSkillsRoot() {
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
   const candidates = [
+    resourcesPath
+      ? path.join(resourcesPath, "app.asar.unpacked", "electron", "builtin-skills")
+      : "",
     path.resolve(process.cwd(), "electron", "builtin-skills"),
     path.resolve(process.cwd(), "..", "electron", "builtin-skills"),
     path.resolve(__dirname, "builtin-skills"),

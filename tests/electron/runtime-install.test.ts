@@ -30,7 +30,14 @@ test("runtime manifest pins Electron-aligned Node and Windows embedded Python", 
   assert.equal(manifest.python.version, "3.14.5");
 
   const assetIds = manifest.assets.map((asset) => asset.id).sort();
-  assert.deepEqual(assetIds, ["node-darwin-arm64", "node-darwin-x64", "node-win32-x64", "python-win32-x64"]);
+  assert.deepEqual(assetIds, [
+    "node-darwin-arm64",
+    "node-darwin-x64",
+    "node-win32-arm64",
+    "node-win32-x64",
+    "python-win32-arm64",
+    "python-win32-x64",
+  ]);
 
   for (const asset of manifest.assets) {
     assert.match(asset.sha256, /^[a-f0-9]{64}$/);
