@@ -12,11 +12,13 @@ import type {
   ToolDefinition,
   ToolApprovalDecision,
   ToolApprovalRequest,
+  ToolOutputDelta,
   ToolResult,
 } from "./types";
 
 const MAX_TOOL_RESULT_CHARS = 30_000;
 const MAX_TOOL_ERROR_CHARS = 2_000;
+const MAX_FALLBACK_TOOL_RESULT_CHARS = 800;
 const NO_ACTION_CONTINUATION_INSTRUCTION =
   "Your previous response contained only hidden reasoning and no visible answer or tool call. Continue now: if the task needs evidence, call the available tools; otherwise provide the user-facing answer. Do not respond with hidden reasoning only.";
 const REQUIRED_TOOL_ACTION_CONTINUATION_INSTRUCTION =
@@ -53,6 +55,21 @@ interface PendingDuplicateToolResult {
 
 function createMaxTurnsReachedMessage(maxTurns: number) {
   return `已达到本轮最大执行轮次（${maxTurns}）。上面的工具结果已经保留；你可以继续发送消息让我接着执行或基于现有结果整理结论。`;
+}
+
+function createToolCompletionFallbackMessage(lastToolResultContent = "") {
+  const resultPreview = lastToolResultContent.trim()
+    ? `最后一个工具结果：\n${truncateText(lastToolResultContent.trim(), MAX_FALLBACK_TOOL_RESULT_CHARS).text}`
+    : "";
+  return [
+    "工具已经执行完成，但模型连续没有生成最终总结。",
+    resultPreview,
+    "上面的完整执行过程已经保留；你可以继续发送消息让我基于现有结果整理结论。",
+  ].filter(Boolean).join("\n\n");
+}
+
+function createNoActionFallbackMessage() {
+  return "模型连续没有生成可见回复，也没有继续调用工具。你可以换个说法再试，或继续发送消息让我接着处理。";
 }
 
 function truncateText(text: string, maxChars: number) {
@@ -450,6 +467,7 @@ export class AgentCore {
     prepared: PreparedToolExecution,
     input: SendTurnInput,
     agentId: string,
+    emitOutput?: (output: ToolOutputDelta) => void,
   ): Promise<ToolResult> {
     try {
       return normalizeToolResult(
@@ -464,6 +482,7 @@ export class AgentCore {
               ? await this.options.approvalHandler(request)
               : { type: "deny", reason: "No approval handler is configured." };
           },
+          emitOutput,
         }),
       );
     } catch (error) {
@@ -504,16 +523,60 @@ export class AgentCore {
         };
       }
 
+      const outputEvents: AgentEvent[] = [];
+      let resolveOutputEvent: (() => void) | null = null;
+      const notifyOutputEvent = () => {
+        resolveOutputEvent?.();
+        resolveOutputEvent = null;
+      };
+
       const pending = batch.map((prepared) => ({
         prepared,
-        promise: this.executePreparedToolCall(prepared, input.turnInput, input.agentId).then((result) => ({
+        promise: this.executePreparedToolCall(
+          prepared,
+          input.turnInput,
+          input.agentId,
+          (output) => {
+            if (!output.text) {
+              return;
+            }
+            outputEvents.push({
+              type: "tool_call_output_delta",
+              sessionId: input.turnInput.sessionId,
+              agentId: input.agentId,
+              toolCall: prepared.toolCall,
+              stream: output.stream,
+              text: output.text,
+            });
+            notifyOutputEvent();
+          },
+        ).then((result) => ({
           prepared,
           result,
         })),
       }));
 
       while (pending.length > 0) {
-        const completed = await Promise.race(pending.map((item) => item.promise));
+        if (outputEvents.length > 0) {
+          yield outputEvents.shift()!;
+          continue;
+        }
+
+        const outputEventReady = new Promise<"output">((resolve) => {
+          resolveOutputEvent = () => resolve("output");
+        });
+        const completed = await Promise.race([
+          ...pending.map((item) => item.promise),
+          outputEventReady,
+        ]);
+        if (completed === "output") {
+          continue;
+        }
+
+        while (outputEvents.length > 0) {
+          yield outputEvents.shift()!;
+        }
+
         const index = pending.findIndex((item) => item.prepared === completed.prepared);
         if (index >= 0) {
           pending.splice(index, 1);
@@ -532,6 +595,10 @@ export class AgentCore {
           toolCall: completed.prepared.toolCall,
           result: completed.result,
         };
+      }
+
+      while (outputEvents.length > 0) {
+        yield outputEvents.shift()!;
       }
     }
   }
@@ -554,6 +621,7 @@ export class AgentCore {
     let stopReason = "max_turns";
     const completedToolResults = new Map<string, ToolResult>();
     let sawToolResultThisTurn = false;
+    let lastToolResultContent = "";
     let noActionRetries = 0;
     const toolCallIdsThisTurn = new Set<string>();
     let toolCallIdCollisionSequence = 0;
@@ -636,6 +704,16 @@ export class AgentCore {
         }
 
         if (event.type === "tool_call_delta") {
+          if (event.toolCallId) {
+            yield {
+              type: "tool_call_input_delta",
+              sessionId: input.sessionId,
+              agentId: agent.id,
+              toolCallId: event.toolCallId,
+              toolName: event.name,
+              inputJsonDelta: event.inputJsonDelta,
+            };
+          }
           continue;
         }
 
@@ -786,6 +864,9 @@ export class AgentCore {
         completedToolResults,
         toolMessageSlots,
       })) {
+        if (toolEvent.type === "tool_call_finished") {
+          lastToolResultContent = toolEvent.result.content;
+        }
         yield toolEvent;
       }
 
@@ -824,6 +905,7 @@ export class AgentCore {
       }
       session.messages.push(...pendingToolMessages);
       if (pendingToolMessages.length > 0) {
+        lastToolResultContent = pendingToolMessages.at(-1)?.content ?? lastToolResultContent;
         this.sessions.save(session);
         sawToolResultThisTurn = true;
       }
@@ -864,6 +946,19 @@ export class AgentCore {
         }
         if (sawToolResultThisTurn) {
           if (noActionRetries >= 2) {
+            const fallbackText = createToolCompletionFallbackMessage(lastToolResultContent);
+            session.messages.push({
+              role: "assistant",
+              content: fallbackText,
+              toolCalls: [],
+            });
+            this.sessions.save(session);
+            yield {
+              type: "message_delta",
+              sessionId: input.sessionId,
+              agentId: agent.id,
+              text: fallbackText,
+            };
             yield {
               type: "turn_finished",
               sessionId: input.sessionId,
@@ -888,6 +983,21 @@ export class AgentCore {
           });
           this.sessions.save(session);
           continue;
+        }
+        if (!assistantText.trim() && assistantToolCalls.length === 0 && noActionRetries >= 2) {
+          const fallbackText = createNoActionFallbackMessage();
+          session.messages.push({
+            role: "assistant",
+            content: fallbackText,
+            toolCalls: [],
+          });
+          this.sessions.save(session);
+          yield {
+            type: "message_delta",
+            sessionId: input.sessionId,
+            agentId: agent.id,
+            text: fallbackText,
+          };
         }
         yield {
           type: "turn_finished",

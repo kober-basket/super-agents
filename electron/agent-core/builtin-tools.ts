@@ -4,7 +4,7 @@ import path from "node:path";
 import { TextDecoder } from "node:util";
 
 import { ToolPermissionDeniedError } from "./types";
-import type { ToolContext, ToolDefinition } from "./types";
+import type { ToolContext, ToolDefinition, ToolOutputStream } from "./types";
 import { createBrowserToolDefinitions, type BrowserAutomationController } from "./builtin-tools/browser-tools";
 import { createInteractionToolDefinitions } from "./builtin-tools/interaction-tools";
 import { createMailToolDefinitions, type MailToolStore } from "./builtin-tools/mail-tools";
@@ -381,7 +381,24 @@ function isPotentiallyDestructiveCommand(command: string) {
   return /\brm\s+-[^\n;|&]*[rf][^\n;|&]*[rf]/i.test(command) || /\brmdir\s+\/[^\s]*/i.test(command);
 }
 
-async function runRg(args: string[], cwd: string) {
+function emitToolOutput(
+  context: Pick<ToolContext, "emitOutput"> | undefined,
+  text: string,
+  stream: ToolOutputStream = "info",
+) {
+  if (!text) {
+    return;
+  }
+  context?.emitOutput?.({ stream, text });
+}
+
+async function runRg(
+  args: string[],
+  cwd: string,
+  options: {
+    emitOutput?: (output: { stream: "stdout" | "stderr"; text: string }) => void;
+  } = {},
+) {
   const env = await createRuntimeProcessEnv();
   return await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
     const child = spawn("rg", args, {
@@ -393,10 +410,14 @@ async function runRg(args: string[], cwd: string) {
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      stdout += text;
+      options.emitOutput?.({ stream: "stdout", text });
     });
     child.stderr?.on("data", (chunk) => {
-      stderr += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      stderr += text;
+      options.emitOutput?.({ stream: "stderr", text });
     });
     child.once("error", reject);
     child.once("exit", (code) => resolve({ stdout, stderr, code }));
@@ -489,6 +510,7 @@ async function runNodeGlob(input: {
   external: boolean;
   pattern: string;
   maxResults: number;
+  emitOutput?: (output: { stream: "stdout"; text: string }) => void;
 }) {
   const matcher = globPatternToRegExp(input.pattern);
   const files = await walkFiles(input.searchRoot, MAX_NODE_SEARCH_FILES);
@@ -499,7 +521,9 @@ async function runNodeGlob(input: {
     if (!matcher.test(relativeToSearchRoot)) {
       continue;
     }
-    matches.push(input.external ? filePath : toPosixPath(path.relative(input.root, filePath)));
+    const match = input.external ? filePath : toPosixPath(path.relative(input.root, filePath));
+    matches.push(match);
+    input.emitOutput?.({ stream: "stdout", text: `${match}\n` });
     if (matches.length > input.maxResults) {
       break;
     }
@@ -525,6 +549,7 @@ async function runNodeGrep(input: {
   external: boolean;
   query: string;
   maxResults: number;
+  emitOutput?: (output: { stream: "stdout"; text: string }) => void;
 }) {
   const matcher = createSearchRegExp(input.query);
   const files = await walkFiles(input.searchRoot, MAX_NODE_SEARCH_FILES);
@@ -560,7 +585,9 @@ async function runNodeGrep(input: {
       if (columnIndex < 0) {
         continue;
       }
-      lines.push(`${displayPath}:${lineIndex + 1}:${columnIndex + 1}:${line}`);
+      const match = `${displayPath}:${lineIndex + 1}:${columnIndex + 1}:${line}`;
+      lines.push(match);
+      input.emitOutput?.({ stream: "stdout", text: `${match}\n` });
       if (lines.length >= input.maxResults) {
         return { lines, truncated: true };
       }
@@ -652,7 +679,13 @@ function decodeShellOutputBytes(buffer: Buffer) {
   }
 }
 
-async function runShellCommand(command: string, cwd: string, timeoutMs: number, maxOutputBytes: number) {
+async function runShellCommand(
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+  maxOutputBytes: number,
+  emitOutput?: (output: { stream: "stdout" | "stderr"; text: string }) => void,
+) {
   const env = await createRuntimeProcessEnv();
   return await new Promise<{
     stdout: string;
@@ -683,15 +716,20 @@ async function runShellCommand(command: string, cwd: string, timeoutMs: number, 
         return;
       }
       const target = stream === "stdout" ? stdoutChunks : stderrChunks;
+      let acceptedChunk = chunk;
       if (chunk.byteLength <= remainingBytes) {
         target.push(chunk);
         outputBytes += chunk.byteLength;
-        return;
+      } else {
+        acceptedChunk = chunk.subarray(0, remainingBytes);
+        target.push(acceptedChunk);
+        outputBytes += remainingBytes;
+        truncated = true;
       }
-
-      target.push(chunk.subarray(0, remainingBytes));
-      outputBytes += remainingBytes;
-      truncated = true;
+      const text = decodeShellOutputBytes(acceptedChunk);
+      if (text) {
+        emitOutput?.({ stream, text });
+      }
     };
 
     const timeout = setTimeout(() => {
@@ -716,6 +754,37 @@ async function runShellCommand(command: string, cwd: string, timeoutMs: number, 
       resolve({ stdout, stderr, exitCode, signal, timedOut, truncated });
     });
   });
+}
+
+async function readResponseBufferWithProgress(response: Response, context?: Pick<ToolContext, "emitOutput">) {
+  if (!response.body) {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    emitToolOutput(context, `Downloaded ${buffer.byteLength} bytes.\n`);
+    return buffer;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  let lastReportedBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    const chunk = Buffer.from(value);
+    chunks.push(chunk);
+    totalBytes += chunk.byteLength;
+
+    if (totalBytes - lastReportedBytes >= 64 * 1024) {
+      emitToolOutput(context, `Downloaded ${totalBytes} bytes...\n`);
+      lastReportedBytes = totalBytes;
+    }
+  }
+
+  emitToolOutput(context, `Downloaded ${totalBytes} bytes.\n`);
+  return Buffer.concat(chunks);
 }
 
 export interface BuiltinToolDefinitionOptions {
@@ -743,6 +812,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         additionalProperties: false,
       },
       execute: async (input, context) => {
+        emitToolOutput(context, `Reading ${stringInput(input, "path") || "."}\n`);
         const target = await resolveWorkspacePath(context, stringInput(input, "path"), { targetKind: "file" });
         const maxBytes = Math.min(Math.max(1_000, numberInput(input, "maxBytes", MAX_READ_BYTES)), MAX_READ_BYTES);
         const fileStat = await stat(target.resolved);
@@ -777,6 +847,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         additionalProperties: false,
       },
       execute: async (input, context) => {
+        emitToolOutput(context, `Listing ${stringInput(input, "path", ".") || "."}\n`);
         const target = await resolveWorkspacePath(context, stringInput(input, "path", "."), { targetKind: "directory" });
         const limit = Math.min(Math.max(1, numberInput(input, "limit", MAX_LIST_ENTRIES)), MAX_LIST_ENTRIES);
         const entries = await readdir(target.resolved, { withFileTypes: true });
@@ -819,11 +890,13 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         }
         const target = await resolveWorkspacePath(context, stringInput(input, "path", "."), { targetKind: "directory" });
         const maxResults = Math.min(Math.max(1, numberInput(input, "maxResults", MAX_SEARCH_RESULTS)), MAX_SEARCH_RESULTS);
+        emitToolOutput(context, `Searching ${target.relative} for ${query}\n`);
         let result;
         try {
           result = await runRg(
             ["--line-number", "--column", "--no-heading", "--color", "never", "--max-count", String(maxResults), query, target.relative],
             target.root,
+            { emitOutput: context.emitOutput },
           );
         } catch (error) {
           if (!isMissingExecutableError(error)) {
@@ -835,6 +908,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
             external: target.external,
             query,
             maxResults,
+            emitOutput: context.emitOutput,
           });
           return {
             content: fallback.lines.length > 0 ? fallback.lines.join("\n") : "No matches.",
@@ -882,11 +956,13 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         }
         const target = await resolveWorkspacePath(context, stringInput(input, "path", "."), { targetKind: "directory" });
         const maxResults = Math.min(Math.max(1, numberInput(input, "maxResults", MAX_GLOB_RESULTS)), MAX_GLOB_RESULTS);
+        emitToolOutput(context, `Finding files in ${target.relative} matching ${pattern}\n`);
         let result;
         try {
           result = await runRg(
             ["--files", "--color", "never", "--glob", pattern, target.relative],
             target.root,
+            { emitOutput: context.emitOutput },
           );
         } catch (error) {
           if (!isMissingExecutableError(error)) {
@@ -898,6 +974,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
             external: target.external,
             pattern,
             maxResults,
+            emitOutput: context.emitOutput,
           });
           return {
             content: fallback.matches.length > 0 ? fallback.matches.join("\n") : "No files found.",
@@ -941,6 +1018,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         additionalProperties: false,
       },
       execute: async (input, context) => {
+        emitToolOutput(context, `Writing ${stringInput(input, "path")}\n`);
         const target = await resolveWorkspacePath(context, stringInput(input, "path"), { targetKind: "file" });
         const content = stringInput(input, "content");
         const bytes = Buffer.byteLength(content, "utf8");
@@ -974,6 +1052,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         additionalProperties: false,
       },
       execute: async (input, context) => {
+        emitToolOutput(context, `Editing ${stringInput(input, "path")}\n`);
         const target = await resolveWorkspacePath(context, stringInput(input, "path"), { targetKind: "file" });
         const oldString = stringInput(input, "oldString");
         const newString = stringInput(input, "newString");
@@ -1037,6 +1116,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         additionalProperties: false,
       },
       execute: async (input, context) => {
+        emitToolOutput(context, `Editing ${stringInput(input, "path")}\n`);
         const target = await resolveWorkspacePath(context, stringInput(input, "path"), { targetKind: "file" });
         const edits = normalizeTextEdits(input);
         const fileStat = await stat(target.resolved);
@@ -1087,6 +1167,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
       execute: async (input, context) => {
         const patch = stringInput(input, "patch");
         const operations = parsePatch(patch);
+        emitToolOutput(context, `Applying patch (${operations.length} operation${operations.length === 1 ? "" : "s"})\n`);
         const changedPaths: string[] = [];
 
         for (const operation of operations) {
@@ -1177,7 +1258,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         required: ["query"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const query = stringInput(input, "query").trim();
         if (!query) {
           throw new Error('query is required. Call web_search with {"query":"search terms"}.');
@@ -1190,6 +1271,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         const timeoutMs = Math.min(Math.max(1_000, numberInput(input, "timeoutMs", DEFAULT_WEB_SEARCH_TIMEOUT_MS)), 60_000);
         const searchUrl = new URL("https://duckduckgo.com/html/");
         searchUrl.searchParams.set("q", query);
+        emitToolOutput(context, `Searching web for ${query}\n`);
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -1208,9 +1290,10 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
             throw new Error(`Search failed with HTTP ${response.status}.`);
           }
 
-          const buffer = Buffer.from(await response.arrayBuffer());
+          const buffer = await readResponseBufferWithProgress(response, context);
           const raw = buffer.subarray(0, MAX_WEB_SEARCH_BYTES).toString("utf8");
           const results = parseDuckDuckGoSearchResults(raw, limit);
+          emitToolOutput(context, `Parsed ${results.length} search result${results.length === 1 ? "" : "s"}.\n`);
           const resultText = results
             .map((result, index) =>
               [
@@ -1261,7 +1344,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         required: ["url"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const rawUrl = stringInput(input, "url").trim();
         if (!rawUrl) {
           throw new Error('url is required. Call web_fetch with {"url":"https://example.com"} or use web_search for queries.');
@@ -1280,13 +1363,15 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
         try {
+          emitToolOutput(context, `Fetching URL ${url.toString()}\n`);
           const response = await fetch(url, {
             signal: controller.signal,
             redirect: "follow",
             headers: { "user-agent": "super-agents/0.1" },
           });
           const contentType = response.headers.get("content-type") ?? "";
-          const buffer = Buffer.from(await response.arrayBuffer());
+          emitToolOutput(context, `Received HTTP ${response.status}${contentType ? ` (${contentType})` : ""}.\n`);
+          const buffer = await readResponseBufferWithProgress(response, context);
           if (!response.ok) {
             throw new Error(`Fetch failed with HTTP ${response.status}.`);
           }
@@ -1348,7 +1433,13 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         }
         const timeoutMs = Math.min(Math.max(1_000, numberInput(input, "timeoutMs", DEFAULT_SHELL_TIMEOUT_MS)), 120_000);
         const maxOutputBytes = Math.min(Math.max(1, numberInput(input, "maxOutputBytes", MAX_SHELL_OUTPUT_BYTES)), MAX_SHELL_OUTPUT_BYTES);
-        const result = await runShellCommand(command, target.resolved, timeoutMs, maxOutputBytes);
+        const result = await runShellCommand(
+          command,
+          target.resolved,
+          timeoutMs,
+          maxOutputBytes,
+          context.emitOutput,
+        );
         const output = [
           result.stdout,
           result.stderr ? `stderr:\n${result.stderr}` : "",

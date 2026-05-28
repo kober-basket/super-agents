@@ -133,7 +133,11 @@ export function buildRuntimeLiveRenderItems(
       continue;
     }
 
-    if (event.type === "tool_call_started" && event.toolCallId && toolCallIds.has(event.toolCallId)) {
+    if (
+      (event.type === "tool_call_started" || event.type === "tool_call_input_delta") &&
+      event.toolCallId &&
+      toolCallIds.has(event.toolCallId)
+    ) {
       if (
         renderItems.some(
           (item) => item.type === "tool" && item.toolCallId === event.toolCallId,

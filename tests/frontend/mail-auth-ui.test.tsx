@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type { DesktopApprovalRequest, MailProviderSetup } from "../../src/types";
+import type { MailAuthDesktopApprovalRequest, MailProviderSetup } from "../../src/types";
 
 const qqSetup: MailProviderSetup = {
   email: "owner@qq.com",
@@ -16,7 +16,7 @@ const qqSetup: MailProviderSetup = {
   helpText: "Use an app password or authorization code from QQ Mail settings.",
 };
 
-function mailAuthRequest(): DesktopApprovalRequest {
+function mailAuthRequest(): MailAuthDesktopApprovalRequest {
   return {
     approvalId: "approval-1",
     kind: "mail_auth",

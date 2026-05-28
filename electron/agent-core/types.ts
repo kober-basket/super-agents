@@ -45,6 +45,12 @@ export interface ToolCall {
 }
 
 export type ToolRisk = "read" | "write" | "network" | "shell" | "destructive";
+export type ToolOutputStream = "stdout" | "stderr" | "info";
+
+export interface ToolOutputDelta {
+  stream: ToolOutputStream;
+  text: string;
+}
 
 export interface ToolDefinition {
   name: string;
@@ -63,6 +69,7 @@ export interface ToolContext {
   fullFileSystemAccess?: boolean;
   toolCall?: ToolCall;
   requestApproval?: (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>;
+  emitOutput?: (output: ToolOutputDelta) => void;
 }
 
 export interface ToolResult {
@@ -112,7 +119,7 @@ export type ModelEvent =
   | { type: "status_delta"; text: string }
   | { type: "text_delta"; text: string }
   | { type: "usage"; usage: ChatModelTokenUsage }
-  | { type: "tool_call_delta"; toolCallId?: string; name?: string }
+  | { type: "tool_call_delta"; toolCallId?: string; name?: string; inputJsonDelta?: string }
   | { type: "tool_call"; toolCall: ToolCall }
   | { type: "done"; stopReason: string };
 
@@ -147,7 +154,23 @@ export type AgentEvent =
   | { type: "message_delta"; sessionId: string; agentId: string; text: string }
   | { type: "message_replace"; sessionId: string; agentId: string; text: string }
   | { type: "token_usage"; sessionId: string; agentId: string; usage: ChatModelTokenUsage }
+  | {
+      type: "tool_call_input_delta";
+      sessionId: string;
+      agentId: string;
+      toolCallId: string;
+      toolName?: string;
+      inputJsonDelta?: string;
+    }
   | { type: "tool_call_started"; sessionId: string; agentId: string; toolCall: ToolCall }
+  | {
+      type: "tool_call_output_delta";
+      sessionId: string;
+      agentId: string;
+      toolCall: ToolCall;
+      stream: ToolOutputStream;
+      text: string;
+    }
   | { type: "tool_call_finished"; sessionId: string; agentId: string; toolCall: ToolCall; result: ToolResult }
   | { type: "permission_denied"; sessionId: string; agentId: string; toolCall: ToolCall; reason: string }
   | { type: "permission_requested"; sessionId: string; agentId: string; toolCall: ToolCall; reason: string }

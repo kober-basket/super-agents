@@ -3,8 +3,9 @@ import { CheckCircle2, Eye, EyeOff, LoaderCircle, Mail, ShieldCheck, X } from "l
 
 import { workspaceClient } from "../../services/workspace-client";
 import type {
-  DesktopApprovalRequest,
   DesktopApprovalResponse,
+  MailAuthDesktopApprovalRequest,
+  MailAuthDesktopApprovalResponse,
   MailAccountSummary,
   MailProviderSetup,
   MailServerConfig,
@@ -20,7 +21,7 @@ interface ServerDraft {
 }
 
 interface MailAuthRequestCardProps {
-  request: DesktopApprovalRequest;
+  request: MailAuthDesktopApprovalRequest;
   onResolve: (response: DesktopApprovalResponse) => void | Promise<void>;
   onToast: (message: string) => void;
 }
@@ -54,7 +55,7 @@ function providerPlaceholder(provider?: string) {
   return "name@example.com";
 }
 
-function connectedMetadata(account: MailAccountSummary): DesktopApprovalResponse["decision"] {
+function connectedMetadata(account: MailAccountSummary): MailAuthDesktopApprovalResponse["decision"] {
   return {
     type: "allow",
     metadata: {

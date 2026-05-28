@@ -7,10 +7,12 @@
   CircleX,
   ChevronDown,
   Copy,
+  ListChecks,
   LoaderCircle,
   MoreHorizontal,
   Mic,
   Plus,
+  RefreshCw,
   Square,
   TerminalSquare,
   Wrench,
@@ -49,10 +51,14 @@ import { formatChatTokenUsageBadge } from "../../lib/token-cost";
 import { chooseFloatingTooltipPlacement, type FloatingTooltipPlacement } from "../../lib/tooltip-placement";
 import { shouldRenderRuntimeToolCard } from "../../lib/runtime-tool-visibility";
 import {
+  buildRuntimeTextDiffLines,
   buildRuntimeToolDiffs,
+  getRuntimeDiffLineNumberColumns,
   getRuntimeToolDisplay,
+  shouldRenderRuntimeToolCommandPreview,
   shouldShowRawToolPayload,
   type RuntimeToolDiff,
+  type RuntimeToolDiffLine,
 } from "../../lib/runtime-tool-display";
 import {
   buildRuntimeLiveRenderItems,
@@ -68,11 +74,19 @@ import {
   shouldShowRuntimeThinkingIndicator,
 } from "../../lib/runtime-timeline";
 import {
+  buildRuntimeTodoSnapshot,
+  getRuntimeTodoProgress,
+  shouldRenderRuntimeTodoPanel,
+  type RuntimeTodoSnapshot,
+} from "../../lib/runtime-todos";
+import {
   buildMessageListScrollRevision,
+  buildRuntimeStateScrollFingerprint,
   isScrollAtBottom,
   isScrollNearBottom,
   scrollMessageListToBottom,
   shouldAutoScrollMessageList,
+  shouldAutoScrollToolContent,
   shouldReleaseAutoScrollOnWheel,
 } from "../../lib/chat-scroll";
 import { copyTextToClipboard } from "./clipboard";
@@ -80,6 +94,7 @@ import { createComposerAttachmentsFromFiles } from "./attachment-files";
 import { buildConversationCopyMarkdown } from "./conversation-markdown";
 import { ComposerRichInput, type ComposerRichInputHandle } from "./ComposerRichInput";
 import { MailAuthRequestCard } from "./MailAuthRequestCard";
+import { QuestionRequestCard } from "./QuestionRequestCard";
 import { RichMarkdown } from "../shared/RichMarkdown";
 import type {
   ChatConversation,
@@ -92,6 +107,8 @@ import type {
   DesktopApprovalResponse,
   FileDropEntry,
   KnowledgeBaseSummary,
+  MailAuthDesktopApprovalRequest,
+  QuestionDesktopApprovalRequest,
   RuntimeModelOption,
   SkillConfig,
 } from "../../types";
@@ -135,6 +152,100 @@ interface ChatWorkspaceProps {
   onToast: (message: string) => void;
   approvalRequests: DesktopApprovalRequest[];
   onResolveApproval: (response: DesktopApprovalResponse) => void | Promise<void>;
+}
+
+function isMailAuthApprovalRequest(request: DesktopApprovalRequest): request is MailAuthDesktopApprovalRequest {
+  return request.kind === "mail_auth";
+}
+
+function isQuestionApprovalRequest(request: DesktopApprovalRequest): request is QuestionDesktopApprovalRequest {
+  return request.kind === "question";
+}
+
+function scrollMetricsForElement(element: HTMLElement) {
+  return {
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    scrollTop: element.scrollTop,
+  };
+}
+
+function usePinnedToolContentScroll<TElement extends HTMLElement>(
+  followKey: string,
+  enabled: boolean,
+) {
+  const ref = useRef<TElement | null>(null);
+  const pinnedToBottomRef = useRef(true);
+  const previousFollowKeyRef = useRef<string | null>(null);
+
+  const handleScroll = useCallback((event: UIEvent<TElement>) => {
+    pinnedToBottomRef.current = isScrollNearBottom(scrollMetricsForElement(event.currentTarget));
+  }, []);
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    const contentChanged = previousFollowKeyRef.current !== followKey;
+    previousFollowKeyRef.current = followKey;
+    if (
+      !enabled ||
+      !element ||
+      !shouldAutoScrollToolContent({
+        contentChanged,
+        wasPinnedToBottom: pinnedToBottomRef.current,
+      })
+    ) {
+      return undefined;
+    }
+
+    scrollMessageListToBottom(element);
+    const frame = window.requestAnimationFrame(() => scrollMessageListToBottom(element));
+    return () => window.cancelAnimationFrame(frame);
+  }, [enabled, followKey]);
+
+  return {
+    onScroll: handleScroll,
+    ref,
+  };
+}
+
+function AutoScrollPre({
+  children,
+  className,
+  enabled,
+  followKey,
+}: {
+  children: ReactNode;
+  className?: string;
+  enabled: boolean;
+  followKey: string;
+}) {
+  const scroll = usePinnedToolContentScroll<HTMLPreElement>(followKey, enabled);
+
+  return (
+    <pre className={className} data-native-wheel-scroll="true" onScroll={scroll.onScroll} ref={scroll.ref}>
+      {children}
+    </pre>
+  );
+}
+
+function AutoScrollDiv({
+  children,
+  className,
+  enabled,
+  followKey,
+}: {
+  children: ReactNode;
+  className?: string;
+  enabled: boolean;
+  followKey: string;
+}) {
+  const scroll = usePinnedToolContentScroll<HTMLDivElement>(followKey, enabled);
+
+  return (
+    <div className={className} data-native-wheel-scroll="true" onScroll={scroll.onScroll} ref={scroll.ref}>
+      {children}
+    </div>
+  );
 }
 
 function RuntimeTraceGroup({
@@ -264,6 +375,9 @@ function statusClassName(status?: ChatToolCall["status"]) {
   if (status === "failed") {
     return "error";
   }
+  if (status === "cancelled") {
+    return "cancelled";
+  }
   if (status === "pending" || status === "in_progress") {
     return "loading";
   }
@@ -276,6 +390,9 @@ function statusLabel(status?: ChatToolCall["status"]) {
   }
   if (status === "failed") {
     return "失败";
+  }
+  if (status === "cancelled") {
+    return "取消";
   }
   if (status === "pending") {
     return "待执行";
@@ -323,36 +440,24 @@ function visualCopyText(visual: NonNullable<ChatMessage["visuals"]>[number], ind
   return [`可视化：${title}`, JSON.stringify(visual.spec, null, 2)].join("\n");
 }
 
-function splitDiffLines(value: string) {
-  return value.split("\n");
+function diffPrefix(kind: RuntimeToolDiffLine["kind"]) {
+  if (kind === "added") return "+";
+  if (kind === "removed") return "-";
+  return " ";
 }
 
-function renderPrefixedDiffLines(text: string, prefix: "+" | "-", className: string) {
-  return splitDiffLines(text).map((line, index) => (
-    <span key={`${className}-${index}`} className={`activity-diff-line ${className}`}>
-      <span className="activity-diff-prefix">{prefix}</span>
-      <span>{line || " "}</span>
-    </span>
-  ));
-}
-
-function patchLineClassName(line: string) {
-  if (line.startsWith("***") || line.startsWith("@@")) {
-    return "meta";
-  }
-  if (line.startsWith("+")) {
-    return "added";
-  }
-  if (line.startsWith("-")) {
-    return "removed";
-  }
-  return "context";
-}
-
-function renderPatchLines(text: string) {
-  return splitDiffLines(text).map((line, index) => (
-    <span key={`patch-${index}`} className={`activity-diff-line ${patchLineClassName(line)}`}>
-      {line || " "}
+function renderRuntimeDiffLines(lines: RuntimeToolDiffLine[]) {
+  const lineNumberColumns = getRuntimeDiffLineNumberColumns(lines);
+  return lines.map((line, index) => (
+    <span key={`diff-${index}`} className={`activity-diff-line ${line.kind}`}>
+      {lineNumberColumns.includes("old") ? (
+        <span className="activity-diff-line-number">{line.oldLineNumber ?? ""}</span>
+      ) : null}
+      {lineNumberColumns.includes("new") ? (
+        <span className="activity-diff-line-number">{line.newLineNumber ?? ""}</span>
+      ) : null}
+      <span className="activity-diff-prefix">{diffPrefix(line.kind)}</span>
+      <span className="activity-diff-content">{line.text || " "}</span>
     </span>
   ));
 }
@@ -433,7 +538,7 @@ function renderMessageUsageTooltipLine(line: string, lineIndex: number, key: str
   );
 }
 
-function MessageUsageBadge({ id, label, title }: { id: string; label: string; title: string }) {
+function MessageUsageBadge({ id, label, title }: { id?: string; label: string; title: string }) {
   const badgeRef = useRef<HTMLSpanElement | null>(null);
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
   const showTooltipTimerRef = useRef<number | null>(null);
@@ -619,15 +724,18 @@ export function ChatWorkspace({
   const autoScrollStateRef = useRef<{
     activeConversationId: string | null;
     messageCount: number;
+    runtimeInProgress: boolean;
     scrollRequest: number;
   }>({
     activeConversationId: null,
     messageCount: 0,
+    runtimeInProgress: false,
     scrollRequest: 0,
   });
   const [knowledgePickerOpen, setKnowledgePickerOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [threadActionMenuOpen, setThreadActionMenuOpen] = useState(false);
+  const [runtimeTodoCollapsed, setRuntimeTodoCollapsed] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [activeSkillSuggestionIndex, setActiveSkillSuggestionIndex] = useState(0);
   const [activeSlashSuggestionIndex, setActiveSlashSuggestionIndex] = useState(0);
@@ -736,27 +844,14 @@ export function ChatWorkspace({
   const selectedKnowledgeBases = knowledgeBases.filter((base) => selectedKnowledgeBaseIds.includes(base.id));
   const selectedKnowledgeCount = knowledgeEnabled ? selectedKnowledgeBaseIds.length : 0;
   const runtimeInProgress = isTurnActiveStatus(runtimeState?.status);
-  const runtimeFingerprint = JSON.stringify({
-    status: runtimeState?.status,
-    stopReason: runtimeState?.stopReason,
-    error: runtimeState?.error,
-    activityItems: runtimeState?.activityItems,
-    timelineItems: runtimeState?.timelineItems,
-    thoughtTextLength: runtimeState?.thoughtText.length ?? 0,
-    planEntries: runtimeState?.planEntries,
-    toolCalls: runtimeState?.toolCalls.map((toolCall) => ({
-      toolCallId: toolCall.toolCallId,
-      status: toolCall.status,
-      content: toolCall.content.map((content) =>
-        content.type === "terminal" ? `${content.type}:${content.terminalId}` : content.type,
-      ),
-    })),
-    terminals: Object.values(runtimeState?.terminalOutputs ?? {}).map((terminal) => ({
-      terminalId: terminal.terminalId,
-      outputLength: terminal.output.length,
-      exitCode: terminal.exitCode,
-    })),
-  });
+
+  useEffect(() => {
+    if (!runtimeInProgress) {
+      setRuntimeTodoCollapsed(false);
+    }
+  }, [runtimeInProgress]);
+
+  const runtimeFingerprint = buildRuntimeStateScrollFingerprint(runtimeState);
   const messageListScrollRevision = buildMessageListScrollRevision({
     lastMessageContentLength,
     lastMessageId,
@@ -829,6 +924,7 @@ export function ChatWorkspace({
       autoScrollStateRef.current = {
         activeConversationId,
         messageCount,
+        runtimeInProgress,
         scrollRequest: scrollToBottomRequest,
       };
       return undefined;
@@ -836,15 +932,21 @@ export function ChatWorkspace({
 
     const previousScrollState = autoScrollStateRef.current;
     const conversationChanged = previousScrollState.activeConversationId !== activeConversationId;
+    const messageAdded = messageCount > previousScrollState.messageCount;
     const requestedManualScroll = previousScrollState.scrollRequest !== scrollToBottomRequest;
+    const turnActiveOrRecentlyFinished = runtimeInProgress || previousScrollState.runtimeInProgress;
     const shouldScrollToBottom = shouldAutoScrollMessageList({
       conversationChanged,
+      manuallyDetached: autoScrollManuallyDetachedRef.current,
+      messageAdded,
       requestedManualScroll,
+      turnActiveOrRecentlyFinished,
       wasPinnedToBottom: autoScrollPinnedToBottomRef.current,
     });
     autoScrollStateRef.current = {
       activeConversationId,
       messageCount,
+      runtimeInProgress,
       scrollRequest: scrollToBottomRequest,
     };
 
@@ -867,6 +969,7 @@ export function ChatWorkspace({
   }, [
     activeConversationId,
     messageListScrollRevision,
+    runtimeInProgress,
     scrollToBottomRequest,
   ]);
 
@@ -1617,6 +1720,10 @@ export function ChatWorkspace({
 
       return hasVisibleText(terminal.output) || terminal.exitCode !== null || terminal.signal !== null;
     });
+    const hasCommandOutput = visibleContent.some(
+      (content) => content.type === "text" && display.kind === "execute",
+    );
+    const showCommandPreview = shouldRenderRuntimeToolCommandPreview(display, { hasCommandOutput });
     const hasFriendlySummary = display.isKnownTool && hasVisibleText(display.detail);
     const showRawPayload = shouldShowRawToolPayload(display, {
       hasReadableContent: visibleContent.length > 0,
@@ -1637,18 +1744,28 @@ export function ChatWorkspace({
     }
 
     const renderDiffPanel = (diff: RuntimeToolDiff, index: number, keyPrefixValue: string) => {
-      const isPatch = diff.oldText === undefined && diff.newText.trim().startsWith("*** Begin Patch");
+      const lines = diff.lines?.length ? diff.lines : buildRuntimeTextDiffLines(diff.oldText, diff.newText);
+      const followKey = [
+        toolCall.toolCallId,
+        keyPrefixValue,
+        index,
+        diff.oldText?.length ?? 0,
+        diff.newText.length,
+        lines.length,
+        lines.at(-1)?.text.length ?? 0,
+        toolCall.status ?? "",
+      ].join(":");
 
       return (
         <div key={`${toolCall.toolCallId}-${keyPrefixValue}-${index}`} className="activity-panel activity-diff-panel">
           <span className="activity-panel-label">{diff.path}</span>
-          <pre className="activity-diff-pre">
-            {isPatch ? renderPatchLines(diff.newText) : null}
-            {!isPatch && diff.oldText !== undefined && diff.oldText !== null
-              ? renderPrefixedDiffLines(diff.oldText, "-", "removed")
-              : null}
-            {!isPatch ? renderPrefixedDiffLines(diff.newText, "+", "added") : null}
-          </pre>
+          <AutoScrollPre
+            className="activity-diff-pre"
+            enabled={runtimeInProgressForCard}
+            followKey={followKey}
+          >
+            {renderRuntimeDiffLines(lines)}
+          </AutoScrollPre>
         </div>
       );
     };
@@ -1669,6 +1786,7 @@ export function ChatWorkspace({
             <span className={`activity-status-pill ${statusClassName(toolCall.status)}`}>
               {toolCall.status === "completed" ? <CircleCheckBig size={12} strokeWidth={2.6} /> : null}
               {toolCall.status === "failed" ? <CircleX size={12} strokeWidth={2.6} /> : null}
+              {toolCall.status === "cancelled" ? <X size={12} strokeWidth={2.6} /> : null}
               {(toolCall.status === "pending" || toolCall.status === "in_progress") ? (
                 <LoaderCircle size={12} className="spin" />
               ) : null}
@@ -1680,12 +1798,34 @@ export function ChatWorkspace({
         <div className="activity-detail">
           {generatedDiffs.map((diff, index) => renderDiffPanel(diff, index, "generated-diff"))}
 
+          {showCommandPreview ? (
+            <div
+              key={`${toolCall.toolCallId}-command-preview`}
+              className="activity-panel activity-command-panel activity-command-preview"
+            >
+              <AutoScrollDiv
+                className="activity-command-shell"
+                enabled={runtimeInProgressForCard}
+                followKey={`${toolCall.toolCallId}:command-preview:${display.command?.length ?? 0}:${toolCall.status ?? ""}`}
+              >
+                <div className="activity-command-line">
+                  <span>$</span>
+                  <code>{display.command}</code>
+                </div>
+              </AutoScrollDiv>
+            </div>
+          ) : null}
+
           {visibleContent.map((content, index) => {
             if (content.type === "text") {
               if (display.kind === "execute") {
                 return (
                   <div key={`${toolCall.toolCallId}-command-${index}`} className="activity-panel activity-command-panel">
-                    <div className="activity-command-shell">
+                    <AutoScrollDiv
+                      className="activity-command-shell"
+                      enabled={runtimeInProgressForCard}
+                      followKey={`${toolCall.toolCallId}:command:${index}:${content.text.length}:${toolCall.status ?? ""}`}
+                    >
                       {display.command ? (
                         <div className="activity-command-line">
                           <span>$</span>
@@ -1693,7 +1833,7 @@ export function ChatWorkspace({
                         </div>
                       ) : null}
                       <pre className="activity-command-output">{content.text}</pre>
-                    </div>
+                    </AutoScrollDiv>
                   </div>
                 );
               }
@@ -1714,7 +1854,12 @@ export function ChatWorkspace({
               return (
                 <div key={`${toolCall.toolCallId}-text-${index}`} className="activity-panel">
                   <span className="activity-panel-label">输出</span>
-                  <pre>{content.text}</pre>
+                  <AutoScrollPre
+                    enabled={runtimeInProgressForCard}
+                    followKey={`${toolCall.toolCallId}:text:${index}:${content.text.length}:${toolCall.status ?? ""}`}
+                  >
+                    {content.text}
+                  </AutoScrollPre>
                 </div>
               );
             }
@@ -1724,10 +1869,16 @@ export function ChatWorkspace({
             }
 
             const terminal = terminalOutputs[content.terminalId];
+            const terminalOutput = terminal?.output || "等待终端输出...";
             return (
               <div key={`${toolCall.toolCallId}-terminal-${index}`} className="activity-panel">
                 <span className="activity-panel-label">终端 {content.terminalId.slice(0, 8)}</span>
-                <pre>{terminal?.output || "等待终端输出..."}</pre>
+                <AutoScrollPre
+                  enabled={runtimeInProgressForCard}
+                  followKey={`${toolCall.toolCallId}:terminal:${content.terminalId}:${terminalOutput.length}:${terminal?.exitCode ?? ""}:${terminal?.signal ?? ""}`}
+                >
+                  {terminalOutput}
+                </AutoScrollPre>
               </div>
             );
           })}
@@ -1798,7 +1949,12 @@ export function ChatWorkspace({
         <div className="activity-detail">
           <div className="activity-panel">
             <span className="activity-panel-label">输出</span>
-            <pre>{terminal.output || "等待终端输出..."}</pre>
+            <AutoScrollPre
+              enabled={terminal.exitCode === null && terminal.signal === null}
+              followKey={`unlinked-terminal:${terminal.terminalId}:${terminal.output.length}:${terminal.exitCode ?? ""}:${terminal.signal ?? ""}`}
+            >
+              {terminal.output || "等待终端输出..."}
+            </AutoScrollPre>
           </div>
         </div>
       </details>
@@ -2082,19 +2238,36 @@ export function ChatWorkspace({
               }`}
               aria-label={`${formatMessageTime(message.createdAt)} 消息操作`}
             >
-              <button
-                aria-label={copied ? "已复制消息" : "复制消息"}
-                className={`message-action-button ${copied ? "copied" : ""}`}
-                onClick={() => void copyMessage(message)}
-                title={copied ? "已复制" : "复制"}
-                type="button"
-              >
-                {copied ? <Check size={15} /> : <Copy size={15} />}
-              </button>
-              {usageBadge ? (
-                <MessageUsageBadge id={usageTooltipId} label={usageBadge.label} title={usageBadge.title} />
-              ) : null}
-              <span className="message-time">{formatMessageTime(message.createdAt)}</span>
+              {message.role === "user" ? (
+                <>
+                  <span className="message-time">{formatMessageTime(message.createdAt)}</span>
+                  <button
+                    aria-label={copied ? "已复制消息" : "复制消息"}
+                    className={`message-action-button ${copied ? "copied" : ""}`}
+                    onClick={() => void copyMessage(message)}
+                    title={copied ? "已复制" : "复制"}
+                    type="button"
+                  >
+                    {copied ? <Check size={15} /> : <Copy size={15} />}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    aria-label={copied ? "已复制消息" : "复制消息"}
+                    className={`message-action-button ${copied ? "copied" : ""}`}
+                    onClick={() => void copyMessage(message)}
+                    title={copied ? "已复制" : "复制"}
+                    type="button"
+                  >
+                    {copied ? <Check size={15} /> : <Copy size={15} />}
+                  </button>
+                  {usageBadge ? (
+                    <MessageUsageBadge id={usageTooltipId} label={usageBadge.label} title={usageBadge.title} />
+                  ) : null}
+                  <span className="message-time">{formatMessageTime(message.createdAt)}</span>
+                </>
+              )}
             </div>
           ) : null}
         </div>
@@ -2151,6 +2324,78 @@ export function ChatWorkspace({
     );
   }
 
+  function renderRuntimeTodoPanel(snapshot: RuntimeTodoSnapshot | null) {
+    if (!snapshot || snapshot.items.length === 0) {
+      return null;
+    }
+
+    const todoProgress = getRuntimeTodoProgress(snapshot.items);
+    const progressStyle = {
+      "--runtime-todo-progress": `${Math.round(todoProgress.ratio * 100)}%`,
+    } as CSSProperties;
+
+    return (
+      <aside
+        aria-label="待办进度"
+        aria-live="polite"
+        className={`runtime-todo-panel ${snapshot.isUpdating ? "updating" : ""} ${runtimeTodoCollapsed ? "collapsed" : ""}`}
+      >
+        <div className="runtime-todo-head">
+          <span className="runtime-todo-title">
+            <ListChecks size={15} />
+            {!runtimeTodoCollapsed ? <strong>任务流</strong> : null}
+          </span>
+          {!runtimeTodoCollapsed ? (
+            <span className="runtime-todo-count">
+              {todoProgress.currentStep}/{todoProgress.total}
+            </span>
+          ) : null}
+          <button
+            aria-expanded={!runtimeTodoCollapsed}
+            aria-label={runtimeTodoCollapsed ? "展开待办进度" : "收起待办进度"}
+            className="runtime-todo-toggle"
+            onClick={() => setRuntimeTodoCollapsed((current) => !current)}
+            title={runtimeTodoCollapsed ? "展开" : "收起"}
+            type="button"
+          >
+            {runtimeTodoCollapsed ? <ListChecks size={14} /> : <ChevronDown size={14} />}
+          </button>
+        </div>
+        {!runtimeTodoCollapsed ? (
+          <>
+            <span className="runtime-todo-subtitle">第 {todoProgress.currentStep} 项</span>
+            <div
+              aria-label="待办进度"
+              aria-valuemax={todoProgress.total}
+              aria-valuemin={0}
+              aria-valuenow={todoProgress.currentStep}
+              className="runtime-todo-progress"
+              role="progressbar"
+              style={progressStyle}
+            >
+              <span className="runtime-todo-progress-fill" />
+            </div>
+            <div className="runtime-todo-list">
+              {snapshot.items.map((item) => (
+                <div key={item.id} className={`runtime-todo-item ${item.status}`}>
+                  <span className="runtime-todo-marker" aria-hidden="true">
+                    {item.status === "completed" ? <Check size={11} strokeWidth={3} /> : null}
+                    {item.status === "in_progress" ? (
+                      <RefreshCw size={14} className="runtime-todo-refresh-icon" />
+                    ) : null}
+                  </span>
+                  <span className="runtime-todo-copy">
+                    <span title={item.content}>{item.content}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : null}
+      </aside>
+    );
+  }
+
   function renderComposer(home = false) {
     const composerPlaceholder = cancelInFlight
       ? "正在停止当前回复..."
@@ -2174,7 +2419,16 @@ export function ChatWorkspace({
         {renderSlashCommandSuggestions()}
         {renderSkillSuggestions()}
         {approvalRequests
-          .filter((request) => request.kind === "mail_auth")
+          .filter(isQuestionApprovalRequest)
+          .map((request) => (
+            <QuestionRequestCard
+              key={request.approvalId}
+              request={request}
+              onResolve={onResolveApproval}
+            />
+          ))}
+        {approvalRequests
+          .filter(isMailAuthApprovalRequest)
           .map((request) => (
             <MailAuthRequestCard
               key={request.approvalId}
@@ -2303,6 +2557,7 @@ export function ChatWorkspace({
     ]
       .filter(Boolean)
       .join(" ");
+    const todoSnapshot = buildRuntimeTodoSnapshot(runtimeState?.toolCalls ?? []);
 
     return (
       <div className="chat-thread-layout">
@@ -2325,7 +2580,7 @@ export function ChatWorkspace({
             onScroll={handleMessageListScroll}
             onWheel={handleMessageListWheel}
           >
-            {leadingMessages.map(renderMessage)}
+            {leadingMessages.map((message) => renderMessage(message))}
 
             {showLoadingBubble ? (
               <div className="message-row">
@@ -2345,6 +2600,10 @@ export function ChatWorkspace({
             })}
           </div>
         </div>
+
+        {shouldRenderRuntimeTodoPanel(todoSnapshot, { isTurnActive: runtimeInProgress })
+          ? renderRuntimeTodoPanel(todoSnapshot)
+          : null}
 
         {renderComposer(false)}
       </div>

@@ -137,6 +137,8 @@ export function useWorkspaceController({ onToast }: UseWorkspaceControllerOption
   }
 
   function scheduleConfigPersist(nextConfig: AppConfig) {
+    setConfig(nextConfig);
+
     if (pendingConfigSaveRef.current) {
       window.clearTimeout(pendingConfigSaveRef.current);
     }

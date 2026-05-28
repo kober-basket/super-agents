@@ -102,6 +102,68 @@ test("conversation copy markdown includes title metadata and messages", () => {
   assert.match(markdown, /当然可以。/);
 });
 
+test("conversation copy markdown includes assistant runtime tool commands and output", () => {
+  const markdown = buildConversationCopyMarkdown({
+    id: "conversation-1",
+    title: "执行记录",
+    createdAt: Date.UTC(2026, 4, 20, 8, 0, 0),
+    updatedAt: Date.UTC(2026, 4, 20, 8, 2, 0),
+    lastMessageAt: Date.UTC(2026, 4, 20, 8, 2, 0),
+    preview: "",
+    messageCount: 1,
+    workspaceRoot: "/tmp/super-agents-chat",
+    selectedKnowledgeBaseIds: [],
+    messages: [
+      {
+        id: "message-1",
+        role: "assistant",
+        content: "我运行了测试。",
+        createdAt: Date.UTC(2026, 4, 20, 8, 1, 0),
+        updatedAt: Date.UTC(2026, 4, 20, 8, 1, 0),
+        runtimeTrace: {
+          events: [],
+          activityItems: [],
+          timelineItems: [
+            { id: "status-1", type: "status", text: "准备运行测试。" },
+            { id: "tool-1", type: "tool", toolCallId: "tool-bash" },
+          ],
+          planEntries: [],
+          toolCalls: [
+            {
+              toolCallId: "tool-bash",
+              title: "bash",
+              status: "completed",
+              kind: "other",
+              content: [{ type: "text", text: "ok\n1 test passed" }],
+              rawInputJson: JSON.stringify({
+                command: "npm run test:electron",
+                description: "运行测试",
+              }),
+            },
+            {
+              toolCallId: "tool-question",
+              title: "question",
+              status: "cancelled",
+              kind: "other",
+              content: [{ type: "text", text: "Question cancelled: User cancelled question." }],
+            },
+          ],
+          terminalOutputs: {},
+          thoughtText: "",
+        },
+      },
+    ],
+  });
+
+  assert.match(markdown, /### 执行过程/);
+  assert.match(markdown, /准备运行测试。/);
+  assert.match(markdown, /#### bash · 完成/);
+  assert.match(markdown, /#### question · 取消/);
+  assert.doesNotMatch(markdown, /已取消/);
+  assert.match(markdown, /```bash\nnpm run test:electron\n```/);
+  assert.match(markdown, /```text\nok\n1 test passed\n```/);
+});
+
 test("message copy hover target stays reachable while moving from the bubble to the action row", () => {
   const localCssPath = path.resolve(process.cwd(), "src/styles.css");
   const cssPath = existsSync(localCssPath)
@@ -176,5 +238,18 @@ test("assistant message actions place copy before usage tooltip and timestamp", 
   assert.doesNotMatch(
     source,
     /<span className="message-usage"\s+aria-label=\{usageBadge\.title\}/,
+  );
+});
+
+test("user message actions place copy after timestamp", () => {
+  const localSourcePath = path.resolve(process.cwd(), "src/features/chat/ChatWorkspace.tsx");
+  const sourcePath = existsSync(localSourcePath)
+    ? localSourcePath
+    : path.resolve(process.cwd(), "..", "src/features/chat/ChatWorkspace.tsx");
+  const source = readFileSync(sourcePath, "utf8");
+
+  assert.match(
+    source,
+    /message\.role === "user" \? \([\s\S]*<span className="message-time">\{formatMessageTime\(message\.createdAt\)\}<\/span>[\s\S]*<button[\s\S]*className=\{`message-action-button/,
   );
 });

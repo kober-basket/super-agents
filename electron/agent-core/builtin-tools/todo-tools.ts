@@ -50,6 +50,7 @@ export function createTodoToolDefinitions(): ToolDefinition[] {
         additionalProperties: false,
       },
       execute: async (_input, context) => {
+        context.emitOutput?.({ stream: "info", text: "Reading todo list\n" });
         const items = sessionTodos.get(context.sessionId) ?? [];
         return {
           content: items.length > 0
@@ -84,6 +85,7 @@ export function createTodoToolDefinitions(): ToolDefinition[] {
         additionalProperties: false,
       },
       execute: async (input, context) => {
+        context.emitOutput?.({ stream: "info", text: "Updating todo list\n" });
         const items = normalizeTodoItems(input);
         sessionTodos.set(context.sessionId, items);
         return {

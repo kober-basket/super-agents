@@ -236,6 +236,7 @@ test("runtime tool summary keeps tool names readable before truncating details",
   const css = readFileSync(cssPath, "utf8");
 
   assert.match(css, /\.activity-summary-title\s+strong\s*{[^}]*flex:\s*0 0 auto/s);
+  assert.match(css, /\.activity-summary-title\s+strong\s*{[^}]*max-width:\s*min\(280px,\s*60%\)/s);
   assert.match(css, /\.activity-summary-title\s+em\s*{[^}]*flex:\s*1 1 auto/s);
 });
 

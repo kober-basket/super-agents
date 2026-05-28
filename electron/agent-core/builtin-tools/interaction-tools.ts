@@ -1,4 +1,3 @@
-import { ToolPermissionDeniedError } from "../types";
 import type { ToolDefinition } from "../types";
 import { arrayInput, isRecord, sanitizeIdentifier } from "./input";
 
@@ -35,7 +34,7 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
                 },
                 multiple: { type: "boolean", description: "Whether multiple options may be selected." },
               },
-              required: ["question", "options"],
+              required: ["question"],
               additionalProperties: false,
             },
           },
@@ -44,6 +43,7 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
         additionalProperties: false,
       },
       execute: async (input, context) => {
+        context.emitOutput?.({ stream: "info", text: "Preparing question card\n" });
         const rawQuestions = arrayInput(input, "questions");
         if (rawQuestions.length === 0 || rawQuestions.length > 4) {
           throw new Error("questions must contain 1 to 4 questions.");
@@ -71,8 +71,8 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
                 };
               })
             : [];
-          if (options.length < 2 || options.length > 4) {
-            throw new Error(`questions[${index}].options must contain 2 to 4 options.`);
+          if (options.length > 6) {
+            throw new Error(`questions[${index}].options must contain at most 6 options.`);
           }
           return {
             id: sanitizeIdentifier(typeof question.id === "string" ? question.id : "", `question-${index + 1}`),
@@ -86,6 +86,7 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
         if (!context.requestApproval) {
           throw new Error("Question tool requires an approval handler.");
         }
+        context.emitOutput?.({ stream: "info", text: "Waiting for user answer\n" });
         const approval = await context.requestApproval({
           sessionId: context.sessionId,
           agentId: context.agentId,
@@ -95,7 +96,10 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
           metadata: { questions },
         });
         if (approval.type === "deny") {
-          throw new ToolPermissionDeniedError(approval.reason);
+          return {
+            content: `Question cancelled: ${approval.reason}`,
+            metadata: { cancelled: true },
+          };
         }
 
         const rawAnswers = Array.isArray(approval.metadata?.answers) ? approval.metadata.answers : [];

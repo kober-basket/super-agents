@@ -83,11 +83,15 @@ test("right workspace header leaves room for the pinned pane toggle", () => {
 test("right workspace top controls use a flat browser-like toolbar style", () => {
   const css = readSource("src/styles.css");
 
-  assert.match(css, /\.right-workspace-head\s*{[^}]*background:\s*#fff/s);
+  assert.match(css, /\.right-workspace-head\s*{[^}]*background:\s*var\(--panel\)/s);
   assert.match(css, /\.right-pane-toggle\s*{[^}]*border-radius:\s*10px[^}]*line-height:\s*0[^}]*box-shadow:\s*none/s);
+  assert.match(css, /\.right-pane-toggle\s*{[^}]*border:\s*1px solid var\(--line\)[^}]*background:\s*var\(--control-bg\)/s);
+  assert.match(css, /\.right-pane-toggle:hover\s*{[^}]*background:\s*var\(--control-bg-hover\)/s);
+  assert.match(css, /\.conversation-workspace-control\s*{[^}]*border:\s*1px solid var\(--line\)[^}]*background:\s*var\(--control-bg\)/s);
   assert.match(css, /\.right-pane-toggle svg,\s*\.right-workspace-add-button svg\s*{[^}]*display:\s*block/s);
-  assert.match(css, /\.right-workspace-tab\.active\s*{[^}]*background:\s*#f5f5f6[^}]*box-shadow:\s*none/s);
+  assert.match(css, /\.right-workspace-tab\.active\s*{[^}]*background:\s*var\(--control-bg\)[^}]*box-shadow:\s*none/s);
   assert.match(css, /\.right-workspace-add-button\s*{[^}]*border-radius:\s*10px[^}]*line-height:\s*0[^}]*box-shadow:\s*none/s);
+  assert.match(css, /\.right-workspace-add-button\s*{[^}]*background:\s*var\(--control-bg\)/s);
 });
 
 test("right workspace pane expands with a restrained motion instead of popping in", () => {

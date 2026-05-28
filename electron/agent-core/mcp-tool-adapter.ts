@@ -56,7 +56,11 @@ export function createMcpToolDefinition(input: {
       ? input.tool.inputSchema
       : { type: "object", properties: {}, additionalProperties: true },
     risk: "network",
-    execute: async (toolInput) => {
+    execute: async (toolInput, context) => {
+      context.emitOutput?.({
+        stream: "info",
+        text: `Calling MCP tool ${input.tool.serverName}/${input.tool.name}\n`,
+      });
       const result = await input.inspector.debugTool({
         server: input.server,
         workspaceRoot: input.workspaceRoot,

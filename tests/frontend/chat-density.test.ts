@@ -109,13 +109,16 @@ test("runtime transcript typography uses the same restrained text colors", () =>
   assert.match(css, /\.message-text\s+code,\s*\.preview-markdown\s+code,\s*\.activity-markdown\s+code\s*{[^}]*color:\s*var\(--text\)[^}]*font-weight:\s*var\(--font-weight-medium\)/s);
 });
 
-test("runtime tool status badges use distinct success and failure affordances", () => {
+test("runtime tool status badges use distinct success cancellation and failure affordances", () => {
   const css = readStyles();
   const workspaceSource = readSource("src/features/chat/ChatWorkspace.tsx");
 
   assert.match(workspaceSource, /CircleCheckBig/);
   assert.match(workspaceSource, /CircleX/);
+  assert.match(workspaceSource, /status === "cancelled"\)\s*{\s*return "取消";/);
+  assert.doesNotMatch(workspaceSource, /已取消/);
   assert.match(css, /\.activity-status-pill\.success\s*{[^}]*background:\s*rgba\(18,\s*183,\s*106,\s*0\.16\)[^}]*border:\s*1px\s+solid\s+rgba\(18,\s*183,\s*106,\s*0\.36\)[^}]*color:\s*#027a48/s);
+  assert.match(css, /\.activity-status-pill\.cancelled\s*{[^}]*background:\s*rgba\(245,\s*158,\s*11,\s*0\.16\)[^}]*border:\s*1px\s+solid\s+rgba\(245,\s*158,\s*11,\s*0\.36\)[^}]*color:\s*#b45309/s);
   assert.match(css, /\.activity-status-pill\.error\s*{[^}]*background:\s*rgba\(217,\s*45,\s*32,\s*0\.16\)[^}]*border:\s*1px\s+solid\s+rgba\(217,\s*45,\s*32,\s*0\.38\)[^}]*color:\s*#b42318/s);
 });
 
@@ -145,6 +148,66 @@ test("runtime process summary has readable size and more breathing room", () => 
   assert.match(css, /\.message-bubble:has\(>\s*\.runtime-trace-group\)\s*{[^}]*gap:\s*14px/s);
 });
 
+test("markdown task list checkboxes keep native inline sizing", () => {
+  const css = readStyles();
+
+  assert.match(
+    css,
+    /\.message-text\s+\.task-list-item\s+input\[type="checkbox"\],\s*\.preview-markdown\s+\.task-list-item\s+input\[type="checkbox"\],\s*\.activity-markdown\s+\.task-list-item\s+input\[type="checkbox"\]\s*{[^}]*width:\s*13px[^}]*height:\s*13px[^}]*padding:\s*0[^}]*flex:\s*0\s+0\s+13px[^}]*transform:\s*none/s,
+  );
+});
+
+test("runtime tool output panels cap long content with internal scrolling", () => {
+  const css = readStyles();
+
+  assert.match(css, /\.activity-panel\s+pre\s*{[^}]*max-height:\s*min\(360px,\s*46vh\)[^}]*overflow:\s*auto/s);
+  assert.match(css, /\.activity-diff-pre\s*{[^}]*max-height:\s*min\(420px,\s*48vh\)[^}]*overflow:\s*auto/s);
+  assert.match(css, /\.activity-command-shell\s*{[^}]*max-height:\s*min\(320px,\s*46vh\)[^}]*overflow:\s*auto/s);
+});
+
+test("runtime tool output panels auto-follow only while pinned to the bottom", () => {
+  const workspaceSource = readSource("src/features/chat/ChatWorkspace.tsx");
+
+  assert.match(workspaceSource, /usePinnedToolContentScroll/);
+  assert.match(workspaceSource, /shouldAutoScrollToolContent/);
+  assert.match(workspaceSource, /isScrollNearBottom/);
+  assert.match(workspaceSource, /<AutoScrollPre[\s\S]*className="activity-diff-pre"/);
+  assert.match(workspaceSource, /<AutoScrollDiv[\s\S]*className="activity-command-shell"/);
+});
+
+test("todo tool progress renders as a floating live panel", () => {
+  const css = readStyles();
+  const workspaceSource = readSource("src/features/chat/ChatWorkspace.tsx");
+  const todoPanelBlock = css.match(/\.runtime-todo-panel\s*{(?<body>[\s\S]*?)\n}/)?.groups?.body ?? "";
+
+  assert.match(workspaceSource, /renderRuntimeTodoPanel/);
+  assert.match(workspaceSource, /runtimeTodoCollapsed/);
+  assert.match(workspaceSource, /setRuntimeTodoCollapsed/);
+  assert.match(workspaceSource, /shouldRenderRuntimeTodoPanel\(todoSnapshot,\s*\{\s*isTurnActive:\s*runtimeInProgress\s*\}\)/s);
+  assert.match(workspaceSource, /aria-expanded=\{!runtimeTodoCollapsed\}/);
+  assert.match(workspaceSource, /runtime-todo-toggle/);
+  assert.match(workspaceSource, /runtime-todo-progress/);
+  assert.match(workspaceSource, /<strong>任务流<\/strong>/);
+  assert.match(workspaceSource, /第 \{todoProgress\.currentStep\} 项/);
+  assert.match(workspaceSource, /RefreshCw/);
+  assert.match(workspaceSource, /runtime-todo-refresh-icon/);
+  assert.doesNotMatch(workspaceSource, /runtime-todo-running-indicator/);
+  assert.doesNotMatch(workspaceSource, /正在第/);
+  assert.doesNotMatch(workspaceSource, /todoStatusLabel/);
+  assert.doesNotMatch(workspaceSource, /runtime-todo-copy[\\s\\S]*<em>/);
+  assert.match(workspaceSource, /runtime-todo-panel/);
+  assert.match(css, /\.runtime-todo-panel\s*{[^}]*position:\s*absolute[^}]*top:\s*50%[^}]*transform:\s*translateY\(-50%\)[^}]*right:\s*clamp\(18px,\s*4vw,\s*44px\)/s);
+  assert.match(todoPanelBlock, /background:[\s\S]*var\(--panel\)/);
+  assert.doesNotMatch(todoPanelBlock, /rgba\(255,\s*255,\s*255,\s*0\.(?:7|8|9)\d*\)/);
+  assert.match(css, /\.runtime-todo-panel\.collapsed\s*{[^}]*width:\s*44px[^}]*padding:\s*8px/s);
+  assert.match(css, /\.runtime-todo-toggle\s*{[^}]*width:\s*24px[^}]*height:\s*24px/s);
+  assert.match(css, /\.runtime-todo-progress-fill\s*{[^}]*background:\s*linear-gradient\(90deg,\s*#2f6f5e,\s*#8ca36b\)/s);
+  assert.match(css, /\.runtime-todo-item\.in_progress\s+\.runtime-todo-marker\s*{[^}]*border-color:\s*transparent[^}]*background:\s*transparent/s);
+  assert.match(css, /\.runtime-todo-refresh-icon\s*{[^}]*animation:\s*spin\s+900ms\s+linear\s+infinite/s);
+  assert.doesNotMatch(css, /runtime-todo-orbit|runtime-todo-sweep|runtime-todo-running-indicator/);
+  assert.doesNotMatch(css, /#7c5cff|#6f6bff|rgba\(124,\s*92,\s*255/);
+});
+
 test("chat thread title sits on the left with a compact actions menu", () => {
   const css = readStyles();
   const workspaceSource = readSource("src/features/chat/ChatWorkspace.tsx");
@@ -154,7 +217,7 @@ test("chat thread title sits on the left with a compact actions menu", () => {
   assert.match(css, /\.chat-thread-toolbar\s*{[^}]*padding:\s*8px\s+18px\s+9px/s);
   assert.match(css, /\.chat-thread-toolbar\s*{[^}]*border-bottom:\s*1px\s+solid\s+var\(--line-soft\)/s);
   assert.match(css, /\.right-workspace-head\s*{[^}]*min-height:\s*50px/s);
-  assert.match(css, /\.chat-thread-title\s*{[^}]*color:\s*#111827/s);
+  assert.match(css, /\.chat-thread-title\s*{[^}]*color:\s*var\(--text\)/s);
   assert.match(css, /\.chat-thread-title\s*{[^}]*font-size:\s*15px/s);
   assert.match(css, /\.chat-thread-folder-control\s*{[^}]*margin-left:\s*auto/s);
   assert.match(css, /\.workspace-main\.is-thread\s+\.chat-column\s*{[^}]*width:\s*100%/s);

@@ -15,6 +15,11 @@ import { exportConversationToFile } from "./conversation-export";
 import type { ToolApprovalDecision, ToolApprovalRequest } from "./agent-core";
 import { InteractiveTerminalManager } from "./interactive-terminal-manager";
 import { ConversationService } from "./conversation-service";
+import {
+  sanitizeDesktopApprovalDecision,
+  sanitizeMailAuthRequestMetadata,
+  sanitizeQuestionApprovalRequestMetadata,
+} from "./desktop-approval";
 import { isTrustedDesktopOrigin } from "./media-permissions";
 import { McpInspector } from "./mcp-inspector";
 import { RemoteControlService } from "./remote-control-service";
@@ -57,6 +62,7 @@ const APPROVAL_TIMEOUT_MS = 10 * 60_000;
 const pendingRendererApprovals = new Map<
   string,
   {
+    kind: DesktopApprovalRequest["kind"];
     resolve: (decision: ToolApprovalDecision) => void;
     timeout: ReturnType<typeof setTimeout>;
   }
@@ -107,102 +113,12 @@ async function showApprovalMessageBox(options: Electron.MessageBoxOptions) {
     : await dialog.showMessageBox(options);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function stringField(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function authTypeField(value: unknown) {
-  return value === "oauth" || value === "password" ? value : undefined;
-}
-
-function mailStatusField(value: unknown) {
-  return value === "needs_auth" || value === "connected" || value === "error" ? value : undefined;
-}
-
-function sanitizeMailServerConfig(value: unknown) {
-  if (!isRecord(value)) return undefined;
-  const host = stringField(value.host);
-  const port = typeof value.port === "number" && Number.isFinite(value.port) ? value.port : undefined;
-  const secure = typeof value.secure === "boolean" ? value.secure : undefined;
-  if (!host || port === undefined || secure === undefined) return undefined;
-  return { host, port, secure };
-}
-
-function sanitizeMailSetup(value: unknown) {
-  if (!isRecord(value)) return undefined;
-  const incoming = sanitizeMailServerConfig(value.incoming);
-  const outgoing = sanitizeMailServerConfig(value.outgoing);
-  const email = stringField(value.email);
-  const domain = stringField(value.domain) ?? "";
-  const providerId = stringField(value.providerId);
-  const providerName = stringField(value.providerName);
-  const authType = authTypeField(value.authType);
-  if (!email || !providerId || !providerName || !authType || !incoming || !outgoing) return undefined;
-  return {
-    email,
-    domain,
-    providerId,
-    providerName,
-    authType,
-    oauthProvider: value.oauthProvider === "google" || value.oauthProvider === "microsoft" ? value.oauthProvider : undefined,
-    incoming,
-    outgoing,
-    advancedRequired: value.advancedRequired === true,
-    helpText: stringField(value.helpText),
-  };
-}
-
-function sanitizeMailAuthRequestMetadata(metadata: unknown): DesktopApprovalRequest["metadata"] {
-  if (!isRecord(metadata)) {
-    return {};
-  }
-  return {
-    email: stringField(metadata.email),
-    provider: stringField(metadata.provider),
-    providerName: stringField(metadata.providerName),
-    authType: authTypeField(metadata.authType),
-    helpText: stringField(metadata.helpText),
-    setup: sanitizeMailSetup(metadata.setup),
-  };
-}
-
-function sanitizeMailAuthDecision(decision: DesktopApprovalResponse["decision"]): ToolApprovalDecision {
-  if (decision.type === "deny") {
-    return { type: "deny", reason: decision.reason || "User denied mail authorization." };
-  }
-
-  const metadata = isRecord(decision.metadata) ? decision.metadata : {};
-  return {
-    type: "allow",
-    metadata: {
-      accountId: stringField(metadata.accountId),
-      email: stringField(metadata.email),
-      providerId: stringField(metadata.providerId),
-      providerName: stringField(metadata.providerName),
-      authType: authTypeField(metadata.authType),
-      status: mailStatusField(metadata.status),
-    },
-  };
-}
-
 function denyPendingRendererApprovals(reason: string) {
   for (const [approvalId, pending] of pendingRendererApprovals) {
     clearTimeout(pending.timeout);
     pending.resolve({ type: "deny", reason });
     pendingRendererApprovals.delete(approvalId);
   }
-}
-
-function questionOptionText(option: unknown) {
-  if (!isRecord(option)) return null;
-  const label = typeof option.label === "string" ? option.label.trim() : "";
-  if (!label) return null;
-  const description = typeof option.description === "string" ? option.description.trim() : "";
-  return { label, description };
 }
 
 async function requestExternalDirectoryApproval(
@@ -247,67 +163,34 @@ async function requestExternalDirectoryApproval(
   return { type: "deny", reason: "User denied external directory access." };
 }
 
-async function requestQuestionApproval(request: ToolApprovalRequest): Promise<ToolApprovalDecision> {
-  const rawQuestions = Array.isArray(request.metadata?.questions) ? request.metadata.questions : [];
-  const answers: Array<{ id: string; question: string; answer: string }> = [];
-
-  for (const rawQuestion of rawQuestions) {
-    if (!isRecord(rawQuestion)) continue;
-
-    const id = typeof rawQuestion.id === "string" && rawQuestion.id.trim()
-      ? rawQuestion.id.trim()
-      : `question-${answers.length + 1}`;
-    const question = typeof rawQuestion.question === "string" && rawQuestion.question.trim()
-      ? rawQuestion.question.trim()
-      : "Agent needs your input.";
-    const header = typeof rawQuestion.header === "string" && rawQuestion.header.trim()
-      ? rawQuestion.header.trim()
-      : "需要你的选择";
-    const options = Array.isArray(rawQuestion.options)
-      ? rawQuestion.options.map(questionOptionText).filter((option): option is { label: string; description: string } => Boolean(option))
-      : [];
-    const optionLabels = options.map((option) => option.label);
-    const buttons = optionLabels.length > 0 ? [...optionLabels, "跳过"] : ["继续"];
-    const detail = options.length > 0
-      ? options.map((option) => option.description ? `${option.label}: ${option.description}` : option.label).join("\n")
-      : request.reason;
-
-    const result = await showApprovalMessageBox({
-      type: "question",
-      title: header,
-      message: question,
-      detail,
-      buttons,
-      defaultId: 0,
-      cancelId: buttons.length - 1,
-      noLink: true,
-    });
-
-    const answer = optionLabels[result.response] ?? "";
-    answers.push({ id, question, answer });
-  }
-
-  return { type: "allow", metadata: { answers } };
-}
-
 async function requestRendererApproval(request: ToolApprovalRequest): Promise<ToolApprovalDecision> {
   const approvalWindow = getApprovalWindow();
-  if (!approvalWindow || request.kind !== "mail_auth") {
+  if (!approvalWindow || (request.kind !== "mail_auth" && request.kind !== "question")) {
     return { type: "deny", reason: "Interactive approval is not available." };
   }
 
   const approvalId = `approval_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-  const payload: DesktopApprovalRequest = {
+  const basePayload = {
     approvalId,
-    kind: "mail_auth",
     sessionId: request.sessionId,
     agentId: request.agentId,
     toolCallId: request.toolCall.id,
     toolName: request.toolCall.name,
     reason: request.reason,
     createdAt: Date.now(),
-    metadata: sanitizeMailAuthRequestMetadata(request.metadata),
   };
+  const payload: DesktopApprovalRequest =
+    request.kind === "question"
+      ? {
+          ...basePayload,
+          kind: "question",
+          metadata: sanitizeQuestionApprovalRequestMetadata(request.metadata),
+        }
+      : {
+          ...basePayload,
+          kind: "mail_auth",
+          metadata: sanitizeMailAuthRequestMetadata(request.metadata),
+        };
 
   return await new Promise<ToolApprovalDecision>((resolve) => {
     const timeout = setTimeout(() => {
@@ -315,18 +198,14 @@ async function requestRendererApproval(request: ToolApprovalRequest): Promise<To
       resolve({ type: "deny", reason: "Interactive approval timed out." });
     }, APPROVAL_TIMEOUT_MS);
 
-    pendingRendererApprovals.set(approvalId, { resolve, timeout });
+    pendingRendererApprovals.set(approvalId, { kind: payload.kind, resolve, timeout });
     approvalWindow.webContents.send("desktop:approval-request", payload);
   });
 }
 
 async function requestToolApproval(request: ToolApprovalRequest): Promise<ToolApprovalDecision> {
-  if (request.kind === "mail_auth") {
+  if (request.kind === "mail_auth" || request.kind === "question") {
     return await requestRendererApproval(request);
-  }
-
-  if (request.kind === "question") {
-    return await requestQuestionApproval(request);
   }
 
   if (request.kind === "external_directory") {
@@ -607,7 +486,7 @@ app.whenReady().then(async () => {
 
     pendingRendererApprovals.delete(approvalId);
     clearTimeout(pending.timeout);
-    pending.resolve(sanitizeMailAuthDecision(payload.decision));
+    pending.resolve(sanitizeDesktopApprovalDecision(pending.kind, payload.decision));
     return true;
   });
 

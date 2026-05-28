@@ -212,6 +212,153 @@ test("native agent core emits reasoning separately from assistant text", async (
   });
 });
 
+test("native agent core streams tool output deltas before the tool finishes", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "tool-streaming-output",
+          name: "streamer",
+          input: {},
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "Final answer." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createSingleToolCore(gateway, {
+    name: "streamer",
+    description: "Stream output from a long-running tool.",
+    inputSchema: { type: "object" },
+    risk: "read",
+    async execute(_input, context) {
+      (
+        context as {
+          emitOutput?: (output: { stream: "stdout" | "stderr"; text: string }) => void;
+        }
+      ).emitOutput?.({ stream: "stdout", text: "step one\n" });
+      await delay(10);
+      (
+        context as {
+          emitOutput?: (output: { stream: "stdout" | "stderr"; text: string }) => void;
+        }
+      ).emitOutput?.({ stream: "stderr", text: "warning\n" });
+      return { content: "final tool result" };
+    },
+  });
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "tool-output-stream-session",
+    agentId: "tool-agent",
+    content: "run streaming tool",
+  })) {
+    events.push(event);
+  }
+
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === "tool_call_output_delta")
+      .map((event) => [event.stream, event.text]),
+    [
+      ["stdout", "step one\n"],
+      ["stderr", "warning\n"],
+    ],
+  );
+  assert.equal(
+    events.findIndex((event) => event.type === "tool_call_output_delta"),
+    1,
+  );
+  assert.equal(
+    events.findIndex((event) => event.type === "tool_call_finished"),
+    3,
+  );
+});
+
+test("native agent core forwards streamed write input deltas before the tool starts", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call_delta",
+        toolCallId: "tool-write-stream",
+        name: "writer",
+      } as ModelEvent,
+      {
+        type: "tool_call_delta",
+        toolCallId: "tool-write-stream",
+        name: "writer",
+        inputJsonDelta: "{\"path\":\"note.md\",\"content\":\"Hello",
+      } as ModelEvent,
+      {
+        type: "tool_call_delta",
+        toolCallId: "tool-write-stream",
+        name: "writer",
+        inputJsonDelta: " world\"}",
+      } as ModelEvent,
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "tool-write-stream",
+          name: "writer",
+          input: { path: "note.md", content: "Hello world" },
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "Done." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createSingleToolCore(gateway, {
+    name: "writer",
+    description: "Write a file.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        content: { type: "string" },
+      },
+      required: ["path", "content"],
+    },
+    risk: "write",
+    async execute() {
+      return { content: "written" };
+    },
+  });
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "tool-input-stream-session",
+    agentId: "tool-agent",
+    content: "write note",
+  })) {
+    events.push(event);
+  }
+
+  const inputEvents = events.filter((event) => event.type === "tool_call_input_delta");
+  assert.deepEqual(
+    inputEvents.map((event) => [
+      event.toolCallId,
+      event.toolName,
+      event.inputJsonDelta,
+    ]),
+    [
+      ["tool-write-stream", "writer", undefined],
+      ["tool-write-stream", "writer", "{\"path\":\"note.md\",\"content\":\"Hello"],
+      ["tool-write-stream", "writer", " world\"}"],
+    ],
+  );
+  assert.ok(
+    events.findIndex((event) => event.type === "tool_call_input_delta") <
+      events.findIndex((event) => event.type === "tool_call_started"),
+  );
+});
+
 test("native agent core preserves reasoning content on assistant tool-call messages", async () => {
   const gateway = new ScriptedModelGateway([
     [
@@ -400,6 +547,33 @@ test("native agent core continues when a model returns only hidden reasoning", a
   assert.match(
     gateway.requests[1]?.messages.at(-1)?.content ?? "",
     /only hidden reasoning and no visible answer or tool call/i,
+  );
+});
+
+test("native agent core emits a fallback answer when no-action retries stay empty", async () => {
+  const gateway = new ScriptedModelGateway([
+    [{ type: "done", stopReason: "end_turn" }],
+    [{ type: "done", stopReason: "end_turn" }],
+    [{ type: "done", stopReason: "end_turn" }],
+  ]);
+  const core = createCore(gateway);
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "empty-no-action-fallback-session",
+    agentId: "neutral",
+    content: "answer directly",
+  })) {
+    events.push(event);
+  }
+
+  const messageText = events.filter((event) => event.type === "message_delta").map((event) => event.text).join("");
+  assert.match(messageText, /模型连续没有生成可见回复/);
+  assert.equal(gateway.requests.length, 3);
+  assert.equal(events.at(-1)?.type, "turn_finished");
+  assert.match(
+    core.getSession("empty-no-action-fallback-session")?.messages.at(-1)?.content ?? "",
+    /模型连续没有生成可见回复/,
   );
 });
 
@@ -1326,6 +1500,46 @@ test("native agent core retries an empty no-tool response after tools until fina
   assert.equal(turnFinished?.type, "turn_finished");
   assert.equal(turnFinished?.stopReason, "end_turn");
   assert.equal(core.getSession("empty-no-tool-after-tool-session")?.messages.at(-1)?.content, "最终结论。");
+});
+
+test("native agent core emits a fallback answer when post-tool retries stay empty", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "tool-first",
+          name: "lookup",
+          input: { key: "alpha" },
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [{ type: "done", stopReason: "end_turn" }],
+    [{ type: "done", stopReason: "end_turn" }],
+    [{ type: "done", stopReason: "end_turn" }],
+  ]);
+  const core = createCore(gateway);
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "empty-post-tool-fallback-session",
+    agentId: "neutral",
+    content: "look this up",
+  })) {
+    events.push(event);
+  }
+
+  const messageText = events.filter((event) => event.type === "message_delta").map((event) => event.text).join("");
+  assert.match(messageText, /工具已经执行完成/);
+  assert.match(messageText, /模型连续没有生成最终总结/);
+  assert.match(messageText, /value:alpha/);
+  assert.equal(gateway.requests.length, 4);
+  assert.equal(events.at(-1)?.type, "turn_finished");
+  assert.match(
+    core.getSession("empty-post-tool-fallback-session")?.messages.at(-1)?.content ?? "",
+    /模型连续没有生成最终总结/,
+  );
 });
 
 test("native agent core treats first no-tool text after tools as final text", async () => {
@@ -2306,6 +2520,219 @@ test("openai-compatible gateway surfaces streamed tool-call deltas before final 
     assert.equal(toolDelta?.type, "tool_call_delta");
     assert.equal(toolDelta.toolCallId, "early-tool-delta");
     assert.equal(toolDelta.name, "lookup");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openai-compatible gateway includes streamed tool argument deltas", async () => {
+  const originalFetch = globalThis.fetch;
+  const chunks = [
+    {
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: "write-args",
+                function: {
+                  name: "write",
+                  arguments: "{\"path\":\"note.md\",",
+                },
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                function: {
+                  arguments: "\"content\":\"Hello\"}",
+                },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    },
+  ];
+
+  globalThis.fetch = (async () =>
+    new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n", {
+      status: 200,
+    })) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "test-provider::tool-model",
+      modelProviders: [
+        {
+          id: "test-provider",
+          name: "Test Provider",
+          kind: "openai-compatible",
+          baseUrl: "https://example.test/v1",
+          apiKey: "test-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [
+            {
+              id: "tool-model",
+              label: "Tool Model",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }) as AppConfig);
+
+    const events = [];
+    for await (const event of gateway.stream({
+      model: "tool-model",
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          name: "write",
+          description: "Write file",
+          inputSchema: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              content: { type: "string" },
+            },
+            required: ["path", "content"],
+          },
+        },
+      ],
+    })) {
+      events.push(event);
+    }
+
+    const deltas = events.filter((event) => event.type === "tool_call_delta");
+    assert.deepEqual(
+      deltas.map((event) => [
+        event.toolCallId,
+        event.name,
+        event.inputJsonDelta,
+      ]),
+      [
+        ["write-args", "write", "{\"path\":\"note.md\","],
+        ["write-args", "write", "\"content\":\"Hello\"}"],
+      ],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openai-compatible gateway keeps a fallback tool id when the provider id arrives late", async () => {
+  const originalFetch = globalThis.fetch;
+  const chunks = [
+    {
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                function: {
+                  name: "write",
+                  arguments: "{\"path\":\"late.md\",",
+                },
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: "provider-late-id",
+                function: {
+                  arguments: "\"content\":\"Hello\"}",
+                },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    },
+  ];
+
+  globalThis.fetch = (async () =>
+    new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n", {
+      status: 200,
+    })) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "test-provider::tool-model",
+      modelProviders: [
+        {
+          id: "test-provider",
+          name: "Test Provider",
+          kind: "openai-compatible",
+          baseUrl: "https://example.test/v1",
+          apiKey: "test-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [
+            {
+              id: "tool-model",
+              label: "Tool Model",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }) as AppConfig);
+
+    const events = [];
+    for await (const event of gateway.stream({
+      model: "tool-model",
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          name: "write",
+          description: "Write file",
+          inputSchema: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              content: { type: "string" },
+            },
+            required: ["path", "content"],
+          },
+        },
+      ],
+    })) {
+      events.push(event);
+    }
+
+    const deltas = events.filter((event) => event.type === "tool_call_delta");
+    const toolCall = events.find((event) => event.type === "tool_call");
+    assert.equal(toolCall?.type, "tool_call");
+    assert.equal(deltas.length, 2);
+    assert.equal(deltas[0]?.toolCallId, deltas[1]?.toolCallId);
+    assert.equal(toolCall.toolCall.id, deltas[0]?.toolCallId);
+    assert.notEqual(toolCall.toolCall.id, "provider-late-id");
   } finally {
     globalThis.fetch = originalFetch;
   }

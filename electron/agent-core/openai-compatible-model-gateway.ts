@@ -936,19 +936,18 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
               lastAnonymousToolKey = key;
             }
 
-            const current = pendingTools.get(key) ?? {
-              id: toolDelta.id ?? this.createFallbackToolCallId(toolDelta.index ?? 0),
-              name: "",
-              argumentsText: "",
-            };
+            const current = pendingTools.get(key);
+            const stableToolId = current?.id ?? toolDelta.id ?? this.createFallbackToolCallId(toolDelta.index ?? 0);
             const argumentDelta = toolDelta.function?.arguments;
             const nextTool = {
-              id: toolDelta.id ?? current.id,
-              name: toolDelta.function?.name ?? current.name,
+              id: stableToolId,
+              name: toolDelta.function?.name ?? current?.name ?? "",
               argumentsText:
-                typeof argumentDelta === "string" ? current.argumentsText + argumentDelta : current.argumentsText,
+                typeof argumentDelta === "string"
+                  ? `${current?.argumentsText ?? ""}${argumentDelta}`
+                  : current?.argumentsText ?? "",
               argumentsObject: typeof argumentDelta === "string" || argumentDelta === undefined
-                ? current.argumentsObject
+                ? current?.argumentsObject
                 : argumentDelta,
             };
             pendingTools.set(key, nextTool);
@@ -956,6 +955,7 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
               type: "tool_call_delta",
               toolCallId: nextTool.id,
               name: nextTool.name || undefined,
+              inputJsonDelta: typeof argumentDelta === "string" ? argumentDelta : undefined,
             };
           }
 

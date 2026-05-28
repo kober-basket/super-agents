@@ -29,6 +29,8 @@ import { TurnEventLog } from "./chat/turn-event-log";
 import { prepareChatPrompt, type PreparedPrompt } from "./chat/prompt-context";
 import { createSkillToolDefinition } from "./chat/skill-tool";
 import {
+  appendRuntimeToolCallInputDelta,
+  appendRuntimeToolCallOutputDelta,
   appendRuntimeTextTimelineItem,
   appendRuntimeToolTimelineItem,
   createEmptyRuntimeTrace as createChatRuntimeTrace,
@@ -707,6 +709,54 @@ export class ChatOrchestrator {
         conversationId: activeTurn.conversationId,
         turnId: activeTurn.turnId,
         toolCall,
+      });
+      return;
+    }
+
+    if (event.type === "tool_call_input_delta") {
+      const recorded = appendRuntimeToolCallInputDelta(activeTurn.runtimeTrace, {
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        inputJsonDelta: event.inputJsonDelta,
+      });
+
+      if (recorded.existing) {
+        this.emitEvent({
+          type: "tool_call_updated",
+          conversationId: activeTurn.conversationId,
+          turnId: activeTurn.turnId,
+          toolCallId: event.toolCallId,
+          patch: recorded.patch,
+        });
+        return;
+      }
+
+      this.appendToolTimelineItem(activeTurn, event.toolCallId);
+      this.emitEvent({
+        type: "tool_call_started",
+        conversationId: activeTurn.conversationId,
+        turnId: activeTurn.turnId,
+        toolCall: recorded.toolCall,
+      });
+      return;
+    }
+
+    if (event.type === "tool_call_output_delta") {
+      const patch = appendRuntimeToolCallOutputDelta(
+        activeTurn.runtimeTrace,
+        event.toolCall,
+        event.text,
+      );
+      if (!patch) {
+        return;
+      }
+
+      this.emitEvent({
+        type: "tool_call_updated",
+        conversationId: activeTurn.conversationId,
+        turnId: activeTurn.turnId,
+        toolCallId: event.toolCall.id,
+        patch,
       });
       return;
     }

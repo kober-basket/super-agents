@@ -564,24 +564,70 @@ export interface MailAuthApprovalResultMetadata {
   status?: MailAccountStatus;
 }
 
-export interface DesktopApprovalRequest {
+export interface QuestionApprovalOption {
+  label: string;
+  description: string;
+}
+
+export interface QuestionApprovalQuestion {
+  id: string;
+  header: string;
+  question: string;
+  options: QuestionApprovalOption[];
+  multiple: boolean;
+}
+
+export interface QuestionApprovalMetadata {
+  questions: QuestionApprovalQuestion[];
+}
+
+export interface QuestionApprovalAnswer {
+  id: string;
+  question: string;
+  answer: string;
+}
+
+export interface QuestionApprovalResultMetadata {
+  answers: QuestionApprovalAnswer[];
+}
+
+export interface DesktopApprovalRequestBase {
   approvalId: string;
-  kind: "mail_auth";
   sessionId: string;
   agentId: string;
   toolCallId: string;
   toolName: string;
   reason: string;
   createdAt: number;
+}
+
+export interface MailAuthDesktopApprovalRequest extends DesktopApprovalRequestBase {
+  kind: "mail_auth";
   metadata: MailAuthApprovalMetadata;
 }
 
-export interface DesktopApprovalResponse {
+export interface QuestionDesktopApprovalRequest extends DesktopApprovalRequestBase {
+  kind: "question";
+  metadata: QuestionApprovalMetadata;
+}
+
+export type DesktopApprovalRequest = MailAuthDesktopApprovalRequest | QuestionDesktopApprovalRequest;
+
+export interface MailAuthDesktopApprovalResponse {
   approvalId: string;
   decision:
     | { type: "allow"; metadata?: MailAuthApprovalResultMetadata }
     | { type: "deny"; reason: string };
 }
+
+export interface QuestionDesktopApprovalResponse {
+  approvalId: string;
+  decision:
+    | { type: "allow"; metadata?: QuestionApprovalResultMetadata }
+    | { type: "deny"; reason: string };
+}
+
+export type DesktopApprovalResponse = MailAuthDesktopApprovalResponse | QuestionDesktopApprovalResponse;
 
 export interface AppConfig {
   workspaceRoot: string;
@@ -753,7 +799,7 @@ export interface TerminalSessionEvent {
 }
 
 export type ChatMessageRole = "user" | "assistant";
-export type ChatToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+export type ChatToolCallStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled";
 export type ChatToolKind =
   | "read"
   | "edit"
@@ -909,7 +955,9 @@ export type ChatTurnEventLogType =
   | "message_replace"
   | "thought_delta"
   | "status_delta"
+  | "tool_call_input_delta"
   | "tool_call_started"
+  | "tool_call_output_delta"
   | "tool_call_finished"
   | "permission_requested"
   | "permission_denied"
@@ -930,6 +978,7 @@ export interface ChatTurnEventLogEntry {
   error?: string;
   inputJson?: string;
   outputJson?: string;
+  stream?: "stdout" | "stderr" | "info";
 }
 
 export interface ChatMessageRuntimeTrace {

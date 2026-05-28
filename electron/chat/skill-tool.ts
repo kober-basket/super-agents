@@ -33,12 +33,13 @@ export function createSkillToolDefinition(workspaceService: WorkspaceService): T
       required: ["name"],
       additionalProperties: false,
     },
-    async execute(input) {
+    async execute(input, context) {
       const name = readString(input, "name");
       if (!name) {
         throw new Error("name is required.");
       }
 
+      context.emitOutput?.({ stream: "info", text: `Loading skill ${name}\n` });
       const config = await workspaceService.getConfigSnapshot();
       const skill = findEnabledSkill(config, name);
       if (!skill) {

@@ -58,6 +58,10 @@ function requireStore(store: MailToolStore | null | undefined) {
   return store;
 }
 
+function emitMailProgress(context: Parameters<ToolDefinition["execute"]>[1], text: string) {
+  context.emitOutput?.({ stream: "info", text: `${text}\n` });
+}
+
 function mailAuthHint(provider: string) {
   const normalized = provider.trim().toLowerCase();
   if (normalized === "qq" || normalized === "qq-mail" || normalized === "qqmail") {
@@ -221,6 +225,7 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
         additionalProperties: false,
       },
       execute: async (input, context) => {
+        emitMailProgress(context, "Opening private mail authorization form");
         if (!context.requestApproval || !context.toolCall) {
           throw new Error("mail_auth requires an interactive desktop approval handler.");
         }
@@ -274,8 +279,9 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
         required: ["action"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const action = stringInput(input, "action");
+        emitMailProgress(context, `Running mail action ${action || "unknown"}`);
         if (action === "infer_setup") {
           const email = stringInput(input, "email").trim();
           if (!email) {
@@ -341,8 +347,9 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
         required: ["accountId", "to", "subject", "body"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const mailStore = requireStore(store);
+        emitMailProgress(context, "Creating mail draft");
         const draft = await mailStore.createDraft({
           accountId: stringInput(input, "accountId").trim(),
           to: stringArrayInput(input, "to"),
@@ -370,8 +377,9 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
         required: ["draftId"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const mailStore = requireStore(store);
+        emitMailProgress(context, `Sending mail draft ${stringInput(input, "draftId").trim()}`);
         const result = await mailStore.sendDraft({
           draftId: stringInput(input, "draftId").trim(),
           accountId: stringInput(input, "accountId") || undefined,

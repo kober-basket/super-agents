@@ -12,6 +12,24 @@ function readStyles() {
   return readFileSync(cssPath, "utf8");
 }
 
+function hasRuleForSelector(css: string, selector: string, bodyPattern: RegExp) {
+  const target = `:root[data-theme="graphite"] ${selector}`;
+  const rulePattern = /([^{}]+)\{([^{}]*)\}/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = rulePattern.exec(css))) {
+    const selectors = match[1]
+      .split(",")
+      .map((part) => part.trim().replace(/\s+/g, " "));
+
+    if (selectors.includes(target) && bodyPattern.test(match[2])) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 test("harbor theme uses a softer mist-blue palette", () => {
   const css = readStyles();
   const harborTheme = css.match(/:root\[data-theme="harbor"\]\s*{(?<body>[^}]+)}/)?.groups?.body ?? "";
@@ -47,4 +65,72 @@ test("assistant model settings soften hard region boundaries", () => {
     css,
     /button:focus-visible\s*{[^}]*outline:\s*2px solid rgba\(var\(--accent-rgb\), 0\.24\)/s,
   );
+});
+
+test("dark themes normalize remaining app chrome and detail surfaces", () => {
+  const css = readStyles();
+
+  for (const selector of ["input", "textarea"]) {
+    assert.equal(
+      hasRuleForSelector(css, selector, /background:\s*var\(--input-bg\)/),
+      true,
+      `${selector} should use the dark input surface`,
+    );
+  }
+
+  for (const selector of [
+    ".chat-model-panel",
+    ".composer-card",
+    ".question-card",
+    ".memory-sidebar",
+    ".memory-panel",
+    ".memory-entry-row",
+    ".memory-modal",
+    ".knowledge-sidebar",
+    ".skill-card",
+    ".workspace-file-preview",
+    ".workspace-file-tree",
+    ".preview-pane",
+    ".file-tile",
+    ".browser-instance-tabs",
+    ".assistant-settings-stage .provider-detail-card",
+    ".model-picker-modal",
+    ".mcp-workbench-modal",
+    ".mail-auth-request-card",
+    ".remote-channel-list",
+    ".remote-channel-detail",
+  ]) {
+    assert.equal(
+      hasRuleForSelector(css, selector, /background:\s*var\(--dark-surface-[23]\)/),
+      true,
+      `${selector} should use a dark app surface`,
+    );
+  }
+
+  for (const selector of [
+    ".secondary-button",
+    ".folder-button",
+    ".composer-file-chip",
+    ".chat-model-option",
+    ".question-option",
+    ".memory-type-row",
+    ".memory-type-row.active",
+    ".memory-type-row b",
+    ".memory-type-icon",
+    ".knowledge-picker-row",
+    ".knowledge-base-row",
+    ".knowledge-base-row.active",
+    ".knowledge-base-count",
+    ".model-picker-row",
+    ".mail-auth-secondary-action",
+    ".workspace-file-search",
+    ".remote-channel-select",
+    ".remote-channel-select.active",
+  ]) {
+    assert.equal(
+      hasRuleForSelector(css, selector, /background:\s*var\(--control-bg\)|background:\s*var\(--dark-surface-3\)/),
+      true,
+      `${selector} should use a dark control surface`,
+    );
+  }
 });

@@ -65,6 +65,11 @@ import {
   syncTimelineActivityItems,
   upsertTimelineToolItem,
 } from "./lib/runtime-timeline";
+import {
+  createEmptyConversationRuntimeState,
+  mergeStartedConversationRuntimeState,
+  resetConversationRuntimeStateForTurn,
+} from "./lib/chat-runtime-state";
 import { stripComposerSkillMentions } from "./lib/composer-skills";
 import { BROWSER_HOME_URL, buildBrowserPreview } from "./lib/browser-target";
 import {
@@ -302,16 +307,7 @@ function LazyViewFallback() {
 function createConversationRuntimeState(
   status: ChatConversationRuntimeState["status"] = "idle",
 ): ChatConversationRuntimeState {
-  return {
-    status,
-    events: [],
-    activityItems: [],
-    timelineItems: [],
-    planEntries: [],
-    toolCalls: [],
-    terminalOutputs: {},
-    thoughtText: "",
-  };
+  return createEmptyConversationRuntimeState(status);
 }
 
 function isConversationTurnActive(status?: ChatConversationRuntimeState["status"]) {
@@ -1287,7 +1283,7 @@ export default function App() {
         ...current.filter((item) => item.approvalId !== request.approvalId),
         request,
       ]);
-      if (request.kind === "mail_auth") {
+      if (request.kind === "mail_auth" || request.kind === "question") {
         setView("chat");
       }
     });
@@ -2327,6 +2323,7 @@ export default function App() {
     const previousConversationId = activeConversationId;
     const previousConversations = conversations;
     const nextConversationId = activeConversationId ?? `temp-${uid()}`;
+    const previousRuntimeState = conversationRuntimeStates[nextConversationId];
     const optimisticUserMessage: ChatMessage = {
       id: `temp-user-${uid()}`,
       role: "user",
@@ -2370,6 +2367,9 @@ export default function App() {
         };
 
     syncConversationState(optimisticConversation);
+    setConversationRuntimeStates((current) =>
+      resetConversationRuntimeStateForTurn(current, nextConversationId),
+    );
     setView("chat");
     setDraftMessage("");
     setAttachments([]);
@@ -2388,10 +2388,12 @@ export default function App() {
         replaceConversationId: nextConversationId.startsWith("temp-") ? nextConversationId : null,
       });
       setDraftConversationWorkspaceRoot("");
-      setConversationRuntimeStates((current) => ({
-        ...current,
-        [result.conversation.id]: createConversationRuntimeState("running"),
-      }));
+      setConversationRuntimeStates((current) =>
+        mergeStartedConversationRuntimeState(current, {
+          conversationId: result.conversation.id,
+          replaceConversationId: nextConversationId.startsWith("temp-") ? nextConversationId : null,
+        }),
+      );
     } catch (error) {
       const alreadyRunning = isConversationAlreadyRunningError(error);
       if (previousConversation) {
@@ -2416,6 +2418,16 @@ export default function App() {
             stopReason: undefined,
           },
         }));
+      } else {
+        setConversationRuntimeStates((current) => {
+          const next = { ...current };
+          if (previousRuntimeState) {
+            next[nextConversationId] = previousRuntimeState;
+          } else {
+            delete next[nextConversationId];
+          }
+          return next;
+        });
       }
       /*
       setToast(error instanceof Error ? error.message : "发送消息失败");

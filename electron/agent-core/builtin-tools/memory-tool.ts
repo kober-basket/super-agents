@@ -170,6 +170,7 @@ export function createMemoryToolDefinition(store?: MemoryToolStore | null): Tool
     execute: async (input, context) => {
       const memoryStore = requireStore(store);
       const action = stringInput(input, "action");
+      context.emitOutput?.({ stream: "info", text: `Running memory action ${action || "unknown"}\n` });
 
       if (action === "list") {
         const payload = await memoryStore.searchMemories({

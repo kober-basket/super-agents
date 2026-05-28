@@ -65,6 +65,31 @@ export class TurnEventLog {
       return;
     }
 
+    if (event.type === "tool_call_input_delta") {
+      this.append({
+        type: event.type,
+        sessionId: event.sessionId,
+        agentId: event.agentId,
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        text: event.inputJsonDelta,
+      });
+      return;
+    }
+
+    if (event.type === "tool_call_output_delta") {
+      this.append({
+        type: event.type,
+        sessionId: event.sessionId,
+        agentId: event.agentId,
+        toolCallId: event.toolCall.id,
+        toolName: event.toolCall.name,
+        text: event.text,
+        stream: event.stream,
+      });
+      return;
+    }
+
     if (
       event.type === "tool_call_started" ||
       event.type === "permission_requested" ||

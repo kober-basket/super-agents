@@ -23,6 +23,17 @@ function createContext(workspaceRoot: string, sessionId = "session-1") {
   };
 }
 
+async function waitForCondition(check: () => boolean, label: string, timeoutMs = 1_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (check()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+}
+
 test("question asks for user input through approval handler and returns answers", async () => {
   const question = toolByName("question");
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-question-"));
@@ -63,6 +74,83 @@ test("question asks for user input through approval handler and returns answers"
     assert.deepEqual(result.metadata?.answers, [
       { id: "approach", question: "Which approach should we use?", answer: "Focused" },
     ]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("question supports open-ended answers without predefined options", async () => {
+  const question = toolByName("question");
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-question-open-"));
+
+  try {
+    const result = await question.execute(
+      {
+        questions: [
+          {
+            id: "goal",
+            question: "What should we optimize for?",
+          },
+        ],
+      },
+      {
+        ...createContext(tempDir, "question-open-session"),
+        requestApproval: async (request) => {
+          assert.equal(request.kind, "question");
+          assert.deepEqual(request.metadata?.questions, [
+            {
+              id: "goal",
+              header: "",
+              question: "What should we optimize for?",
+              options: [],
+              multiple: false,
+            },
+          ]);
+          return {
+            type: "allow",
+            metadata: {
+              answers: [{ id: "goal", question: "What should we optimize for?", answer: "Fast iteration" }],
+            },
+          };
+        },
+      },
+    );
+
+    assert.match(result.content, /Fast iteration/);
+    assert.deepEqual(result.metadata?.answers, [
+      { id: "goal", question: "What should we optimize for?", answer: "Fast iteration" },
+    ]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("question cancellation returns a cancelled tool result", async () => {
+  const question = toolByName("question");
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-question-cancel-"));
+
+  try {
+    const result = await question.execute(
+      {
+        questions: [
+          {
+            id: "next",
+            question: "What should happen next?",
+            options: [{ label: "Ship it", description: "" }],
+          },
+        ],
+      },
+      {
+        ...createContext(tempDir, "question-cancel-session"),
+        requestApproval: async () => ({
+          type: "deny",
+          reason: "User cancelled question.",
+        }),
+      },
+    );
+
+    assert.match(result.content, /cancelled/i);
+    assert.equal(result.metadata?.cancelled, true);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -246,6 +334,193 @@ test("bash tool prefers app-private runtime commands over the system PATH", asyn
     }
     await rm(tempDir, { recursive: true, force: true });
     await rm(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
+test("bash tool emits stdout chunks before the command exits", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-bash-stream-"));
+
+  try {
+    const bash = toolByName("bash");
+    const outputChunks: Array<{ stream: string; text: string }> = [];
+    const resultPromise = bash.execute(
+      {
+        command:
+          'node -e "process.stdout.write(\\"step one\\\\n\\"); setTimeout(() => { process.stdout.write(\\"step two\\\\n\\"); }, 120)"',
+        timeoutMs: 5_000,
+      },
+      {
+        ...createContext(tempDir),
+        emitOutput: (output: { stream: string; text: string }) => {
+          outputChunks.push(output);
+        },
+      },
+    );
+
+    await waitForCondition(
+      () => outputChunks.some((output) => output.stream === "stdout" && output.text.includes("step one")),
+      "first bash stdout chunk",
+    );
+    assert.equal(outputChunks.some((output) => output.text.includes("step two")), false);
+
+    const result = await resultPromise;
+    assert.match(result.content, /step one/);
+    assert.match(result.content, /step two/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("workspace mutation and search tools emit progress output", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-tool-progress-"));
+  const outputChunks: Array<{ stream: string; text: string }> = [];
+  const context = {
+    ...createContext(tempDir, "tool-progress-session"),
+    emitOutput: (output: { stream: string; text: string }) => {
+      outputChunks.push(output);
+    },
+  };
+
+  try {
+    await toolByName("write").execute({ path: "notes.txt", content: "alpha\nbeta\n" }, context);
+    await toolByName("edit").execute(
+      { path: "notes.txt", oldString: "alpha", newString: "needle alpha" },
+      context,
+    );
+    await toolByName("multi_edit").execute(
+      {
+        path: "notes.txt",
+        edits: [{ oldString: "beta", newString: "needle beta" }],
+      },
+      context,
+    );
+    await toolByName("grep").execute({ query: "needle", path: "." }, context);
+    await toolByName("glob").execute({ pattern: "**/*.txt", path: "." }, context);
+    await toolByName("apply_patch").execute(
+      {
+        patch: [
+          "*** Begin Patch",
+          "*** Add File: patched.txt",
+          "+patched content",
+          "*** End Patch",
+        ].join("\n"),
+      },
+      context,
+    );
+
+    const progressText = outputChunks.map((chunk) => chunk.text).join("");
+    assert.match(progressText, /Writing notes\.txt/);
+    assert.match(progressText, /Editing notes\.txt/);
+    assert.match(progressText, /Searching/);
+    assert.match(progressText, /needle alpha/);
+    assert.match(progressText, /Finding files/);
+    assert.match(progressText, /notes\.txt/);
+    assert.match(progressText, /Applying patch/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("web_fetch emits progress before the response finishes", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-web-fetch-progress-"));
+  const server = createServer((_, response) => {
+    response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    response.write("first chunk\n");
+    setTimeout(() => {
+      response.end("second chunk\n");
+    }, 120);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const outputChunks: Array<{ stream: string; text: string }> = [];
+    const resultPromise = toolByName("web_fetch").execute(
+      { url: `http://127.0.0.1:${address.port}/stream`, timeoutMs: 5_000 },
+      {
+        ...createContext(tempDir, "web-fetch-progress-session"),
+        emitOutput: (output) => {
+          outputChunks.push(output);
+        },
+      },
+    );
+
+    await waitForCondition(
+      () => outputChunks.some((output) => /Fetching/.test(output.text)),
+      "web_fetch start progress",
+    );
+    assert.equal(outputChunks.some((output) => /second chunk/.test(output.text)), false);
+
+    const result = await resultPromise;
+    assert.match(result.content, /first chunk/);
+    assert.match(result.content, /second chunk/);
+    assert.match(outputChunks.map((output) => output.text).join(""), /Downloaded/);
+  } finally {
+    server.close();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("workspace tools emit progress output while they run", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-tool-progress-"));
+
+  try {
+    await writeFile(path.join(tempDir, "notes.txt"), "needle here\n", "utf8");
+    const outputChunks: Array<{ stream: string; text: string }> = [];
+    const context = {
+      ...createContext(tempDir, "workspace-progress-session"),
+      emitOutput: (output: { stream: string; text: string }) => {
+        outputChunks.push(output);
+      },
+    };
+
+    const grep = toolByName("grep");
+    const grepResult = await grep.execute({ query: "needle", path: "." }, context);
+    assert.match(grepResult.content, /needle here/);
+    assert.equal(outputChunks.some((output) => output.text.includes("Searching")), true);
+
+    const writeTool = toolByName("write");
+    await writeTool.execute({ path: "created.txt", content: "hello" }, context);
+    assert.equal(outputChunks.some((output) => output.text.includes("Writing created.txt")), true);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("web_fetch emits fetch progress before returning content", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-web-fetch-progress-"));
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    response.write("first chunk\n");
+    setTimeout(() => {
+      response.end("second chunk\n");
+    }, 20);
+  });
+
+  try {
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const outputChunks: Array<{ stream: string; text: string }> = [];
+    const webFetch = toolByName("web_fetch");
+    const result = await webFetch.execute(
+      { url: `http://127.0.0.1:${address.port}/progress` },
+      {
+        ...createContext(tempDir, "web-fetch-progress-session"),
+        emitOutput: (output) => {
+          outputChunks.push(output);
+        },
+      },
+    );
+
+    assert.match(result.content, /first chunk/);
+    assert.match(result.content, /second chunk/);
+    assert.equal(outputChunks.some((output) => output.text.includes("Fetching URL http://127.0.0.1")), true);
+    assert.equal(outputChunks.some((output) => output.text.includes("Downloaded")), true);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(tempDir, { recursive: true, force: true });
   }
 });
 

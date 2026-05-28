@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import type { ToolDefinition } from "../types";
+import type { ToolContext, ToolDefinition } from "../types";
 import type { BrowserAutomationService, BrowserAutomationToolResult } from "../../browser-automation-service";
 
 export type BrowserAutomationController = Pick<
@@ -97,6 +97,15 @@ function toToolResult(result: BrowserAutomationToolResult) {
   return result;
 }
 
+async function withBrowserProgress(
+  context: ToolContext,
+  text: string,
+  action: () => Promise<BrowserAutomationToolResult>,
+) {
+  context.emitOutput?.({ stream: "info", text: `${text}\n` });
+  return toToolResult(await action());
+}
+
 export function createBrowserToolDefinitions(service?: BrowserAutomationController): ToolDefinition[] {
   return [
     {
@@ -109,7 +118,8 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         properties: {},
         additionalProperties: false,
       },
-      execute: async () => {
+      execute: async (_input, context) => {
+        context.emitOutput?.({ stream: "info", text: "Listing browser pages\n" });
         const pages = serviceOrThrow(service).listPages();
         return {
           content: formatListPages(pages),
@@ -129,9 +139,10 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         required: ["pageId"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const pageId = numberInput(input, "pageId");
         if (pageId === undefined) throw new Error("pageId is required.");
+        context.emitOutput?.({ stream: "info", text: `Selecting browser page ${pageId}\n` });
         serviceOrThrow(service).selectPage(pageId);
         return { content: `Selected browser page ${pageId}.`, metadata: { pageId } };
       },
@@ -150,9 +161,9 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         },
         additionalProperties: false,
       },
-      execute: async (input) =>
-        toToolResult(
-          await serviceOrThrow(service).navigate({
+      execute: async (input, context) =>
+        withBrowserProgress(context, "Navigating browser page", () =>
+          serviceOrThrow(service).navigate({
             pageId: numberInput(input, "pageId"),
             url: stringInput(input, "url"),
             type: stringInput(input, "type"),
@@ -173,9 +184,9 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         },
         additionalProperties: false,
       },
-      execute: async (input) =>
-        toToolResult(
-          await serviceOrThrow(service).takeSnapshot({
+      execute: async (input, context) =>
+        withBrowserProgress(context, "Taking browser snapshot", () =>
+          serviceOrThrow(service).takeSnapshot({
             pageId: numberInput(input, "pageId"),
             verbose: booleanInput(input, "verbose"),
           }),
@@ -195,11 +206,11 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         required: ["uid"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const uid = stringInput(input, "uid").trim();
         if (!uid) throw new Error("uid is required.");
-        return toToolResult(
-          await serviceOrThrow(service).click({
+        return withBrowserProgress(context, `Clicking browser element ${uid}`, () =>
+          serviceOrThrow(service).click({
             pageId: numberInput(input, "pageId"),
             uid,
             dblClick: booleanInput(input, "dblClick"),
@@ -221,11 +232,11 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         required: ["uid", "value"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const uid = stringInput(input, "uid").trim();
         if (!uid) throw new Error("uid is required.");
-        return toToolResult(
-          await serviceOrThrow(service).fill({
+        return withBrowserProgress(context, `Filling browser element ${uid}`, () =>
+          serviceOrThrow(service).fill({
             pageId: numberInput(input, "pageId"),
             uid,
             value: stringInput(input, "value"),
@@ -258,11 +269,11 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         required: ["elements"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const elements = formElementsInput(input).filter((element) => element.uid);
         if (elements.length === 0) throw new Error("elements must contain at least one uid/value pair.");
-        return toToolResult(
-          await serviceOrThrow(service).fillForm({
+        return withBrowserProgress(context, `Filling ${elements.length} browser form element${elements.length === 1 ? "" : "s"}`, () =>
+          serviceOrThrow(service).fillForm({
             pageId: numberInput(input, "pageId"),
             elements,
           }),
@@ -282,10 +293,12 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         required: ["uid"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const uid = stringInput(input, "uid").trim();
         if (!uid) throw new Error("uid is required.");
-        return toToolResult(await serviceOrThrow(service).hover({ pageId: numberInput(input, "pageId"), uid }));
+        return withBrowserProgress(context, `Hovering browser element ${uid}`, () =>
+          serviceOrThrow(service).hover({ pageId: numberInput(input, "pageId"), uid }),
+        );
       },
     },
     {
@@ -302,12 +315,14 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         required: ["fromUid", "toUid"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const fromUid = stringInput(input, "fromUid").trim();
         const toUid = stringInput(input, "toUid").trim();
         if (!fromUid || !toUid) throw new Error("fromUid and toUid are required.");
-        return toToolResult(
-          await serviceOrThrow(service).drag({ pageId: numberInput(input, "pageId"), fromUid, toUid }),
+        return withBrowserProgress(
+          context,
+          `Dragging browser element ${fromUid} to ${toUid}`,
+          () => serviceOrThrow(service).drag({ pageId: numberInput(input, "pageId"), fromUid, toUid }),
         );
       },
     },
@@ -325,10 +340,10 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         required: ["text"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const text = stringInput(input, "text");
-        return toToolResult(
-          await serviceOrThrow(service).typeText({
+        return withBrowserProgress(context, "Typing text in browser page", () =>
+          serviceOrThrow(service).typeText({
             pageId: numberInput(input, "pageId"),
             text,
             submitKey: stringInput(input, "submitKey").trim() || undefined,
@@ -355,8 +370,8 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         const filePath = workspaceResolvedPath(input, "filePath", context.workspaceRoot);
         if (!uid) throw new Error("uid is required.");
         if (!filePath) throw new Error("filePath is required.");
-        return toToolResult(
-          await serviceOrThrow(service).uploadFile({
+        return withBrowserProgress(context, `Uploading file ${filePath}`, () =>
+          serviceOrThrow(service).uploadFile({
             pageId: numberInput(input, "pageId"),
             uid,
             filePath,
@@ -377,10 +392,12 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         required: ["key"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const key = stringInput(input, "key").trim();
         if (!key) throw new Error("key is required.");
-        return toToolResult(await serviceOrThrow(service).pressKey({ pageId: numberInput(input, "pageId"), key }));
+        return withBrowserProgress(context, `Pressing browser key ${key}`, () =>
+          serviceOrThrow(service).pressKey({ pageId: numberInput(input, "pageId"), key }),
+        );
       },
     },
     {
@@ -397,11 +414,11 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         required: ["text"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const text = stringArrayInput(input, "text");
         if (text.length === 0) throw new Error("text must contain at least one string.");
-        return toToolResult(
-          await serviceOrThrow(service).waitFor({
+        return withBrowserProgress(context, `Waiting for browser text: ${text.join(", ")}`, () =>
+          serviceOrThrow(service).waitFor({
             pageId: numberInput(input, "pageId"),
             text,
             timeoutMs: numberInput(input, "timeoutMs"),
@@ -424,11 +441,11 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         required: ["function"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const functionSource = stringInput(input, "function").trim();
         if (!functionSource) throw new Error("function is required.");
-        return toToolResult(
-          await serviceOrThrow(service).evaluate({
+        return withBrowserProgress(context, "Evaluating JavaScript in browser page", () =>
+          serviceOrThrow(service).evaluate({
             pageId: numberInput(input, "pageId"),
             function: functionSource,
             args: unknownArrayInput(input, "args"),
@@ -452,9 +469,9 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         },
         additionalProperties: false,
       },
-      execute: async (input) =>
-        toToolResult(
-          await serviceOrThrow(service).listConsoleMessages({
+      execute: async (input, context) =>
+        withBrowserProgress(context, "Listing browser console messages", () =>
+          serviceOrThrow(service).listConsoleMessages({
             pageId: numberInput(input, "pageId"),
             pageSize: numberInput(input, "pageSize"),
             pageIdx: numberInput(input, "pageIdx"),
@@ -477,11 +494,11 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         required: ["msgid"],
         additionalProperties: false,
       },
-      execute: async (input) => {
+      execute: async (input, context) => {
         const msgid = numberInput(input, "msgid");
         if (msgid === undefined) throw new Error("msgid is required.");
-        return toToolResult(
-          await serviceOrThrow(service).getConsoleMessage({
+        return withBrowserProgress(context, `Reading browser console message ${msgid}`, () =>
+          serviceOrThrow(service).getConsoleMessage({
             pageId: numberInput(input, "pageId"),
             msgid,
           }),
@@ -504,9 +521,9 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         },
         additionalProperties: false,
       },
-      execute: async (input) =>
-        toToolResult(
-          await serviceOrThrow(service).listNetworkRequests({
+      execute: async (input, context) =>
+        withBrowserProgress(context, "Listing browser network requests", () =>
+          serviceOrThrow(service).listNetworkRequests({
             pageId: numberInput(input, "pageId"),
             pageSize: numberInput(input, "pageSize"),
             pageIdx: numberInput(input, "pageIdx"),
@@ -530,8 +547,8 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         additionalProperties: false,
       },
       execute: async (input, context) =>
-        toToolResult(
-          await serviceOrThrow(service).getNetworkRequest({
+        withBrowserProgress(context, "Reading browser network request", () =>
+          serviceOrThrow(service).getNetworkRequest({
             pageId: numberInput(input, "pageId"),
             reqid: numberInput(input, "reqid"),
             requestFilePath: workspaceResolvedPath(input, "requestFilePath", context.workspaceRoot) || undefined,
@@ -554,8 +571,8 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         additionalProperties: false,
       },
       execute: async (input, context) =>
-        toToolResult(
-          await serviceOrThrow(service).takeScreenshot({
+        withBrowserProgress(context, "Taking browser screenshot", () =>
+          serviceOrThrow(service).takeScreenshot({
             pageId: numberInput(input, "pageId"),
             filePath: workspaceResolvedPath(input, "filePath", context.workspaceRoot),
             format: stringInput(input, "format") === "jpeg" ? "jpeg" : "png",

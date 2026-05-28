@@ -553,6 +553,101 @@ test("chat orchestrator emits compact activity summaries for native tool events"
   }
 });
 
+test("chat orchestrator forwards tool output deltas into runtime tool cards", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
+  const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
+  await conversationService.initialize();
+
+  try {
+    const workspaceService = {
+      async getConfigSnapshot() {
+        return createConfig(tempDir);
+      },
+      async getEnabledSkillPromptContext() {
+        return "";
+      },
+      async searchKnowledgeBases() {
+        return { query: "", total: 0, results: [], searchedBases: [], warnings: [] };
+      },
+    } as unknown as WorkspaceService;
+
+    const events: ChatEvent[] = [];
+    const orchestrator = new ChatOrchestrator(conversationService, workspaceService, (event) => {
+      events.push(event);
+    });
+
+    (orchestrator as unknown as {
+      nativeCore: {
+        sendTurn(): AsyncIterable<AgentEvent>;
+      };
+    }).nativeCore = {
+      async *sendTurn() {
+        const bashCall = { id: "tool-bash-live", name: "bash", input: { command: "npm test" } };
+        yield { type: "tool_call_started", sessionId: "s", agentId: "a", toolCall: bashCall };
+        yield {
+          type: "tool_call_output_delta",
+          sessionId: "s",
+          agentId: "a",
+          toolCall: bashCall,
+          stream: "stdout",
+          text: "step one\n",
+        } as AgentEvent;
+        yield {
+          type: "tool_call_output_delta",
+          sessionId: "s",
+          agentId: "a",
+          toolCall: bashCall,
+          stream: "stderr",
+          text: "warning\n",
+        } as AgentEvent;
+        yield {
+          type: "tool_call_finished",
+          sessionId: "s",
+          agentId: "a",
+          toolCall: bashCall,
+          result: { content: "final output", metadata: { exitCode: 0 } },
+        };
+        yield { type: "turn_finished", sessionId: "s", agentId: "a", stopReason: "end_turn" };
+      },
+    };
+
+    const execution = await orchestrator.startTurnWithCompletion({ content: "run live command" });
+    await execution.completion;
+
+    const liveUpdates = events.filter(
+      (event): event is Extract<ChatEvent, { type: "tool_call_updated" }> =>
+        event.type === "tool_call_updated" &&
+        event.toolCallId === "tool-bash-live" &&
+        event.patch.status === "in_progress",
+    );
+    assert.deepEqual(
+      liveUpdates.map((event) => event.patch.content?.[0]),
+      [
+        { type: "text", text: "step one\n" },
+        { type: "text", text: "step one\nwarning\n" },
+      ],
+    );
+
+    const loaded = await conversationService.getConversation(execution.result.conversation.id);
+    const assistantMessage = loaded.messages.find((message) => message.role === "assistant");
+    assert.deepEqual(
+      assistantMessage?.runtimeTrace?.events
+        .filter((event) => event.type === "tool_call_output_delta")
+        .map((event) => [event.toolName, event.text]),
+      [
+        ["bash", "step one\n"],
+        ["bash", "warning\n"],
+      ],
+    );
+    assert.deepEqual(assistantMessage?.runtimeTrace?.toolCalls[0]?.content, [
+      { type: "text", text: "final output" },
+    ]);
+  } finally {
+    await conversationService.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("chat orchestrator preserves thought, tool, and status order in runtime timeline", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
   const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
@@ -686,7 +781,7 @@ test("chat orchestrator marks errored tool results as failed runtime tool calls"
   }
 });
 
-test("chat orchestrator marks cancelled tool results as failed runtime tool calls", async () => {
+test("chat orchestrator marks cancelled tool results as cancelled runtime tool calls", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
   const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
   await conversationService.initialize();
@@ -738,11 +833,11 @@ test("chat orchestrator marks cancelled tool results as failed runtime tool call
       (event): event is Extract<ChatEvent, { type: "tool_call_updated" }> =>
         event.type === "tool_call_updated" && event.toolCallId === "tool-mail-auth",
     );
-    assert.equal(updated?.patch.status, "failed");
+    assert.equal(updated?.patch.status, "cancelled");
 
     const loaded = await conversationService.getConversation(execution.result.conversation.id);
     const assistantMessage = loaded.messages.find((message) => message.role === "assistant");
-    assert.equal(assistantMessage?.runtimeTrace?.toolCalls[0]?.status, "failed");
+    assert.equal(assistantMessage?.runtimeTrace?.toolCalls[0]?.status, "cancelled");
   } finally {
     await conversationService.shutdown();
     await rm(tempDir, { recursive: true, force: true });

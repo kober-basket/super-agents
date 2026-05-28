@@ -2857,12 +2857,211 @@ textarea {
 .chat-thread-layout {
   --chat-thread-fade-height: 56px;
   --chat-thread-fade-bg: var(--panel);
+  position: relative;
   height: 100%;
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 0;
   padding: 0 0 18px;
+}
+
+.runtime-todo-panel {
+  --runtime-todo-accent: #2f6f5e;
+  --runtime-todo-secondary: #8ca36b;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  right: clamp(18px, 4vw, 44px);
+  z-index: 8;
+  display: grid;
+  gap: 14px;
+  width: min(340px, calc(100% - 36px));
+  max-height: min(430px, calc(100% - 168px));
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--runtime-todo-accent) 22%, var(--line));
+  border-radius: 12px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--panel) 94%, transparent),
+      color-mix(in srgb, var(--panel-soft) 90%, transparent)
+    );
+  box-shadow: var(--card-shadow), inset 0 1px 0 rgba(var(--accent-rgb), 0.08);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transition: width 160ms ease, padding 160ms ease, box-shadow 160ms ease;
+}
+
+.runtime-todo-panel.collapsed {
+  width: 44px;
+  max-height: 44px;
+  overflow: hidden;
+  padding: 8px;
+  gap: 0;
+}
+
+.runtime-todo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.runtime-todo-panel.collapsed .runtime-todo-head {
+  justify-content: center;
+  gap: 0;
+}
+
+.runtime-todo-title {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-strong);
+}
+
+.runtime-todo-title svg {
+  flex: 0 0 auto;
+  color: var(--runtime-todo-accent);
+}
+
+.runtime-todo-title strong {
+  font-size: 16px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.runtime-todo-count {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(47, 111, 94, 0.08);
+  color: var(--runtime-todo-accent);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  box-shadow: none;
+}
+
+.runtime-todo-toggle {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  background: var(--control-bg);
+  cursor: pointer;
+}
+
+.runtime-todo-toggle:hover {
+  color: var(--runtime-todo-accent);
+  background: var(--control-bg-hover);
+}
+
+.runtime-todo-subtitle {
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+}
+
+.runtime-todo-progress {
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(47, 111, 94, 0.1);
+}
+
+.runtime-todo-progress-fill {
+  display: block;
+  width: var(--runtime-todo-progress, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2f6f5e, #8ca36b);
+}
+
+.runtime-todo-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.runtime-todo-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--muted-strong);
+}
+
+.runtime-todo-marker {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  margin-top: 2px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--control-bg);
+}
+
+.runtime-todo-item.completed .runtime-todo-marker {
+  border-color: rgba(18, 183, 106, 0.48);
+  background: rgba(18, 183, 106, 0.14);
+  color: #027a48;
+}
+
+.runtime-todo-item.in_progress .runtime-todo-marker {
+  border-color: transparent;
+  background: transparent;
+  color: var(--runtime-todo-accent);
+}
+
+.runtime-todo-item.in_progress {
+  border-color: rgba(47, 111, 94, 0.16);
+  background: linear-gradient(90deg, rgba(47, 111, 94, 0.1), rgba(140, 163, 107, 0.08));
+  color: var(--text);
+}
+
+.runtime-todo-refresh-icon {
+  color: var(--runtime-todo-accent);
+  animation: spin 900ms linear infinite;
+}
+
+.runtime-todo-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.runtime-todo-copy span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-todo-item.completed .runtime-todo-copy span {
+  color: var(--muted-strong);
+  text-decoration: line-through;
+  text-decoration-color: rgba(15, 23, 42, 0.24);
 }
 
 .chat-thread-toolbar {
@@ -2881,7 +3080,7 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #111827;
+  color: var(--text);
   font-size: 15px;
   font-weight: var(--font-weight-semibold);
 }
@@ -4206,11 +4405,36 @@ textarea {
 .preview-markdown .task-list-item,
 .activity-markdown .task-list-item {
   list-style: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .message-text .task-list-item {
   margin: 2px 0 6px;
   color: var(--muted-strong);
+}
+
+.message-text .task-list-item label,
+.preview-markdown .task-list-item label,
+.activity-markdown .task-list-item label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.message-text .task-list-item input[type="checkbox"],
+.preview-markdown .task-list-item input[type="checkbox"],
+.activity-markdown .task-list-item input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  min-width: 13px;
+  padding: 0;
+  flex: 0 0 13px;
+  margin: 0.42em 0 0;
+  border-radius: 3px;
+  box-shadow: none;
+  transform: none;
+  opacity: 1;
 }
 
 .message-text .task-list-item input,
@@ -4399,7 +4623,7 @@ textarea {
 
 .activity-summary-title strong {
   flex: 0 0 auto;
-  max-width: min(180px, 42%);
+  max-width: min(280px, 60%);
   color: var(--text-strong);
   font-size: 13px;
   font-weight: var(--font-weight-semibold);
@@ -4442,6 +4666,12 @@ textarea {
   color: #b42318;
   background: rgba(254, 242, 242, 0.94);
   border-color: rgba(253, 205, 211, 0.9);
+}
+
+.activity-status-pill.cancelled {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.16);
+  border-color: rgba(245, 158, 11, 0.36);
 }
 
 .activity-summary-main p {
@@ -4643,19 +4873,27 @@ textarea {
 
 .question-card {
   display: grid;
-  gap: 14px;
-  padding: 14px;
+  grid-template-rows: auto auto auto;
+  gap: 12px;
+  padding: 12px 14px;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  box-shadow: 0 16px 40px rgba(17, 24, 39, 0.06);
 }
 
 .question-card-head,
-.question-card-actions,
-.question-block-copy,
-.question-option {
-  display: grid;
-  gap: 6px;
+.question-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.question-card-head {
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .question-card-head strong,
@@ -4664,84 +4902,204 @@ textarea {
   margin: 0;
 }
 
+.question-card-head strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: var(--font-size-title);
+}
+
+.question-option svg {
+  flex: 0 0 auto;
+}
+
 .question-card-head span,
 .question-block-copy span,
 .question-option span {
   color: var(--muted);
 }
 
+.question-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--line-soft);
+  font-size: var(--font-size-caption);
+  line-height: 1.2;
+}
+
+.question-jump-list {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.question-jump {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-strong);
+  font-size: var(--font-size-caption);
+  line-height: 1;
+}
+
+.question-jump:hover:not(:disabled) {
+  background: var(--panel-soft);
+}
+
+.question-jump.selected {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+  color: var(--text);
+}
+
+.question-jump.answered {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 16%, var(--line));
+  color: var(--text);
+}
+
 .question-card-body {
   display: grid;
-  gap: 14px;
+  gap: 8px;
+  min-height: 0;
 }
 
 .question-block {
   display: grid;
   gap: 10px;
-  padding: 12px;
-  border-radius: 16px;
-  background: #fcfaf6;
-  border: 1px solid var(--line-soft);
+  padding: 2px 0 0;
 }
 
-.question-block-copy span {
+.question-block-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.question-topic {
   font-size: var(--font-size-micro);
   letter-spacing: 0;
   text-transform: uppercase;
+  color: var(--muted);
+}
+
+.question-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.question-number {
+  flex: 0 0 auto;
+  min-width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--muted-strong);
+  font-size: var(--font-size-caption);
+  line-height: 1;
 }
 
 .question-block-copy p {
   color: var(--text);
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: var(--font-size-ui);
+  line-height: 1.5;
 }
 
 .question-option-list {
   display: grid;
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  gap: 10px;
 }
 
 .question-option {
   width: 100%;
-  padding: 10px 12px;
-  border-radius: 14px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--text);
   text-align: left;
 }
 
 .question-option:hover {
-  background: #faf7f0;
-  border-color: #d8ccbb;
+  background: var(--panel-soft);
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--line));
 }
 
 .question-option.selected {
-  background: rgba(37, 99, 235, 0.08);
-  border-color: rgba(37, 99, 235, 0.3);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--line));
 }
 
 .question-option strong {
   font-size: var(--font-size-ui);
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .question-option span {
-  font-size: var(--font-size-ui);
-  line-height: 1.55;
+  font-size: var(--font-size-caption);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.question-freeform {
+  display: grid;
+}
+
+.question-freeform-input {
+  width: 100%;
+  min-height: 34px;
+  max-height: 96px;
+  resize: vertical;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.35;
+}
+
+.question-freeform-input:focus {
+  outline: 2px solid var(--focus-ring);
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--line));
 }
 
 .question-card-actions {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 2px;
 }
 
 .question-action {
-  min-height: 36px;
+  min-height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  border-radius: 12px;
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: 10px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: transparent;
   color: var(--muted-strong);
 }
 
@@ -4755,7 +5113,7 @@ textarea {
 
 .question-action.stop {
   background: #fff4f2;
-  border-color: rgba(180, 35, 24, 0.12);
+  border-color: rgba(180, 35, 24, 0.14);
   color: #b42318;
 }
 
@@ -9523,8 +9881,8 @@ body.pane-resizing .app-shell.with-preview .right-workspace-slot > .right-worksp
   display: inline-grid;
   place-items: center;
   border-radius: 10px;
-  border: 1px solid #e7eaf0;
-  background: #f7f7f8;
+  border: 1px solid var(--line);
+  background: var(--control-bg);
   color: var(--muted-strong);
   line-height: 0;
   box-shadow: none;
@@ -9544,8 +9902,8 @@ body.pane-resizing .app-shell.with-preview .right-workspace-slot > .right-worksp
 }
 
 .right-pane-toggle:hover {
-  border-color: #dde2ea;
-  background: #fff;
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--line));
+  background: var(--control-bg-hover);
   color: var(--text);
 }
 
@@ -9555,8 +9913,8 @@ body.pane-resizing .app-shell.with-preview .right-workspace-slot > .right-worksp
 }
 
 .right-pane-toggle.is-open {
-  border-color: #e7eaf0;
-  background: #f2f3f5;
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--line));
+  background: var(--control-bg-hover);
   color: var(--text);
 }
 
@@ -9568,9 +9926,9 @@ body.pane-resizing .app-shell.with-preview .right-workspace-slot > .right-worksp
   max-width: min(32vw, 280px);
   height: 34px;
   padding: 1px;
-  border: 1px solid #e7eaf0;
+  border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--control-bg);
 }
 
 .conversation-workspace-control .right-pane-toggle {
@@ -9614,7 +9972,7 @@ body.pane-resizing .app-shell.with-preview .right-workspace-slot > .right-worksp
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #fbfbfa 0%, #f5f5f3 100%);
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-soft) 100%);
 }
 
 .app-shell.with-preview .right-workspace-slot > .right-workspace-pane {
@@ -9656,7 +10014,7 @@ body.pane-resizing .app-shell.with-preview .right-workspace-slot > .right-worksp
   gap: 8px;
   padding: 7px 10px;
   border-bottom: 1px solid var(--line-soft);
-  background: #fff;
+  background: var(--panel);
   backdrop-filter: none;
 }
 
@@ -9693,11 +10051,11 @@ body.pane-resizing .app-shell.with-preview .right-workspace-slot > .right-worksp
 }
 
 .right-workspace-tab:hover {
-  background: #f7f7f8;
+  background: var(--control-bg-hover);
 }
 
 .right-workspace-tab.active {
-  background: #f5f5f6;
+  background: var(--control-bg);
   border-color: transparent;
   color: var(--text);
   box-shadow: none;
@@ -9755,16 +10113,16 @@ body.pane-resizing .app-shell.with-preview .right-workspace-slot > .right-worksp
   gap: 3px;
   padding: 0 9px;
   border-radius: 10px;
-  border: 1px solid #e7eaf0;
-  background: #fff;
+  border: 1px solid var(--line);
+  background: var(--control-bg);
   color: var(--text);
   line-height: 0;
   box-shadow: none;
 }
 
 .right-workspace-add-button:hover {
-  border-color: #dde2ea;
-  background: #f7f7f8;
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--line));
+  background: var(--control-bg-hover);
 }
 
 .right-workspace-action-menu {
@@ -9778,7 +10136,7 @@ body.pane-resizing .app-shell.with-preview .right-workspace-slot > .right-worksp
   padding: 6px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--panel-overlay);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
 }
 
@@ -12226,11 +12584,19 @@ textarea:focus,
   font-weight: var(--font-weight-semibold);
 }
 
+.activity-status-pill.cancelled {
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.36);
+  color: #b45309;
+  font-weight: var(--font-weight-semibold);
+}
+
 .activity-status-pill.success svg {
   color: currentColor;
 }
 
-.activity-status-pill.error svg {
+.activity-status-pill.error svg,
+.activity-status-pill.cancelled svg {
   color: currentColor;
 }
 
@@ -12280,6 +12646,7 @@ textarea:focus,
 
 .activity-panel pre {
   margin: 0;
+  max-height: min(360px, 46vh);
   padding: 8px 10px;
   border-radius: 10px;
   border: 0;
@@ -12315,7 +12682,7 @@ textarea:focus,
 
 .activity-command-shell {
   position: relative;
-  max-height: 260px;
+  max-height: min(320px, 46vh);
   overflow: auto;
   padding: 10px 12px;
   border-radius: 10px;
@@ -12363,6 +12730,7 @@ textarea:focus,
 .activity-diff-pre {
   display: grid;
   margin: 0;
+  max-height: min(420px, 48vh);
   padding: 8px 0;
   border-radius: 10px;
   border: 1px solid rgba(15, 23, 42, 0.06);
@@ -12375,9 +12743,9 @@ textarea:focus,
 
 .activity-diff-line {
   display: flex;
-  gap: 8px;
+  gap: 5px;
   min-width: max-content;
-  padding: 0 10px;
+  padding: 0 8px;
   white-space: pre-wrap;
 }
 
@@ -12405,6 +12773,18 @@ textarea:focus,
   flex: 0 0 auto;
   color: currentColor;
   opacity: 0.8;
+}
+
+.activity-diff-line-number {
+  min-width: 3ch;
+  flex: 0 0 auto;
+  color: rgba(71, 84, 103, 0.68);
+  text-align: right;
+  user-select: none;
+}
+
+.activity-diff-content {
+  flex: 0 0 auto;
 }
 
 .activity-markdown p,
@@ -14139,6 +14519,8 @@ textarea:focus,
   --dark-border-1: rgba(var(--accent-rgb), 0.16);
   --dark-border-2: rgba(var(--accent-rgb), 0.24);
   --dark-shadow-soft: 0 16px 36px rgba(2, 8, 23, 0.18);
+  --control-bg: rgba(255, 255, 255, 0.07);
+  --control-bg-hover: rgba(255, 255, 255, 0.11);
 }
 
 :root[data-theme="graphite"] .sidebar,
@@ -14408,6 +14790,15 @@ textarea:focus,
   color: #fda29b;
 }
 
+:root[data-theme="graphite"] .activity-status-pill.cancelled,
+:root[data-theme="dusk"] .activity-status-pill.cancelled,
+:root[data-theme="midnight"] .activity-status-pill.cancelled,
+:root[data-theme="ember"] .activity-status-pill.cancelled {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(245, 158, 11, 0.44);
+  color: #fbbf24;
+}
+
 :root[data-theme="graphite"] .activity-summary-title strong,
 :root[data-theme="graphite"] .activity-card pre,
 :root[data-theme="graphite"] .activity-panel-label,
@@ -14476,6 +14867,13 @@ textarea:focus,
 :root[data-theme="ember"] .activity-diff-line.meta,
 :root[data-theme="ember"] .activity-diff-line.context {
   color: var(--muted-strong);
+}
+
+:root[data-theme="graphite"] .activity-diff-line-number,
+:root[data-theme="dusk"] .activity-diff-line-number,
+:root[data-theme="midnight"] .activity-diff-line-number,
+:root[data-theme="ember"] .activity-diff-line-number {
+  color: rgba(226, 232, 240, 0.52);
 }
 
 :root[data-theme="graphite"] .activity-diff-line.added,
@@ -15103,6 +15501,816 @@ textarea:focus,
   color: #fda29b;
 }
 
+:root[data-theme="graphite"] input,
+:root[data-theme="graphite"] textarea,
+:root[data-theme="graphite"] select,
+:root[data-theme="graphite"] .memory-modal-body input,
+:root[data-theme="graphite"] .memory-modal-body textarea,
+:root[data-theme="graphite"] .memory-modal-body select,
+:root[data-theme="dusk"] input,
+:root[data-theme="dusk"] textarea,
+:root[data-theme="dusk"] select,
+:root[data-theme="dusk"] .memory-modal-body input,
+:root[data-theme="dusk"] .memory-modal-body textarea,
+:root[data-theme="dusk"] .memory-modal-body select,
+:root[data-theme="midnight"] input,
+:root[data-theme="midnight"] textarea,
+:root[data-theme="midnight"] select,
+:root[data-theme="midnight"] .memory-modal-body input,
+:root[data-theme="midnight"] .memory-modal-body textarea,
+:root[data-theme="midnight"] .memory-modal-body select,
+:root[data-theme="ember"] input,
+:root[data-theme="ember"] textarea,
+:root[data-theme="ember"] select,
+:root[data-theme="ember"] .memory-modal-body input,
+:root[data-theme="ember"] .memory-modal-body textarea,
+:root[data-theme="ember"] .memory-modal-body select {
+  background: var(--input-bg);
+  border-color: var(--dark-border-1);
+  color: var(--text);
+}
+
+:root[data-theme="graphite"] .chat-model-panel,
+:root[data-theme="graphite"] .chat-slash-suggestions,
+:root[data-theme="graphite"] .question-card,
+:root[data-theme="graphite"] .memory-panel,
+:root[data-theme="graphite"] .memory-entry-row,
+:root[data-theme="graphite"] .memory-modal,
+:root[data-theme="graphite"] .workspace-file-preview,
+:root[data-theme="graphite"] .workspace-file-breadcrumb,
+:root[data-theme="graphite"] .workspace-file-tree-toolbar,
+:root[data-theme="graphite"] .workspace-file-tree-head,
+:root[data-theme="graphite"] .workspace-file-list,
+:root[data-theme="graphite"] .model-picker-modal,
+:root[data-theme="graphite"] .mcp-workbench-modal,
+:root[data-theme="graphite"] .mcp-tool-row,
+:root[data-theme="graphite"] .mcp-tool-editor,
+:root[data-theme="graphite"] .mcp-tool-card,
+:root[data-theme="graphite"] .mail-auth-request-card,
+:root[data-theme="graphite"] .mail-account-row,
+:root[data-theme="graphite"] .mail-server-grid,
+:root[data-theme="graphite"] .skill-actions-menu,
+:root[data-theme="graphite"] .skill-detail-modal,
+:root[data-theme="graphite"] .knowledge-reference-modal,
+:root[data-theme="graphite"] .knowledge-reference-row,
+:root[data-theme="graphite"] .knowledge-reference-detail,
+:root[data-theme="graphite"] .preview-surface,
+:root[data-theme="graphite"] .preview-editor-shell,
+:root[data-theme="graphite"] .preview-editor-lines,
+:root[data-theme="graphite"] .preview-editor-line-number,
+:root[data-theme="dusk"] .chat-model-panel,
+:root[data-theme="dusk"] .chat-slash-suggestions,
+:root[data-theme="dusk"] .question-card,
+:root[data-theme="dusk"] .memory-panel,
+:root[data-theme="dusk"] .memory-entry-row,
+:root[data-theme="dusk"] .memory-modal,
+:root[data-theme="dusk"] .workspace-file-preview,
+:root[data-theme="dusk"] .workspace-file-breadcrumb,
+:root[data-theme="dusk"] .workspace-file-tree-toolbar,
+:root[data-theme="dusk"] .workspace-file-tree-head,
+:root[data-theme="dusk"] .workspace-file-list,
+:root[data-theme="dusk"] .model-picker-modal,
+:root[data-theme="dusk"] .mcp-workbench-modal,
+:root[data-theme="dusk"] .mcp-tool-row,
+:root[data-theme="dusk"] .mcp-tool-editor,
+:root[data-theme="dusk"] .mcp-tool-card,
+:root[data-theme="dusk"] .mail-auth-request-card,
+:root[data-theme="dusk"] .mail-account-row,
+:root[data-theme="dusk"] .mail-server-grid,
+:root[data-theme="dusk"] .skill-actions-menu,
+:root[data-theme="dusk"] .skill-detail-modal,
+:root[data-theme="dusk"] .knowledge-reference-modal,
+:root[data-theme="dusk"] .knowledge-reference-row,
+:root[data-theme="dusk"] .knowledge-reference-detail,
+:root[data-theme="dusk"] .preview-surface,
+:root[data-theme="dusk"] .preview-editor-shell,
+:root[data-theme="dusk"] .preview-editor-lines,
+:root[data-theme="dusk"] .preview-editor-line-number,
+:root[data-theme="midnight"] .chat-model-panel,
+:root[data-theme="midnight"] .chat-slash-suggestions,
+:root[data-theme="midnight"] .question-card,
+:root[data-theme="midnight"] .memory-panel,
+:root[data-theme="midnight"] .memory-entry-row,
+:root[data-theme="midnight"] .memory-modal,
+:root[data-theme="midnight"] .workspace-file-preview,
+:root[data-theme="midnight"] .workspace-file-breadcrumb,
+:root[data-theme="midnight"] .workspace-file-tree-toolbar,
+:root[data-theme="midnight"] .workspace-file-tree-head,
+:root[data-theme="midnight"] .workspace-file-list,
+:root[data-theme="midnight"] .model-picker-modal,
+:root[data-theme="midnight"] .mcp-workbench-modal,
+:root[data-theme="midnight"] .mcp-tool-row,
+:root[data-theme="midnight"] .mcp-tool-editor,
+:root[data-theme="midnight"] .mcp-tool-card,
+:root[data-theme="midnight"] .mail-auth-request-card,
+:root[data-theme="midnight"] .mail-account-row,
+:root[data-theme="midnight"] .mail-server-grid,
+:root[data-theme="midnight"] .skill-actions-menu,
+:root[data-theme="midnight"] .skill-detail-modal,
+:root[data-theme="midnight"] .knowledge-reference-modal,
+:root[data-theme="midnight"] .knowledge-reference-row,
+:root[data-theme="midnight"] .knowledge-reference-detail,
+:root[data-theme="midnight"] .preview-surface,
+:root[data-theme="midnight"] .preview-editor-shell,
+:root[data-theme="midnight"] .preview-editor-lines,
+:root[data-theme="midnight"] .preview-editor-line-number,
+:root[data-theme="ember"] .chat-model-panel,
+:root[data-theme="ember"] .chat-slash-suggestions,
+:root[data-theme="ember"] .question-card,
+:root[data-theme="ember"] .memory-panel,
+:root[data-theme="ember"] .memory-entry-row,
+:root[data-theme="ember"] .memory-modal,
+:root[data-theme="ember"] .workspace-file-preview,
+:root[data-theme="ember"] .workspace-file-breadcrumb,
+:root[data-theme="ember"] .workspace-file-tree-toolbar,
+:root[data-theme="ember"] .workspace-file-tree-head,
+:root[data-theme="ember"] .workspace-file-list,
+:root[data-theme="ember"] .model-picker-modal,
+:root[data-theme="ember"] .mcp-workbench-modal,
+:root[data-theme="ember"] .mcp-tool-row,
+:root[data-theme="ember"] .mcp-tool-editor,
+:root[data-theme="ember"] .mcp-tool-card,
+:root[data-theme="ember"] .mail-auth-request-card,
+:root[data-theme="ember"] .mail-account-row,
+:root[data-theme="ember"] .mail-server-grid,
+:root[data-theme="ember"] .skill-actions-menu,
+:root[data-theme="ember"] .skill-detail-modal,
+:root[data-theme="ember"] .knowledge-reference-modal,
+:root[data-theme="ember"] .knowledge-reference-row,
+:root[data-theme="ember"] .knowledge-reference-detail,
+:root[data-theme="ember"] .preview-surface,
+:root[data-theme="ember"] .preview-editor-shell,
+:root[data-theme="ember"] .preview-editor-lines,
+:root[data-theme="ember"] .preview-editor-line-number {
+  background: var(--dark-surface-2);
+  border-color: var(--dark-border-1);
+  box-shadow: var(--dark-shadow-soft);
+}
+
+:root[data-theme="graphite"] .workspace-file-tree,
+:root[data-theme="dusk"] .workspace-file-tree,
+:root[data-theme="midnight"] .workspace-file-tree,
+:root[data-theme="ember"] .workspace-file-tree {
+  background: var(--dark-surface-3);
+  border-color: var(--dark-border-1);
+}
+
+:root[data-theme="graphite"] .question-option,
+:root[data-theme="graphite"] .question-freeform-input,
+:root[data-theme="graphite"] .knowledge-picker-row,
+:root[data-theme="graphite"] .knowledge-picker-empty,
+:root[data-theme="graphite"] .knowledge-picker-manage,
+:root[data-theme="graphite"] .knowledge-picker-check,
+:root[data-theme="graphite"] .model-picker-row,
+:root[data-theme="graphite"] .model-group-head,
+:root[data-theme="graphite"] .mail-auth-secondary-action,
+:root[data-theme="graphite"] .workspace-file-search,
+:root[data-theme="graphite"] .workspace-file-toolbar-button:hover:not(:disabled),
+:root[data-theme="graphite"] .workspace-file-toolbar-button.active,
+:root[data-theme="graphite"] .workspace-file-row:hover,
+:root[data-theme="graphite"] .workspace-file-row.active,
+:root[data-theme="graphite"] .browser-toolbar,
+:root[data-theme="graphite"] .browser-address-field,
+:root[data-theme="graphite"] .preview-toolbar-group,
+:root[data-theme="graphite"] .preview-editor-line:hover,
+:root[data-theme="dusk"] .question-option,
+:root[data-theme="dusk"] .question-freeform-input,
+:root[data-theme="dusk"] .knowledge-picker-row,
+:root[data-theme="dusk"] .knowledge-picker-empty,
+:root[data-theme="dusk"] .knowledge-picker-manage,
+:root[data-theme="dusk"] .knowledge-picker-check,
+:root[data-theme="dusk"] .model-picker-row,
+:root[data-theme="dusk"] .model-group-head,
+:root[data-theme="dusk"] .mail-auth-secondary-action,
+:root[data-theme="dusk"] .workspace-file-search,
+:root[data-theme="dusk"] .workspace-file-toolbar-button:hover:not(:disabled),
+:root[data-theme="dusk"] .workspace-file-toolbar-button.active,
+:root[data-theme="dusk"] .workspace-file-row:hover,
+:root[data-theme="dusk"] .workspace-file-row.active,
+:root[data-theme="dusk"] .browser-toolbar,
+:root[data-theme="dusk"] .browser-address-field,
+:root[data-theme="dusk"] .preview-toolbar-group,
+:root[data-theme="dusk"] .preview-editor-line:hover,
+:root[data-theme="midnight"] .question-option,
+:root[data-theme="midnight"] .question-freeform-input,
+:root[data-theme="midnight"] .knowledge-picker-row,
+:root[data-theme="midnight"] .knowledge-picker-empty,
+:root[data-theme="midnight"] .knowledge-picker-manage,
+:root[data-theme="midnight"] .knowledge-picker-check,
+:root[data-theme="midnight"] .model-picker-row,
+:root[data-theme="midnight"] .model-group-head,
+:root[data-theme="midnight"] .mail-auth-secondary-action,
+:root[data-theme="midnight"] .workspace-file-search,
+:root[data-theme="midnight"] .workspace-file-toolbar-button:hover:not(:disabled),
+:root[data-theme="midnight"] .workspace-file-toolbar-button.active,
+:root[data-theme="midnight"] .workspace-file-row:hover,
+:root[data-theme="midnight"] .workspace-file-row.active,
+:root[data-theme="midnight"] .browser-toolbar,
+:root[data-theme="midnight"] .browser-address-field,
+:root[data-theme="midnight"] .preview-toolbar-group,
+:root[data-theme="midnight"] .preview-editor-line:hover,
+:root[data-theme="ember"] .question-option,
+:root[data-theme="ember"] .question-freeform-input,
+:root[data-theme="ember"] .knowledge-picker-row,
+:root[data-theme="ember"] .knowledge-picker-empty,
+:root[data-theme="ember"] .knowledge-picker-manage,
+:root[data-theme="ember"] .knowledge-picker-check,
+:root[data-theme="ember"] .model-picker-row,
+:root[data-theme="ember"] .model-group-head,
+:root[data-theme="ember"] .mail-auth-secondary-action,
+:root[data-theme="ember"] .workspace-file-search,
+:root[data-theme="ember"] .workspace-file-toolbar-button:hover:not(:disabled),
+:root[data-theme="ember"] .workspace-file-toolbar-button.active,
+:root[data-theme="ember"] .workspace-file-row:hover,
+:root[data-theme="ember"] .workspace-file-row.active,
+:root[data-theme="ember"] .browser-toolbar,
+:root[data-theme="ember"] .browser-address-field,
+:root[data-theme="ember"] .preview-toolbar-group,
+:root[data-theme="ember"] .preview-editor-line:hover {
+  background: var(--dark-surface-3);
+  border-color: var(--dark-border-1);
+  color: var(--text);
+}
+
+:root[data-theme="graphite"] .preview-head,
+:root[data-theme="graphite"] .preview-toolbar,
+:root[data-theme="graphite"] .preview-surface-head,
+:root[data-theme="dusk"] .preview-head,
+:root[data-theme="dusk"] .preview-toolbar,
+:root[data-theme="dusk"] .preview-surface-head,
+:root[data-theme="midnight"] .preview-head,
+:root[data-theme="midnight"] .preview-toolbar,
+:root[data-theme="midnight"] .preview-surface-head,
+:root[data-theme="ember"] .preview-head,
+:root[data-theme="ember"] .preview-toolbar,
+:root[data-theme="ember"] .preview-surface-head {
+  background: var(--panel-overlay);
+  border-color: var(--dark-border-1);
+}
+
+:root[data-theme="graphite"] .model-picker-row.active,
+:root[data-theme="graphite"] .knowledge-picker-row:hover,
+:root[data-theme="graphite"] .knowledge-picker-manage:hover,
+:root[data-theme="dusk"] .model-picker-row.active,
+:root[data-theme="dusk"] .knowledge-picker-row:hover,
+:root[data-theme="dusk"] .knowledge-picker-manage:hover,
+:root[data-theme="midnight"] .model-picker-row.active,
+:root[data-theme="midnight"] .knowledge-picker-row:hover,
+:root[data-theme="midnight"] .knowledge-picker-manage:hover,
+:root[data-theme="ember"] .model-picker-row.active,
+:root[data-theme="ember"] .knowledge-picker-row:hover,
+:root[data-theme="ember"] .knowledge-picker-manage:hover {
+  background: var(--dark-surface-hover);
+  border-color: var(--dark-border-2);
+}
+
+:root[data-theme="graphite"] .model-capability-tag,
+:root[data-theme="dusk"] .model-capability-tag,
+:root[data-theme="midnight"] .model-capability-tag,
+:root[data-theme="ember"] .model-capability-tag {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--muted-strong);
+}
+
+:root[data-theme="graphite"] .memory-entry-title-row span,
+:root[data-theme="graphite"] .memory-muted-badge,
+:root[data-theme="graphite"] .memory-icon-button,
+:root[data-theme="graphite"] .memory-inline-action,
+:root[data-theme="graphite"] .memory-toggle-row,
+:root[data-theme="dusk"] .memory-entry-title-row span,
+:root[data-theme="dusk"] .memory-muted-badge,
+:root[data-theme="dusk"] .memory-icon-button,
+:root[data-theme="dusk"] .memory-inline-action,
+:root[data-theme="dusk"] .memory-toggle-row,
+:root[data-theme="midnight"] .memory-entry-title-row span,
+:root[data-theme="midnight"] .memory-muted-badge,
+:root[data-theme="midnight"] .memory-icon-button,
+:root[data-theme="midnight"] .memory-inline-action,
+:root[data-theme="midnight"] .memory-toggle-row,
+:root[data-theme="ember"] .memory-entry-title-row span,
+:root[data-theme="ember"] .memory-muted-badge,
+:root[data-theme="ember"] .memory-icon-button,
+:root[data-theme="ember"] .memory-inline-action,
+:root[data-theme="ember"] .memory-toggle-row {
+  background: var(--control-bg);
+  border-color: var(--dark-border-1);
+  color: var(--muted-strong);
+}
+
+:root[data-theme="graphite"] .composer-card,
+:root[data-theme="graphite"] .composer-card.home-mode,
+:root[data-theme="graphite"] .composer-attachment-card,
+:root[data-theme="graphite"] .composer-image-attachment-card,
+:root[data-theme="graphite"] .chat-visual-surface,
+:root[data-theme="graphite"] .chat-visual-clear,
+:root[data-theme="graphite"] .skill-card,
+:root[data-theme="graphite"] .skill-detail-markdown,
+:root[data-theme="graphite"] .tool-message-card,
+:root[data-theme="graphite"] .tool-message-card[open],
+:root[data-theme="graphite"] .preview-pane,
+:root[data-theme="graphite"] .file-tile,
+:root[data-theme="graphite"] .file-tile-icon,
+:root[data-theme="graphite"] .browser-instance-tabs,
+:root[data-theme="graphite"] .browser-instance-tab,
+:root[data-theme="graphite"] .assistant-settings-stage .provider-detail-card,
+:root[data-theme="graphite"] .assistant-settings-stage .provider-nav-card,
+:root[data-theme="graphite"] .assistant-settings-stage .model-picker-row,
+:root[data-theme="graphite"] .knowledge-modal,
+:root[data-theme="graphite"] .knowledge-base-modal,
+:root[data-theme="graphite"] .mcp-tool-panel,
+:root[data-theme="graphite"] .mcp-parameter-item,
+:root[data-theme="graphite"] .mcp-empty-inline,
+:root[data-theme="graphite"] .mcp-stage-empty,
+:root[data-theme="graphite"] .mail-oauth-callback,
+:root[data-theme="dusk"] .composer-card,
+:root[data-theme="dusk"] .composer-card.home-mode,
+:root[data-theme="dusk"] .composer-attachment-card,
+:root[data-theme="dusk"] .composer-image-attachment-card,
+:root[data-theme="dusk"] .chat-visual-surface,
+:root[data-theme="dusk"] .chat-visual-clear,
+:root[data-theme="dusk"] .skill-card,
+:root[data-theme="dusk"] .skill-detail-markdown,
+:root[data-theme="dusk"] .tool-message-card,
+:root[data-theme="dusk"] .tool-message-card[open],
+:root[data-theme="dusk"] .preview-pane,
+:root[data-theme="dusk"] .file-tile,
+:root[data-theme="dusk"] .file-tile-icon,
+:root[data-theme="dusk"] .browser-instance-tabs,
+:root[data-theme="dusk"] .browser-instance-tab,
+:root[data-theme="dusk"] .assistant-settings-stage .provider-detail-card,
+:root[data-theme="dusk"] .assistant-settings-stage .provider-nav-card,
+:root[data-theme="dusk"] .assistant-settings-stage .model-picker-row,
+:root[data-theme="dusk"] .knowledge-modal,
+:root[data-theme="dusk"] .knowledge-base-modal,
+:root[data-theme="dusk"] .mcp-tool-panel,
+:root[data-theme="dusk"] .mcp-parameter-item,
+:root[data-theme="dusk"] .mcp-empty-inline,
+:root[data-theme="dusk"] .mcp-stage-empty,
+:root[data-theme="dusk"] .mail-oauth-callback,
+:root[data-theme="midnight"] .composer-card,
+:root[data-theme="midnight"] .composer-card.home-mode,
+:root[data-theme="midnight"] .composer-attachment-card,
+:root[data-theme="midnight"] .composer-image-attachment-card,
+:root[data-theme="midnight"] .chat-visual-surface,
+:root[data-theme="midnight"] .chat-visual-clear,
+:root[data-theme="midnight"] .skill-card,
+:root[data-theme="midnight"] .skill-detail-markdown,
+:root[data-theme="midnight"] .tool-message-card,
+:root[data-theme="midnight"] .tool-message-card[open],
+:root[data-theme="midnight"] .preview-pane,
+:root[data-theme="midnight"] .file-tile,
+:root[data-theme="midnight"] .file-tile-icon,
+:root[data-theme="midnight"] .browser-instance-tabs,
+:root[data-theme="midnight"] .browser-instance-tab,
+:root[data-theme="midnight"] .assistant-settings-stage .provider-detail-card,
+:root[data-theme="midnight"] .assistant-settings-stage .provider-nav-card,
+:root[data-theme="midnight"] .assistant-settings-stage .model-picker-row,
+:root[data-theme="midnight"] .knowledge-modal,
+:root[data-theme="midnight"] .knowledge-base-modal,
+:root[data-theme="midnight"] .mcp-tool-panel,
+:root[data-theme="midnight"] .mcp-parameter-item,
+:root[data-theme="midnight"] .mcp-empty-inline,
+:root[data-theme="midnight"] .mcp-stage-empty,
+:root[data-theme="midnight"] .mail-oauth-callback,
+:root[data-theme="ember"] .composer-card,
+:root[data-theme="ember"] .composer-card.home-mode,
+:root[data-theme="ember"] .composer-attachment-card,
+:root[data-theme="ember"] .composer-image-attachment-card,
+:root[data-theme="ember"] .chat-visual-surface,
+:root[data-theme="ember"] .chat-visual-clear,
+:root[data-theme="ember"] .skill-card,
+:root[data-theme="ember"] .skill-detail-markdown,
+:root[data-theme="ember"] .tool-message-card,
+:root[data-theme="ember"] .tool-message-card[open],
+:root[data-theme="ember"] .preview-pane,
+:root[data-theme="ember"] .file-tile,
+:root[data-theme="ember"] .file-tile-icon,
+:root[data-theme="ember"] .browser-instance-tabs,
+:root[data-theme="ember"] .browser-instance-tab,
+:root[data-theme="ember"] .assistant-settings-stage .provider-detail-card,
+:root[data-theme="ember"] .assistant-settings-stage .provider-nav-card,
+:root[data-theme="ember"] .assistant-settings-stage .model-picker-row,
+:root[data-theme="ember"] .knowledge-modal,
+:root[data-theme="ember"] .knowledge-base-modal,
+:root[data-theme="ember"] .mcp-tool-panel,
+:root[data-theme="ember"] .mcp-parameter-item,
+:root[data-theme="ember"] .mcp-empty-inline,
+:root[data-theme="ember"] .mcp-stage-empty,
+:root[data-theme="ember"] .mail-oauth-callback {
+  background: var(--dark-surface-2);
+  border-color: var(--dark-border-1);
+  box-shadow: var(--dark-shadow-soft);
+}
+
+:root[data-theme="graphite"] .secondary-button,
+:root[data-theme="graphite"] .toolbar-chip,
+:root[data-theme="graphite"] .status-pill,
+:root[data-theme="graphite"] .toggle-button,
+:root[data-theme="graphite"] .folder-button,
+:root[data-theme="graphite"] .composer-file-chip,
+:root[data-theme="graphite"] .composer-attachment-remove,
+:root[data-theme="graphite"] .chat-model-option,
+:root[data-theme="graphite"] .chat-thread-actions-trigger,
+:root[data-theme="graphite"] .chat-thread-actions-option,
+:root[data-theme="graphite"] .chat-slash-suggestion:hover,
+:root[data-theme="graphite"] .chat-slash-suggestion.active,
+:root[data-theme="graphite"] .icon-action-button,
+:root[data-theme="graphite"] .skill-state-button,
+:root[data-theme="graphite"] .server-row-action,
+:root[data-theme="graphite"] .skills-toolbar-actions .skill-toolbar-icon-button,
+:root[data-theme="graphite"] .skills-toolbar-actions .search-field input,
+:root[data-theme="graphite"] .knowledge-inline-action,
+:root[data-theme="graphite"] .knowledge-picker-clear,
+:root[data-theme="dusk"] .secondary-button,
+:root[data-theme="dusk"] .toolbar-chip,
+:root[data-theme="dusk"] .status-pill,
+:root[data-theme="dusk"] .toggle-button,
+:root[data-theme="dusk"] .folder-button,
+:root[data-theme="dusk"] .composer-file-chip,
+:root[data-theme="dusk"] .composer-attachment-remove,
+:root[data-theme="dusk"] .chat-model-option,
+:root[data-theme="dusk"] .chat-thread-actions-trigger,
+:root[data-theme="dusk"] .chat-thread-actions-option,
+:root[data-theme="dusk"] .chat-slash-suggestion:hover,
+:root[data-theme="dusk"] .chat-slash-suggestion.active,
+:root[data-theme="dusk"] .icon-action-button,
+:root[data-theme="dusk"] .skill-state-button,
+:root[data-theme="dusk"] .server-row-action,
+:root[data-theme="dusk"] .skills-toolbar-actions .skill-toolbar-icon-button,
+:root[data-theme="dusk"] .skills-toolbar-actions .search-field input,
+:root[data-theme="dusk"] .knowledge-inline-action,
+:root[data-theme="dusk"] .knowledge-picker-clear,
+:root[data-theme="midnight"] .secondary-button,
+:root[data-theme="midnight"] .toolbar-chip,
+:root[data-theme="midnight"] .status-pill,
+:root[data-theme="midnight"] .toggle-button,
+:root[data-theme="midnight"] .folder-button,
+:root[data-theme="midnight"] .composer-file-chip,
+:root[data-theme="midnight"] .composer-attachment-remove,
+:root[data-theme="midnight"] .chat-model-option,
+:root[data-theme="midnight"] .chat-thread-actions-trigger,
+:root[data-theme="midnight"] .chat-thread-actions-option,
+:root[data-theme="midnight"] .chat-slash-suggestion:hover,
+:root[data-theme="midnight"] .chat-slash-suggestion.active,
+:root[data-theme="midnight"] .icon-action-button,
+:root[data-theme="midnight"] .skill-state-button,
+:root[data-theme="midnight"] .server-row-action,
+:root[data-theme="midnight"] .skills-toolbar-actions .skill-toolbar-icon-button,
+:root[data-theme="midnight"] .skills-toolbar-actions .search-field input,
+:root[data-theme="midnight"] .knowledge-inline-action,
+:root[data-theme="midnight"] .knowledge-picker-clear,
+:root[data-theme="ember"] .secondary-button,
+:root[data-theme="ember"] .toolbar-chip,
+:root[data-theme="ember"] .status-pill,
+:root[data-theme="ember"] .toggle-button,
+:root[data-theme="ember"] .folder-button,
+:root[data-theme="ember"] .composer-file-chip,
+:root[data-theme="ember"] .composer-attachment-remove,
+:root[data-theme="ember"] .chat-model-option,
+:root[data-theme="ember"] .chat-thread-actions-trigger,
+:root[data-theme="ember"] .chat-thread-actions-option,
+:root[data-theme="ember"] .chat-slash-suggestion:hover,
+:root[data-theme="ember"] .chat-slash-suggestion.active,
+:root[data-theme="ember"] .icon-action-button,
+:root[data-theme="ember"] .skill-state-button,
+:root[data-theme="ember"] .server-row-action,
+:root[data-theme="ember"] .skills-toolbar-actions .skill-toolbar-icon-button,
+:root[data-theme="ember"] .skills-toolbar-actions .search-field input,
+:root[data-theme="ember"] .knowledge-inline-action,
+:root[data-theme="ember"] .knowledge-picker-clear {
+  background: var(--control-bg);
+  border-color: var(--dark-border-1);
+  color: var(--muted-strong);
+  box-shadow: none;
+}
+
+:root[data-theme="graphite"] .secondary-button:hover,
+:root[data-theme="graphite"] .toolbar-chip:hover,
+:root[data-theme="graphite"] .status-pill:hover,
+:root[data-theme="graphite"] .toggle-button:hover,
+:root[data-theme="graphite"] .folder-button:hover,
+:root[data-theme="graphite"] .chat-model-option:hover,
+:root[data-theme="graphite"] .chat-model-option.selected,
+:root[data-theme="graphite"] .icon-action-button:hover,
+:root[data-theme="graphite"] .skill-state-button:hover,
+:root[data-theme="graphite"] .server-row-action:hover,
+:root[data-theme="graphite"] .assistant-settings-stage .provider-nav-card:hover,
+:root[data-theme="dusk"] .secondary-button:hover,
+:root[data-theme="dusk"] .toolbar-chip:hover,
+:root[data-theme="dusk"] .status-pill:hover,
+:root[data-theme="dusk"] .toggle-button:hover,
+:root[data-theme="dusk"] .folder-button:hover,
+:root[data-theme="dusk"] .chat-model-option:hover,
+:root[data-theme="dusk"] .chat-model-option.selected,
+:root[data-theme="dusk"] .icon-action-button:hover,
+:root[data-theme="dusk"] .skill-state-button:hover,
+:root[data-theme="dusk"] .server-row-action:hover,
+:root[data-theme="dusk"] .assistant-settings-stage .provider-nav-card:hover,
+:root[data-theme="midnight"] .secondary-button:hover,
+:root[data-theme="midnight"] .toolbar-chip:hover,
+:root[data-theme="midnight"] .status-pill:hover,
+:root[data-theme="midnight"] .toggle-button:hover,
+:root[data-theme="midnight"] .folder-button:hover,
+:root[data-theme="midnight"] .chat-model-option:hover,
+:root[data-theme="midnight"] .chat-model-option.selected,
+:root[data-theme="midnight"] .icon-action-button:hover,
+:root[data-theme="midnight"] .skill-state-button:hover,
+:root[data-theme="midnight"] .server-row-action:hover,
+:root[data-theme="midnight"] .assistant-settings-stage .provider-nav-card:hover,
+:root[data-theme="ember"] .secondary-button:hover,
+:root[data-theme="ember"] .toolbar-chip:hover,
+:root[data-theme="ember"] .status-pill:hover,
+:root[data-theme="ember"] .toggle-button:hover,
+:root[data-theme="ember"] .folder-button:hover,
+:root[data-theme="ember"] .chat-model-option:hover,
+:root[data-theme="ember"] .chat-model-option.selected,
+:root[data-theme="ember"] .icon-action-button:hover,
+:root[data-theme="ember"] .skill-state-button:hover,
+:root[data-theme="ember"] .server-row-action:hover,
+:root[data-theme="ember"] .assistant-settings-stage .provider-nav-card:hover {
+  background: var(--control-bg-hover);
+  border-color: var(--dark-border-2);
+  color: var(--text);
+}
+
+:root[data-theme="graphite"] .message-text pre,
+:root[data-theme="graphite"] .message-text code,
+:root[data-theme="graphite"] .preview-markdown pre,
+:root[data-theme="graphite"] .preview-markdown code,
+:root[data-theme="graphite"] .activity-markdown pre,
+:root[data-theme="graphite"] .activity-markdown code,
+:root[data-theme="graphite"] .preview-code,
+:root[data-theme="graphite"] .activity-panel pre,
+:root[data-theme="dusk"] .message-text pre,
+:root[data-theme="dusk"] .message-text code,
+:root[data-theme="dusk"] .preview-markdown pre,
+:root[data-theme="dusk"] .preview-markdown code,
+:root[data-theme="dusk"] .activity-markdown pre,
+:root[data-theme="dusk"] .activity-markdown code,
+:root[data-theme="dusk"] .preview-code,
+:root[data-theme="dusk"] .activity-panel pre,
+:root[data-theme="midnight"] .message-text pre,
+:root[data-theme="midnight"] .message-text code,
+:root[data-theme="midnight"] .preview-markdown pre,
+:root[data-theme="midnight"] .preview-markdown code,
+:root[data-theme="midnight"] .activity-markdown pre,
+:root[data-theme="midnight"] .activity-markdown code,
+:root[data-theme="midnight"] .preview-code,
+:root[data-theme="midnight"] .activity-panel pre,
+:root[data-theme="ember"] .message-text pre,
+:root[data-theme="ember"] .message-text code,
+:root[data-theme="ember"] .preview-markdown pre,
+:root[data-theme="ember"] .preview-markdown code,
+:root[data-theme="ember"] .activity-markdown pre,
+:root[data-theme="ember"] .activity-markdown code,
+:root[data-theme="ember"] .preview-code,
+:root[data-theme="ember"] .activity-panel pre {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--dark-border-1);
+  color: var(--muted-strong);
+}
+
+:root[data-theme="graphite"] .preview-markdown .markdown-mermaid,
+:root[data-theme="graphite"] .message-text .markdown-mermaid,
+:root[data-theme="graphite"] .activity-markdown .markdown-mermaid,
+:root[data-theme="dusk"] .preview-markdown .markdown-mermaid,
+:root[data-theme="dusk"] .message-text .markdown-mermaid,
+:root[data-theme="dusk"] .activity-markdown .markdown-mermaid,
+:root[data-theme="midnight"] .preview-markdown .markdown-mermaid,
+:root[data-theme="midnight"] .message-text .markdown-mermaid,
+:root[data-theme="midnight"] .activity-markdown .markdown-mermaid,
+:root[data-theme="ember"] .preview-markdown .markdown-mermaid,
+:root[data-theme="ember"] .message-text .markdown-mermaid,
+:root[data-theme="ember"] .activity-markdown .markdown-mermaid {
+  background: var(--dark-surface-3);
+  border-color: var(--dark-border-1);
+}
+
+:root[data-theme="graphite"] :is(
+  .empty-state-card,
+  .empty-state-card:hover,
+  .slash-skill-panel,
+  .workspace-file-preview .preview-content-panel .preview-body,
+  .skill-list-row .skill-icon-shell,
+  .skills-page:not(.tools-page) .skill-icon-shell.skill-icon-premium,
+  .composer-card:focus-within
+),
+:root[data-theme="dusk"] :is(
+  .empty-state-card,
+  .empty-state-card:hover,
+  .slash-skill-panel,
+  .workspace-file-preview .preview-content-panel .preview-body,
+  .skill-list-row .skill-icon-shell,
+  .skills-page:not(.tools-page) .skill-icon-shell.skill-icon-premium,
+  .composer-card:focus-within
+),
+:root[data-theme="midnight"] :is(
+  .empty-state-card,
+  .empty-state-card:hover,
+  .slash-skill-panel,
+  .workspace-file-preview .preview-content-panel .preview-body,
+  .skill-list-row .skill-icon-shell,
+  .skills-page:not(.tools-page) .skill-icon-shell.skill-icon-premium,
+  .composer-card:focus-within
+),
+:root[data-theme="ember"] :is(
+  .empty-state-card,
+  .empty-state-card:hover,
+  .slash-skill-panel,
+  .workspace-file-preview .preview-content-panel .preview-body,
+  .skill-list-row .skill-icon-shell,
+  .skills-page:not(.tools-page) .skill-icon-shell.skill-icon-premium,
+  .composer-card:focus-within
+) {
+  background: var(--dark-surface-2);
+  border-color: var(--dark-border-1);
+  box-shadow: var(--dark-shadow-soft);
+}
+
+:root[data-theme="graphite"] :is(
+  .slash-skill-option,
+  .slash-skill-option:hover,
+  .composer-attachment-remove:hover,
+  .composer-attachment-card:hover .composer-attachment-remove,
+  .composer-attachment-card:focus-within .composer-attachment-remove,
+  .composer-image-attachment-card:hover .composer-attachment-remove,
+  .composer-image-attachment-card:focus-within .composer-attachment-remove,
+  .composer-knowledge-trigger,
+  .settings-back-link:hover,
+  .settings-nav-link:hover,
+  .settings-nav-link.active,
+  .skills-toolbar-actions .skill-toolbar-icon-button:hover:not(:disabled),
+  .skills-toolbar-actions .search-field input:focus,
+  .memory-icon-button:hover:not(:disabled),
+  .memory-icon-button.active,
+  .knowledge-inline-action:hover:not(:disabled),
+  .knowledge-picker-clear:hover,
+  .mail-auth-secondary-action:hover:not(:disabled),
+  .mail-auth-request-close:hover:not(:disabled),
+  .mail-auth-secret-field button:hover:not(:disabled),
+  .model-group-action:hover,
+  .question-action.secondary:hover:not(:disabled),
+  .right-workspace-tab-close:hover,
+  .workspace-file-breadcrumb-action:hover,
+  .toolbar-select:hover select,
+  .status-select:hover select,
+  .status-pill.active,
+  .toggle-button.active
+),
+:root[data-theme="dusk"] :is(
+  .slash-skill-option,
+  .slash-skill-option:hover,
+  .composer-attachment-remove:hover,
+  .composer-attachment-card:hover .composer-attachment-remove,
+  .composer-attachment-card:focus-within .composer-attachment-remove,
+  .composer-image-attachment-card:hover .composer-attachment-remove,
+  .composer-image-attachment-card:focus-within .composer-attachment-remove,
+  .composer-knowledge-trigger,
+  .settings-back-link:hover,
+  .settings-nav-link:hover,
+  .settings-nav-link.active,
+  .skills-toolbar-actions .skill-toolbar-icon-button:hover:not(:disabled),
+  .skills-toolbar-actions .search-field input:focus,
+  .memory-icon-button:hover:not(:disabled),
+  .memory-icon-button.active,
+  .knowledge-inline-action:hover:not(:disabled),
+  .knowledge-picker-clear:hover,
+  .mail-auth-secondary-action:hover:not(:disabled),
+  .mail-auth-request-close:hover:not(:disabled),
+  .mail-auth-secret-field button:hover:not(:disabled),
+  .model-group-action:hover,
+  .question-action.secondary:hover:not(:disabled),
+  .right-workspace-tab-close:hover,
+  .workspace-file-breadcrumb-action:hover,
+  .toolbar-select:hover select,
+  .status-select:hover select,
+  .status-pill.active,
+  .toggle-button.active
+),
+:root[data-theme="midnight"] :is(
+  .slash-skill-option,
+  .slash-skill-option:hover,
+  .composer-attachment-remove:hover,
+  .composer-attachment-card:hover .composer-attachment-remove,
+  .composer-attachment-card:focus-within .composer-attachment-remove,
+  .composer-image-attachment-card:hover .composer-attachment-remove,
+  .composer-image-attachment-card:focus-within .composer-attachment-remove,
+  .composer-knowledge-trigger,
+  .settings-back-link:hover,
+  .settings-nav-link:hover,
+  .settings-nav-link.active,
+  .skills-toolbar-actions .skill-toolbar-icon-button:hover:not(:disabled),
+  .skills-toolbar-actions .search-field input:focus,
+  .memory-icon-button:hover:not(:disabled),
+  .memory-icon-button.active,
+  .knowledge-inline-action:hover:not(:disabled),
+  .knowledge-picker-clear:hover,
+  .mail-auth-secondary-action:hover:not(:disabled),
+  .mail-auth-request-close:hover:not(:disabled),
+  .mail-auth-secret-field button:hover:not(:disabled),
+  .model-group-action:hover,
+  .question-action.secondary:hover:not(:disabled),
+  .right-workspace-tab-close:hover,
+  .workspace-file-breadcrumb-action:hover,
+  .toolbar-select:hover select,
+  .status-select:hover select,
+  .status-pill.active,
+  .toggle-button.active
+),
+:root[data-theme="ember"] :is(
+  .slash-skill-option,
+  .slash-skill-option:hover,
+  .composer-attachment-remove:hover,
+  .composer-attachment-card:hover .composer-attachment-remove,
+  .composer-attachment-card:focus-within .composer-attachment-remove,
+  .composer-image-attachment-card:hover .composer-attachment-remove,
+  .composer-image-attachment-card:focus-within .composer-attachment-remove,
+  .composer-knowledge-trigger,
+  .settings-back-link:hover,
+  .settings-nav-link:hover,
+  .settings-nav-link.active,
+  .skills-toolbar-actions .skill-toolbar-icon-button:hover:not(:disabled),
+  .skills-toolbar-actions .search-field input:focus,
+  .memory-icon-button:hover:not(:disabled),
+  .memory-icon-button.active,
+  .knowledge-inline-action:hover:not(:disabled),
+  .knowledge-picker-clear:hover,
+  .mail-auth-secondary-action:hover:not(:disabled),
+  .mail-auth-request-close:hover:not(:disabled),
+  .mail-auth-secret-field button:hover:not(:disabled),
+  .model-group-action:hover,
+  .question-action.secondary:hover:not(:disabled),
+  .right-workspace-tab-close:hover,
+  .workspace-file-breadcrumb-action:hover,
+  .toolbar-select:hover select,
+  .status-select:hover select,
+  .status-pill.active,
+  .toggle-button.active
+) {
+  background: var(--control-bg-hover);
+  border-color: var(--dark-border-2);
+  color: var(--text);
+  box-shadow: none;
+}
+
+:root[data-theme="graphite"] :is(
+  .memory-entry-row.confirming-delete,
+  .knowledge-list-row.confirming-delete,
+  .question-action.stop,
+  .question-action.stop:hover:not(:disabled)
+),
+:root[data-theme="dusk"] :is(
+  .memory-entry-row.confirming-delete,
+  .knowledge-list-row.confirming-delete,
+  .question-action.stop,
+  .question-action.stop:hover:not(:disabled)
+),
+:root[data-theme="midnight"] :is(
+  .memory-entry-row.confirming-delete,
+  .knowledge-list-row.confirming-delete,
+  .question-action.stop,
+  .question-action.stop:hover:not(:disabled)
+),
+:root[data-theme="ember"] :is(
+  .memory-entry-row.confirming-delete,
+  .knowledge-list-row.confirming-delete,
+  .question-action.stop,
+  .question-action.stop:hover:not(:disabled)
+) {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+:root[data-theme="graphite"] :is(
+  .mail-auth-request-grid input:focus,
+  .mail-auth-oauth-finish input:focus,
+  .mail-auth-server-grid input:focus,
+  .mail-auth-secret-field:focus-within
+),
+:root[data-theme="dusk"] :is(
+  .mail-auth-request-grid input:focus,
+  .mail-auth-oauth-finish input:focus,
+  .mail-auth-server-grid input:focus,
+  .mail-auth-secret-field:focus-within
+),
+:root[data-theme="midnight"] :is(
+  .mail-auth-request-grid input:focus,
+  .mail-auth-oauth-finish input:focus,
+  .mail-auth-server-grid input:focus,
+  .mail-auth-secret-field:focus-within
+),
+:root[data-theme="ember"] :is(
+  .mail-auth-request-grid input:focus,
+  .mail-auth-oauth-finish input:focus,
+  .mail-auth-server-grid input:focus,
+  .mail-auth-secret-field:focus-within
+) {
+  background: var(--input-bg);
+  border-color: var(--dark-border-2);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
 @media (max-width: 980px) {
   .remote-control-shell,
   .remote-detail-grid,
@@ -15436,4 +16644,214 @@ textarea:focus,
     inset 0 1px 0 rgba(255, 255, 255, 0.22),
     inset 0 -18px 24px rgba(2, 8, 23, 0.24),
     0 14px 28px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme="graphite"] .memory-sidebar,
+:root[data-theme="graphite"] .knowledge-sidebar,
+:root[data-theme="graphite"] .remote-channel-list,
+:root[data-theme="graphite"] .remote-channel-detail,
+:root[data-theme="dusk"] .memory-sidebar,
+:root[data-theme="dusk"] .knowledge-sidebar,
+:root[data-theme="dusk"] .remote-channel-list,
+:root[data-theme="dusk"] .remote-channel-detail,
+:root[data-theme="midnight"] .memory-sidebar,
+:root[data-theme="midnight"] .knowledge-sidebar,
+:root[data-theme="midnight"] .remote-channel-list,
+:root[data-theme="midnight"] .remote-channel-detail,
+:root[data-theme="ember"] .memory-sidebar,
+:root[data-theme="ember"] .knowledge-sidebar,
+:root[data-theme="ember"] .remote-channel-list,
+:root[data-theme="ember"] .remote-channel-detail {
+  background: var(--dark-surface-2);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0));
+  border-color: var(--dark-border-1);
+  box-shadow: none;
+}
+
+:root[data-theme="graphite"] .memory-shell,
+:root[data-theme="graphite"] .knowledge-shell,
+:root[data-theme="graphite"] .remote-control-stage,
+:root[data-theme="graphite"] .remote-control-shell,
+:root[data-theme="dusk"] .memory-shell,
+:root[data-theme="dusk"] .knowledge-shell,
+:root[data-theme="dusk"] .remote-control-stage,
+:root[data-theme="dusk"] .remote-control-shell,
+:root[data-theme="midnight"] .memory-shell,
+:root[data-theme="midnight"] .knowledge-shell,
+:root[data-theme="midnight"] .remote-control-stage,
+:root[data-theme="midnight"] .remote-control-shell,
+:root[data-theme="ember"] .memory-shell,
+:root[data-theme="ember"] .knowledge-shell,
+:root[data-theme="ember"] .remote-control-stage,
+:root[data-theme="ember"] .remote-control-shell {
+  background: var(--panel);
+}
+
+:root[data-theme="graphite"] .memory-type-row,
+:root[data-theme="graphite"] .knowledge-base-row,
+:root[data-theme="graphite"] .remote-channel-select,
+:root[data-theme="dusk"] .memory-type-row,
+:root[data-theme="dusk"] .knowledge-base-row,
+:root[data-theme="dusk"] .remote-channel-select,
+:root[data-theme="midnight"] .memory-type-row,
+:root[data-theme="midnight"] .knowledge-base-row,
+:root[data-theme="midnight"] .remote-channel-select,
+:root[data-theme="ember"] .memory-type-row,
+:root[data-theme="ember"] .knowledge-base-row,
+:root[data-theme="ember"] .remote-channel-select {
+  background: var(--control-bg);
+  border-color: var(--dark-border-1);
+  color: var(--muted-strong);
+  box-shadow: none;
+}
+
+:root[data-theme="graphite"] .memory-type-row:hover:not(:disabled),
+:root[data-theme="graphite"] .memory-type-row.active,
+:root[data-theme="graphite"] .knowledge-base-row:hover,
+:root[data-theme="graphite"] .knowledge-base-row.active,
+:root[data-theme="graphite"] .remote-channel-select:hover,
+:root[data-theme="graphite"] .remote-channel-select.active,
+:root[data-theme="dusk"] .memory-type-row:hover:not(:disabled),
+:root[data-theme="dusk"] .memory-type-row.active,
+:root[data-theme="dusk"] .knowledge-base-row:hover,
+:root[data-theme="dusk"] .knowledge-base-row.active,
+:root[data-theme="dusk"] .remote-channel-select:hover,
+:root[data-theme="dusk"] .remote-channel-select.active,
+:root[data-theme="midnight"] .memory-type-row:hover:not(:disabled),
+:root[data-theme="midnight"] .memory-type-row.active,
+:root[data-theme="midnight"] .knowledge-base-row:hover,
+:root[data-theme="midnight"] .knowledge-base-row.active,
+:root[data-theme="midnight"] .remote-channel-select:hover,
+:root[data-theme="midnight"] .remote-channel-select.active,
+:root[data-theme="ember"] .memory-type-row:hover:not(:disabled),
+:root[data-theme="ember"] .memory-type-row.active,
+:root[data-theme="ember"] .knowledge-base-row:hover,
+:root[data-theme="ember"] .knowledge-base-row.active,
+:root[data-theme="ember"] .remote-channel-select:hover,
+:root[data-theme="ember"] .remote-channel-select.active {
+  background: var(--dark-surface-3);
+  background-image: linear-gradient(90deg, rgba(var(--accent-rgb), 0.12), rgba(255, 255, 255, 0.02));
+  border-color: var(--dark-border-2);
+  color: var(--text);
+  box-shadow: var(--dark-shadow-soft);
+}
+
+:root[data-theme="graphite"] .memory-type-icon,
+:root[data-theme="graphite"] .knowledge-base-icon,
+:root[data-theme="dusk"] .memory-type-icon,
+:root[data-theme="dusk"] .knowledge-base-icon,
+:root[data-theme="midnight"] .memory-type-icon,
+:root[data-theme="midnight"] .knowledge-base-icon,
+:root[data-theme="ember"] .memory-type-icon,
+:root[data-theme="ember"] .knowledge-base-icon {
+  background: var(--dark-surface-3);
+  border-color: var(--dark-border-1);
+  color: var(--muted-strong);
+  box-shadow: none;
+}
+
+:root[data-theme="graphite"] .memory-type-row.active .memory-type-icon,
+:root[data-theme="graphite"] .knowledge-base-row.active .knowledge-base-icon,
+:root[data-theme="dusk"] .memory-type-row.active .memory-type-icon,
+:root[data-theme="dusk"] .knowledge-base-row.active .knowledge-base-icon,
+:root[data-theme="midnight"] .memory-type-row.active .memory-type-icon,
+:root[data-theme="midnight"] .knowledge-base-row.active .knowledge-base-icon,
+:root[data-theme="ember"] .memory-type-row.active .memory-type-icon,
+:root[data-theme="ember"] .knowledge-base-row.active .knowledge-base-icon {
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: var(--dark-border-2);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+:root[data-theme="graphite"] .memory-type-row b,
+:root[data-theme="graphite"] .knowledge-base-count,
+:root[data-theme="dusk"] .memory-type-row b,
+:root[data-theme="dusk"] .knowledge-base-count,
+:root[data-theme="midnight"] .memory-type-row b,
+:root[data-theme="midnight"] .knowledge-base-count,
+:root[data-theme="ember"] .memory-type-row b,
+:root[data-theme="ember"] .knowledge-base-count {
+  background: var(--control-bg);
+  color: var(--muted-strong);
+}
+
+:root[data-theme="graphite"] .memory-type-row.active b,
+:root[data-theme="graphite"] .knowledge-base-row.active .knowledge-base-count,
+:root[data-theme="dusk"] .memory-type-row.active b,
+:root[data-theme="dusk"] .knowledge-base-row.active .knowledge-base-count,
+:root[data-theme="midnight"] .memory-type-row.active b,
+:root[data-theme="midnight"] .knowledge-base-row.active .knowledge-base-count,
+:root[data-theme="ember"] .memory-type-row.active b,
+:root[data-theme="ember"] .knowledge-base-row.active .knowledge-base-count {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--text);
+}
+
+:root[data-theme="graphite"] .knowledge-base-action-menu,
+:root[data-theme="graphite"] .remote-detail-section,
+:root[data-theme="graphite"] .remote-detail-list,
+:root[data-theme="graphite"] .remote-detail-toggle-row,
+:root[data-theme="graphite"] .remote-config-note,
+:root[data-theme="dusk"] .knowledge-base-action-menu,
+:root[data-theme="dusk"] .remote-detail-section,
+:root[data-theme="dusk"] .remote-detail-list,
+:root[data-theme="dusk"] .remote-detail-toggle-row,
+:root[data-theme="dusk"] .remote-config-note,
+:root[data-theme="midnight"] .knowledge-base-action-menu,
+:root[data-theme="midnight"] .remote-detail-section,
+:root[data-theme="midnight"] .remote-detail-list,
+:root[data-theme="midnight"] .remote-detail-toggle-row,
+:root[data-theme="midnight"] .remote-config-note,
+:root[data-theme="ember"] .knowledge-base-action-menu,
+:root[data-theme="ember"] .remote-detail-section,
+:root[data-theme="ember"] .remote-detail-list,
+:root[data-theme="ember"] .remote-detail-toggle-row,
+:root[data-theme="ember"] .remote-config-note {
+  background: var(--dark-surface-3);
+  border-color: var(--dark-border-1);
+  color: var(--muted-strong);
+  box-shadow: var(--dark-shadow-soft);
+}
+
+:root[data-theme="graphite"] .memory-sidebar-head h2,
+:root[data-theme="graphite"] .memory-type-copy strong,
+:root[data-theme="graphite"] .knowledge-sidebar-head h2,
+:root[data-theme="graphite"] .knowledge-base-copy strong,
+:root[data-theme="graphite"] .remote-channel-select-copy strong,
+:root[data-theme="graphite"] .remote-detail-row strong,
+:root[data-theme="dusk"] .memory-sidebar-head h2,
+:root[data-theme="dusk"] .memory-type-copy strong,
+:root[data-theme="dusk"] .knowledge-sidebar-head h2,
+:root[data-theme="dusk"] .knowledge-base-copy strong,
+:root[data-theme="dusk"] .remote-channel-select-copy strong,
+:root[data-theme="dusk"] .remote-detail-row strong,
+:root[data-theme="midnight"] .memory-sidebar-head h2,
+:root[data-theme="midnight"] .memory-type-copy strong,
+:root[data-theme="midnight"] .knowledge-sidebar-head h2,
+:root[data-theme="midnight"] .knowledge-base-copy strong,
+:root[data-theme="midnight"] .remote-channel-select-copy strong,
+:root[data-theme="midnight"] .remote-detail-row strong,
+:root[data-theme="ember"] .memory-sidebar-head h2,
+:root[data-theme="ember"] .memory-type-copy strong,
+:root[data-theme="ember"] .knowledge-sidebar-head h2,
+:root[data-theme="ember"] .knowledge-base-copy strong,
+:root[data-theme="ember"] .remote-channel-select-copy strong,
+:root[data-theme="ember"] .remote-detail-row strong {
+  color: var(--text);
+}
+
+:root[data-theme="graphite"] .knowledge-base-copy span,
+:root[data-theme="graphite"] .remote-channel-select-copy small,
+:root[data-theme="graphite"] .remote-detail-row span,
+:root[data-theme="dusk"] .knowledge-base-copy span,
+:root[data-theme="dusk"] .remote-channel-select-copy small,
+:root[data-theme="dusk"] .remote-detail-row span,
+:root[data-theme="midnight"] .knowledge-base-copy span,
+:root[data-theme="midnight"] .remote-channel-select-copy small,
+:root[data-theme="midnight"] .remote-detail-row span,
+:root[data-theme="ember"] .knowledge-base-copy span,
+:root[data-theme="ember"] .remote-channel-select-copy small,
+:root[data-theme="ember"] .remote-detail-row span {
+  color: var(--muted-strong);
 }

@@ -1,3 +1,5 @@
+import type { ChatConversationRuntimeState } from "../types";
+
 export interface ScrollMetrics {
   clientHeight: number;
   scrollHeight: number;
@@ -44,14 +46,21 @@ export function isScrollAtBottom(
 
 export function shouldAutoScrollMessageList(options: {
   conversationChanged: boolean;
+  manuallyDetached: boolean;
+  messageAdded: boolean;
   requestedManualScroll: boolean;
+  turnActiveOrRecentlyFinished: boolean;
   wasPinnedToBottom: boolean;
 }) {
-  return (
-    options.conversationChanged ||
-    options.requestedManualScroll ||
-    options.wasPinnedToBottom
-  );
+  if (options.conversationChanged || options.messageAdded || options.requestedManualScroll) {
+    return true;
+  }
+
+  if (options.manuallyDetached) {
+    return false;
+  }
+
+  return options.wasPinnedToBottom || options.turnActiveOrRecentlyFinished;
 }
 
 export function buildMessageListScrollRevision(options: MessageListScrollRevisionInput) {
@@ -62,6 +71,43 @@ export function buildMessageListScrollRevision(options: MessageListScrollRevisio
     options.messageCount,
     options.runtimeFingerprint,
   ].join(":");
+}
+
+export function buildRuntimeStateScrollFingerprint(
+  runtimeState: ChatConversationRuntimeState | null | undefined,
+) {
+  return JSON.stringify({
+    status: runtimeState?.status,
+    stopReason: runtimeState?.stopReason,
+    error: runtimeState?.error,
+    liveMessageEvents: runtimeState?.events
+      .filter((event) => event.type === "message_delta" || event.type === "message_replace")
+      .map((event) => ({
+        id: event.id,
+        type: event.type,
+        textLength: event.text?.length ?? 0,
+      })),
+    activityItems: runtimeState?.activityItems,
+    timelineItems: runtimeState?.timelineItems,
+    thoughtTextLength: runtimeState?.thoughtText.length ?? 0,
+    planEntries: runtimeState?.planEntries,
+    toolCalls: runtimeState?.toolCalls.map((toolCall) => ({
+      toolCallId: toolCall.toolCallId,
+      status: toolCall.status,
+      content: toolCall.content.map((content) =>
+        content.type === "terminal"
+          ? `${content.type}:${content.terminalId}`
+          : content.type === "text"
+            ? `${content.type}:${content.text.length}`
+            : `${content.type}:${content.newText.length}`,
+      ),
+    })),
+    terminals: Object.values(runtimeState?.terminalOutputs ?? {}).map((terminal) => ({
+      terminalId: terminal.terminalId,
+      outputLength: terminal.output.length,
+      exitCode: terminal.exitCode,
+    })),
+  });
 }
 
 export function scrollMessageListToBottom(
@@ -98,4 +144,11 @@ export function scrollMessageListToBottom(
 
 export function shouldReleaseAutoScrollOnWheel(deltaY: number) {
   return deltaY < 0;
+}
+
+export function shouldAutoScrollToolContent(options: {
+  contentChanged: boolean;
+  wasPinnedToBottom: boolean;
+}) {
+  return options.contentChanged && options.wasPinnedToBottom;
 }
