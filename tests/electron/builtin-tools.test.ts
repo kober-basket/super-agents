@@ -40,6 +40,7 @@ test("question asks for user input through approval handler and returns answers"
 
   try {
     let requestedKind = "";
+    const outputChunks: Array<{ stream: string; text: string }> = [];
     const result = await question.execute(
       {
         questions: [
@@ -56,6 +57,9 @@ test("question asks for user input through approval handler and returns answers"
       },
       {
         ...createContext(tempDir),
+        emitOutput: (output) => {
+          outputChunks.push(output);
+        },
         requestApproval: async (request) => {
           requestedKind = request.kind ?? "";
           return {
@@ -74,6 +78,10 @@ test("question asks for user input through approval handler and returns answers"
     assert.deepEqual(result.metadata?.answers, [
       { id: "approach", question: "Which approach should we use?", answer: "Focused" },
     ]);
+    const progressText = outputChunks.map((output) => output.text).join("");
+    assert.match(progressText, /Preparing question card/);
+    assert.match(progressText, /Waiting for user answer/);
+    assert.match(progressText, /Received 1 answer/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -235,7 +243,13 @@ test("todo_write stores session todos and todo_read returns them", async () => {
   try {
     const write = toolByName("todo_write");
     const read = toolByName("todo_read");
-    const context = createContext(tempDir, "todo-session");
+    const outputChunks: Array<{ stream: string; text: string }> = [];
+    const context = {
+      ...createContext(tempDir, "todo-session"),
+      emitOutput: (output: { stream: string; text: string }) => {
+        outputChunks.push(output);
+      },
+    };
 
     await write.execute(
       {
@@ -255,6 +269,10 @@ test("todo_write stores session todos and todo_read returns them", async () => {
       { id: "one", content: "Add question tool", status: "completed" },
       { id: "two", content: "Add todo tools", status: "in_progress" },
     ]);
+    const progressText = outputChunks.map((output) => output.text).join("");
+    assert.match(progressText, /Updating todo list/);
+    assert.match(progressText, /Saving 2 todo items/);
+    assert.match(progressText, /Loaded 2 todo items/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -383,6 +401,8 @@ test("workspace mutation and search tools emit progress output", async () => {
 
   try {
     await toolByName("write").execute({ path: "notes.txt", content: "alpha\nbeta\n" }, context);
+    await toolByName("read").execute({ path: "notes.txt" }, context);
+    await toolByName("list").execute({ path: "." }, context);
     await toolByName("edit").execute(
       { path: "notes.txt", oldString: "alpha", newString: "needle alpha" },
       context,
@@ -410,12 +430,19 @@ test("workspace mutation and search tools emit progress output", async () => {
 
     const progressText = outputChunks.map((chunk) => chunk.text).join("");
     assert.match(progressText, /Writing notes\.txt/);
+    assert.match(progressText, /Reading notes\.txt/);
+    assert.match(progressText, /Loaded \d+ of \d+ bytes/);
+    assert.match(progressText, /Listing ./);
+    assert.match(progressText, /Found \d+ entr(?:y|ies)/);
     assert.match(progressText, /Editing notes\.txt/);
+    assert.match(progressText, /Applying edit 1\/1/);
     assert.match(progressText, /Searching/);
     assert.match(progressText, /needle alpha/);
     assert.match(progressText, /Finding files/);
     assert.match(progressText, /notes\.txt/);
     assert.match(progressText, /Applying patch/);
+    assert.match(progressText, /Adding patched\.txt/);
+    assert.match(progressText, /Added patched\.txt/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -650,7 +677,16 @@ test("web_search returns query results with URLs and snippets", async () => {
 
   try {
     const webSearch = toolByName("web_search");
-    const result = await webSearch.execute({ query: "gold outlook 2026", limit: 3 }, createContext(os.tmpdir()));
+    const outputChunks: Array<{ stream: string; text: string }> = [];
+    const result = await webSearch.execute(
+      { query: "gold outlook 2026", limit: 3 },
+      {
+        ...createContext(os.tmpdir()),
+        emitOutput: (output) => {
+          outputChunks.push(output);
+        },
+      },
+    );
 
     assert.match(result.content, /Gold outlook 2026/);
     assert.match(result.content, /https:\/\/example\.com\/gold/);
@@ -658,6 +694,10 @@ test("web_search returns query results with URLs and snippets", async () => {
     assert.match(result.content, /Search snippets are unverified/i);
     assert.doesNotMatch(result.content, /Sponsored gold/);
     assert.deepEqual(result.metadata?.query, "gold outlook 2026");
+    const progressText = outputChunks.map((output) => output.text).join("");
+    assert.match(progressText, /Searching web for gold outlook 2026/);
+    assert.match(progressText, /Downloaded \d+ bytes/);
+    assert.match(progressText, /Parsed 1 search result/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -710,12 +750,35 @@ test("mail tools are registered with conservative risk boundaries", async () => 
   const mailAuth = tools.find((item) => item.name === "mail_auth");
   const mailDraft = tools.find((item) => item.name === "mail_draft");
   const mailSend = tools.find((item) => item.name === "mail_send");
+  const outputChunks: Array<{ stream: string; text: string }> = [];
+  const context = {
+    ...createContext(os.tmpdir()),
+    emitOutput: (output: { stream: string; text: string }) => {
+      outputChunks.push(output);
+    },
+  };
 
   assert.equal(mailAuth?.risk, "network");
   assert.equal(mail?.risk, "network");
   assert.equal(mailDraft?.risk, "write");
   assert.equal(mailSend?.risk, "write");
 
-  const result = await mail?.execute({ action: "list_accounts" }, createContext(os.tmpdir()));
+  const result = await mail?.execute({ action: "list_accounts" }, context);
   assert.match(result?.content ?? "", /No mail accounts/);
+  await mail?.execute({ action: "infer_setup", email: "owner@example.com" }, context);
+  await mail?.execute({ action: "search", query: "hello" }, context);
+  await mail?.execute({ action: "read", messageId: "message-1" }, context);
+  await mailDraft?.execute(
+    { accountId: "account-1", to: ["to@example.com"], subject: "Hello", body: "Body" },
+    context,
+  );
+  await mailSend?.execute({ draftId: "draft-1" }, context);
+
+  const progressText = outputChunks.map((output) => output.text).join("");
+  assert.match(progressText, /Listing mail accounts/);
+  assert.match(progressText, /Mail setup inferred/);
+  assert.match(progressText, /Searching mail messages/);
+  assert.match(progressText, /Reading mail message message-1/);
+  assert.match(progressText, /Created mail draft draft-1/);
+  assert.match(progressText, /Sent mail draft draft-1/);
 });

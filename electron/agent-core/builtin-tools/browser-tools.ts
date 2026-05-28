@@ -103,7 +103,9 @@ async function withBrowserProgress(
   action: () => Promise<BrowserAutomationToolResult>,
 ) {
   context.emitOutput?.({ stream: "info", text: `${text}\n` });
-  return toToolResult(await action());
+  const result = toToolResult(await action());
+  context.emitOutput?.({ stream: "info", text: `${text} done\n` });
+  return result;
 }
 
 export function createBrowserToolDefinitions(service?: BrowserAutomationController): ToolDefinition[] {
@@ -121,6 +123,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
       execute: async (_input, context) => {
         context.emitOutput?.({ stream: "info", text: "Listing browser pages\n" });
         const pages = serviceOrThrow(service).listPages();
+        context.emitOutput?.({ stream: "info", text: `Found ${pages.length} browser page${pages.length === 1 ? "" : "s"}\n` });
         return {
           content: formatListPages(pages),
           metadata: { pages },
@@ -144,6 +147,7 @@ export function createBrowserToolDefinitions(service?: BrowserAutomationControll
         if (pageId === undefined) throw new Error("pageId is required.");
         context.emitOutput?.({ stream: "info", text: `Selecting browser page ${pageId}\n` });
         serviceOrThrow(service).selectPage(pageId);
+        context.emitOutput?.({ stream: "info", text: `Selected browser page ${pageId}\n` });
         return { content: `Selected browser page ${pageId}.`, metadata: { pageId } };
       },
     },

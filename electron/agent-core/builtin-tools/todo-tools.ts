@@ -52,6 +52,7 @@ export function createTodoToolDefinitions(): ToolDefinition[] {
       execute: async (_input, context) => {
         context.emitOutput?.({ stream: "info", text: "Reading todo list\n" });
         const items = sessionTodos.get(context.sessionId) ?? [];
+        context.emitOutput?.({ stream: "info", text: `Loaded ${items.length} todo item${items.length === 1 ? "" : "s"}\n` });
         return {
           content: items.length > 0
             ? items.map((item) => `${item.status}\t${item.id}\t${item.content}`).join("\n")
@@ -87,7 +88,9 @@ export function createTodoToolDefinitions(): ToolDefinition[] {
       execute: async (input, context) => {
         context.emitOutput?.({ stream: "info", text: "Updating todo list\n" });
         const items = normalizeTodoItems(input);
+        context.emitOutput?.({ stream: "info", text: `Saving ${items.length} todo item${items.length === 1 ? "" : "s"}\n` });
         sessionTodos.set(context.sessionId, items);
+        context.emitOutput?.({ stream: "info", text: "Todo list saved\n" });
         return {
           content: `Todo list updated:\n${items.map((item) => `${item.status}\t${item.id}\t${item.content}`).join("\n")}`,
           metadata: { items },

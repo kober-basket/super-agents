@@ -119,6 +119,39 @@ function looksLikeTurnCancellation(value?: string) {
   return Boolean(value && /(cancel|abort|interrupt|stop(ped)?)/i.test(value));
 }
 
+function parseModelRequestFailure(rawMessage: string) {
+  const match = rawMessage.match(/^Model request failed \((\d{3})\):\s*([\s\S]*)$/i);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const status = match[1];
+  const responseText = (match[2] ?? "").trim();
+
+  return {
+    status,
+    providerMessage: responseText || "Provider returned an error.",
+  };
+}
+
+function formatAgentTurnFailure(error: unknown) {
+  const rawMessage = error instanceof Error ? error.message.trim() : String(error || "").trim();
+  const modelFailure = parseModelRequestFailure(rawMessage);
+  if (modelFailure) {
+    const summary = `模型请求失败（${modelFailure.status}）：${modelFailure.providerMessage}`;
+    return {
+      summary,
+      content: summary,
+    };
+  }
+
+  const summary = rawMessage || "Agent turn failed";
+  return {
+    summary,
+    content: ["智能体执行失败。", "", summary].join("\n"),
+  };
+}
+
 function isToolBoundaryEvent(
   event: ChatMessageRuntimeTrace["events"][number],
 ) {
@@ -422,17 +455,25 @@ export class ChatOrchestrator {
       });
     } catch (error) {
       await activeTurn.messagePersister.flush();
-      await this.ensureInterruptedReplyHint(
-        activeTurn,
-        error instanceof Error ? error.message : String(error),
-      );
+      const failure = formatAgentTurnFailure(error);
+      const cancelled = looksLikeTurnCancellation(failure.summary);
+      if (cancelled) {
+        await this.ensureInterruptedReplyHint(activeTurn, failure.summary);
+      } else {
+        const previousText = activeTurn.assistantRawText.trimEnd();
+        activeTurn.assistantRawText = previousText
+          ? `${previousText}\n\n${failure.content}`
+          : failure.content;
+      }
       activeTurn.runtimeTrace.stopReason = undefined;
-      activeTurn.runtimeTrace.error =
-        error instanceof Error ? error.message : "Agent turn failed";
+      activeTurn.runtimeTrace.error = failure.summary;
+      if (!cancelled) {
+        await this.persistAssistantState(activeTurn, { emitUpdate: true, forceEmitUpdate: true });
+      }
       activeTurn.eventLog.appendLifecycle("turn_failed", {
         sessionId: activeTurn.sessionId,
         agentId: this.defaultAgentId,
-        error: activeTurn.runtimeTrace.error,
+        error: failure.summary,
       });
       activeTurn.runtimeTrace.events = activeTurn.eventLog.snapshot();
       try {
@@ -445,7 +486,7 @@ export class ChatOrchestrator {
         type: "turn_failed",
         conversationId: activeTurn.conversationId,
         turnId: activeTurn.turnId,
-        error: error instanceof Error ? error.message : "Agent turn failed",
+        error: failure.summary,
       });
     } finally {
       this.cleanupTurn(activeTurn);

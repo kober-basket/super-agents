@@ -128,6 +128,70 @@ test("chat orchestrator forwards agent thoughts into runtime trace and thought e
   }
 });
 
+test("chat orchestrator writes model request failures into the assistant message without parsing provider JSON", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
+  const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
+  await conversationService.initialize();
+
+  try {
+    const workspaceService = {
+      async getConfigSnapshot() {
+        return createConfig(tempDir);
+      },
+      async getEnabledSkillPromptContext() {
+        return "";
+      },
+      async searchKnowledgeBases() {
+        return { query: "", total: 0, results: [], searchedBases: [], warnings: [] };
+      },
+    } as unknown as WorkspaceService;
+
+    const events: ChatEvent[] = [];
+    const orchestrator = new ChatOrchestrator(conversationService, workspaceService, (event) => {
+      events.push(event);
+    });
+
+    (orchestrator as unknown as {
+      nativeCore: {
+        sendTurn(): AsyncIterable<AgentEvent>;
+      };
+    }).nativeCore = {
+      async *sendTurn() {
+        throw new Error(
+          'Model request failed (400): {"error":{"message":"The product is not activated, please confirm that you have activated products and try again after activation.","type":"invalid_request_error","param":null,"code":"invalid_parameter_error"},"request_id":"abc"}',
+        );
+      },
+    };
+
+    const execution = await orchestrator.startTurnWithCompletion({ content: "hello" });
+    await assert.rejects(execution.completion, /product is not activated/i);
+
+    const loaded = await conversationService.getConversation(execution.result.conversation.id);
+    const assistantMessage = loaded.messages.find((message) => message.role === "assistant");
+    assert.match(assistantMessage?.content ?? "", /模型请求失败/);
+    assert.match(assistantMessage?.content ?? "", /The product is not activated/);
+    assert.match(assistantMessage?.content ?? "", /"request_id":"abc"/);
+    assert.equal(
+      assistantMessage?.content,
+      '模型请求失败（400）：{"error":{"message":"The product is not activated, please confirm that you have activated products and try again after activation.","type":"invalid_request_error","param":null,"code":"invalid_parameter_error"},"request_id":"abc"}',
+    );
+    assert.equal(
+      assistantMessage?.runtimeTrace?.error,
+      '模型请求失败（400）：{"error":{"message":"The product is not activated, please confirm that you have activated products and try again after activation.","type":"invalid_request_error","param":null,"code":"invalid_parameter_error"},"request_id":"abc"}',
+    );
+
+    const updated = events.find((event) => event.type === "message_updated");
+    assert.equal(updated?.type, "message_updated");
+    assert.match(updated.content, /模型请求失败/);
+    const failed = events.find((event) => event.type === "turn_failed");
+    assert.equal(failed?.type, "turn_failed");
+    assert.equal(failed.error, assistantMessage?.runtimeTrace?.error);
+  } finally {
+    await conversationService.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("chat orchestrator persists assistant token usage in the runtime trace", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
   const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));

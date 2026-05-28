@@ -96,4 +96,5 @@ test("browser tools emit progress output before long actions finish", async () =
   resolveNavigate();
   const result = await resultPromise;
   assert.equal(result.content, "Navigated.");
+  assert.match(outputChunks.map((output) => output.text).join(""), /Navigating browser page done/);
 });

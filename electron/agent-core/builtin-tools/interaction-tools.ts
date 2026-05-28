@@ -96,6 +96,7 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
           metadata: { questions },
         });
         if (approval.type === "deny") {
+          context.emitOutput?.({ stream: "info", text: "Question cancelled\n" });
           return {
             content: `Question cancelled: ${approval.reason}`,
             metadata: { cancelled: true },
@@ -118,6 +119,7 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
             answer: typeof rawAnswer === "string" ? rawAnswer : "",
           };
         });
+        context.emitOutput?.({ stream: "info", text: `Received ${answers.length} answer${answers.length === 1 ? "" : "s"}\n` });
 
         return {
           content: `User answered: ${answers.map((answer) => `"${answer.question}"="${answer.answer || "Unanswered"}"`).join(", ")}`,

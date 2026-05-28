@@ -1245,11 +1245,9 @@ export default function App() {
         return;
       }
 
-      let shouldToast = true;
       setConversationRuntimeStates((current) => {
         const previous = current[event.conversationId] ?? createConversationRuntimeState();
         if (previous.status === "cancelling" && looksLikeTurnCancellation(event.error)) {
-          shouldToast = false;
           return {
             ...current,
             [event.conversationId]: {
@@ -1271,9 +1269,6 @@ export default function App() {
           },
         };
       });
-      if (shouldToast) {
-        setToast(event.error);
-      }
     });
   }, []);
 

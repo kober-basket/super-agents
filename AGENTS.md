@@ -103,6 +103,7 @@ npm run preview
 - 长期记忆要保持短、结构化、可删除；写入前拒绝疑似密钥内容，prompt 注入时不能让记忆覆盖 runtime/system/developer/直接用户指令。
 - 工具结果过长时截断并写入 metadata，而不是让模型上下文失控。
 - 工具调用前或工具间的模型可见文本可以先流式显示为 provisional assistant text；一旦确认后续发生工具/权限事件，orchestrator 必须把这段文本清空并折回 runtime trace。工具完成后的正式回答优先通过内部 `finish_task` 进入 final-only 阶段并流式输出，避免完整总结同时出现在过程和最终回答中。
+- 内置工具和 MCP adapter 应尽量通过 `context.emitOutput()` 暴露执行中状态；能流 stdout/stderr 或下载进度的工具直接流 chunk，只能最终返回的外部能力至少要发出开始、等待/审批和完成状态。
 - turn 事实事件进入 `runtimeTrace.events`，UI timeline/activity 是派生展示，不能反过来作为 agent runtime 的事实来源。
 - 同一个 conversation 的 `agentSessionId` 应能恢复对应 agent messages；改 session 行为时要覆盖持久化恢复测试。
 - 同一 turn 内重复的同签名工具调用应复用已有结果或给出明确提示。

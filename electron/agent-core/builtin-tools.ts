@@ -819,8 +819,13 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         if (!fileStat.isFile()) {
           throw new Error("Target path is not a file.");
         }
+        emitToolOutput(context, `Reading ${fileStat.size} bytes from ${target.relative}\n`);
         const buffer = await readFile(target.resolved);
         const truncated = buffer.byteLength > maxBytes;
+        emitToolOutput(
+          context,
+          `Loaded ${Math.min(buffer.byteLength, maxBytes)} of ${buffer.byteLength} bytes${truncated ? " (truncated)" : ""}.\n`,
+        );
         return {
           content: trimOutput(buffer.subarray(0, maxBytes).toString("utf8")),
           metadata: {
@@ -851,6 +856,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         const target = await resolveWorkspacePath(context, stringInput(input, "path", "."), { targetKind: "directory" });
         const limit = Math.min(Math.max(1, numberInput(input, "limit", MAX_LIST_ENTRIES)), MAX_LIST_ENTRIES);
         const entries = await readdir(target.resolved, { withFileTypes: true });
+        emitToolOutput(context, `Found ${entries.length} entr${entries.length === 1 ? "y" : "ies"} in ${target.relative}\n`);
         const lines = entries
           .slice(0, limit)
           .map((entry) => `${entry.isDirectory() ? "dir " : "file"}\t${entry.name}`)
@@ -1025,8 +1031,11 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         if (bytes > MAX_WRITE_BYTES) {
           throw new Error(`Content is too large to write (${bytes} bytes, max ${MAX_WRITE_BYTES}).`);
         }
+        emitToolOutput(context, `Ensuring parent directory for ${target.relative}\n`);
         await mkdir(path.dirname(target.resolved), { recursive: true });
+        emitToolOutput(context, `Writing ${bytes} bytes to ${target.relative}\n`);
         await writeFile(target.resolved, content, "utf8");
+        emitToolOutput(context, `Wrote ${target.relative}\n`);
         return {
           content: `Wrote ${target.relative} (${bytes} bytes).`,
           metadata: {
@@ -1066,19 +1075,26 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         if (!fileStat.isFile()) {
           throw new Error("Target path is not a file.");
         }
+        emitToolOutput(context, `Loading ${target.relative}\n`);
         const current = await readFile(target.resolved, "utf8");
         const occurrences = current.split(oldString).length - 1;
         if (occurrences === 0) {
           throw new Error("oldString was not found in the file.");
         }
         const replaceAll = booleanInput(input, "replaceAll");
+        emitToolOutput(
+          context,
+          `Applying ${replaceAll ? occurrences : 1} replacement${(replaceAll ? occurrences : 1) === 1 ? "" : "s"} in ${target.relative}\n`,
+        );
         const next = replaceAll ? current.split(oldString).join(newString) : current.replace(oldString, newString);
         const bytes = Buffer.byteLength(next, "utf8");
         if (bytes > MAX_WRITE_BYTES) {
           throw new Error(`Edited content is too large to write (${bytes} bytes, max ${MAX_WRITE_BYTES}).`);
         }
+        emitToolOutput(context, `Writing edited file ${target.relative} (${bytes} bytes)\n`);
         await writeFile(target.resolved, next, "utf8");
         const replacements = replaceAll ? occurrences : 1;
+        emitToolOutput(context, `Edit applied to ${target.relative}\n`);
         return {
           content: `Edit applied to ${target.relative} (${replacements} replacement${replacements === 1 ? "" : "s"}).`,
           metadata: {
@@ -1124,10 +1140,12 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
           throw new Error("Target path is not a file.");
         }
 
+        emitToolOutput(context, `Loading ${target.relative}\n`);
         const original = await readFile(target.resolved, "utf8");
         let next = original;
         let replacements = 0;
-        for (const edit of edits) {
+        for (const [index, edit] of edits.entries()) {
+          emitToolOutput(context, `Applying edit ${index + 1}/${edits.length} in ${target.relative}\n`);
           const result = applyTextEdit(next, edit);
           next = result.content;
           replacements += result.replacements;
@@ -1137,7 +1155,9 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         if (bytes > MAX_WRITE_BYTES) {
           throw new Error(`Edited content is too large to write (${bytes} bytes, max ${MAX_WRITE_BYTES}).`);
         }
+        emitToolOutput(context, `Writing edited file ${target.relative} (${bytes} bytes)\n`);
         await writeFile(target.resolved, next, "utf8");
+        emitToolOutput(context, `Multi edit applied to ${target.relative}\n`);
         return {
           content: `Multi edit applied to ${target.relative} (${replacements} replacements).`,
           metadata: {
@@ -1173,6 +1193,7 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
         for (const operation of operations) {
           if (operation.type === "add") {
             const target = await resolveWorkspacePath(context, operation.filePath, { targetKind: "file" });
+            emitToolOutput(context, `Adding ${target.relative}\n`);
             const body = operation.lines.map((line) => {
               if (!line.startsWith("+")) {
                 throw new Error(`Add file lines must start with '+': ${line}`);
@@ -1187,17 +1208,21 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
             await mkdir(path.dirname(target.resolved), { recursive: true });
             await writeFile(target.resolved, content, { encoding: "utf8", flag: "wx" });
             changedPaths.push(target.relative);
+            emitToolOutput(context, `Added ${target.relative} (${bytes} bytes)\n`);
             continue;
           }
 
           if (operation.type === "delete") {
             const target = await resolveWorkspacePath(context, operation.filePath, { targetKind: "file" });
+            emitToolOutput(context, `Deleting ${target.relative}\n`);
             await rm(target.resolved);
             changedPaths.push(target.relative);
+            emitToolOutput(context, `Deleted ${target.relative}\n`);
             continue;
           }
 
           const target = await resolveWorkspacePath(context, operation.filePath, { targetKind: "file" });
+          emitToolOutput(context, `Updating ${target.relative}\n`);
           const current = await readFile(target.resolved, "utf8");
           const next = applyPatchUpdate(current, operation.lines);
           const bytes = Buffer.byteLength(next, "utf8");
@@ -1213,9 +1238,11 @@ export function createBuiltinToolDefinitions(options: BuiltinToolDefinitionOptio
               await rm(target.resolved);
             }
             changedPaths.push(`${target.relative} -> ${moveTarget.relative}`);
+            emitToolOutput(context, `Moved ${target.relative} to ${moveTarget.relative}\n`);
           } else {
             await writeFile(target.resolved, next, "utf8");
             changedPaths.push(target.relative);
+            emitToolOutput(context, `Updated ${target.relative} (${bytes} bytes)\n`);
           }
         }
 

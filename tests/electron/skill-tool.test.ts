@@ -73,6 +73,7 @@ function createWorkspaceService() {
 
 test("skill tool loads enabled skill content with arguments", async () => {
   const tool = createSkillToolDefinition(createWorkspaceService());
+  const outputChunks: Array<{ stream: string; text: string }> = [];
 
   const result = await tool.execute(
     { name: "spec-writer", args: "payment retry flow" },
@@ -80,6 +81,9 @@ test("skill tool loads enabled skill content with arguments", async () => {
       sessionId: "session",
       agentId: "agent",
       workspaceRoot: "/tmp/super-agents-test",
+      emitOutput: (output) => {
+        outputChunks.push(output);
+      },
     },
   );
 
@@ -87,6 +91,9 @@ test("skill tool loads enabled skill content with arguments", async () => {
   assert.match(result.content, /Base directory for this skill:/);
   assert.match(result.content, /Focus on acceptance criteria:\npayment retry flow/);
   assert.equal(result.metadata?.skillId, "spec-writer");
+  const progressText = outputChunks.map((output) => output.text).join("");
+  assert.match(progressText, /Loading skill spec-writer/);
+  assert.match(progressText, /Loaded skill spec-writer/);
 });
 
 test("skill tool rejects disabled or unknown skills", async () => {

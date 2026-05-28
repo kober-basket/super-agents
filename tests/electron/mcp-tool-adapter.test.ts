@@ -65,4 +65,5 @@ test("MCP adapter emits progress output before debugTool finishes", async () => 
   resolveTool();
   const result = await resultPromise;
   assert.equal(result.content, "probe result");
+  assert.match(outputChunks.map((output) => output.text).join(""), /MCP tool Local Server\/probe finished/);
 });

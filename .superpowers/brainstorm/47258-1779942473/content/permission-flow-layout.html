@@ -1,0 +1,87 @@
+<h2>权限确认应该放在哪里？</h2>
+<p class="subtitle">点一个你觉得最顺手的方向。这里先看交互位置，不纠结最终视觉细节。</p>
+
+<div class="cards">
+  <div class="card" data-choice="composer-card" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="height:260px;display:grid;grid-template-rows:1fr auto;gap:14px;padding:16px;background:#f5f6f3;border-radius:14px;">
+        <div style="display:grid;align-content:end;gap:10px;">
+          <div style="justify-self:end;width:44%;height:30px;border-radius:15px;background:#dde3df;"></div>
+          <div style="width:66%;height:58px;border-radius:12px;background:#ffffff;border:1px solid #d7ddd8;"></div>
+        </div>
+        <div style="display:grid;gap:8px;">
+          <div style="padding:12px;border-radius:12px;background:#fff7e8;border:1px solid #e5c87d;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+              <strong style="font-size:13px;color:#3b3121;">bash 请求执行命令</strong>
+              <span style="font-size:11px;color:#7a6440;">需要确认</span>
+            </div>
+            <div style="margin-top:7px;height:18px;border-radius:5px;background:#f0e3c5;"></div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+              <span style="width:54px;height:24px;border-radius:7px;background:#fff;"></span>
+              <span style="width:78px;height:24px;border-radius:7px;background:#2f6c52;"></span>
+            </div>
+          </div>
+          <div style="height:54px;border-radius:16px;background:#ffffff;border:1px solid #dce1dc;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>输入框上方卡片</h3>
+      <p>像 question/mail 授权一样进入聊天流，不打断窗口焦点，适合快速确认和补充选项。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="inline-tool" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="height:260px;display:grid;grid-template-columns:76px 1fr;gap:14px;padding:16px;background:#f5f6f3;border-radius:14px;">
+        <div style="border-radius:12px;background:#e5e8e4;"></div>
+        <div style="display:grid;align-content:center;gap:10px;">
+          <div style="width:36%;height:28px;border-radius:14px;background:#dde3df;"></div>
+          <div style="border-radius:12px;background:#ffffff;border:1px solid #d7ddd8;padding:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <strong style="font-size:13px;color:#28312c;">bash</strong>
+              <span style="font-size:11px;color:#9a6b20;">等待授权</span>
+            </div>
+            <div style="margin-top:8px;height:22px;border-radius:6px;background:#eef1ed;"></div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+              <span style="width:54px;height:23px;border-radius:7px;background:#f7f4ef;border:1px solid #ddd4c7;"></span>
+              <span style="width:66px;height:23px;border-radius:7px;background:#2f6c52;"></span>
+            </div>
+          </div>
+          <div style="height:28px;border-radius:14px;background:#dde3df;justify-self:end;width:42%;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>工具行内展开</h3>
+      <p>直接在 pending tool call 里展开授权详情，因果关系最清楚，但可能挤压聊天阅读区域。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="side-panel" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="height:260px;display:grid;grid-template-columns:1fr 132px;gap:12px;padding:16px;background:#f5f6f3;border-radius:14px;">
+        <div style="display:grid;align-content:center;gap:10px;">
+          <div style="width:42%;height:30px;border-radius:15px;background:#dde3df;"></div>
+          <div style="height:54px;border-radius:12px;background:#ffffff;border:1px solid #d7ddd8;"></div>
+          <div style="height:36px;border-radius:12px;background:#e8ece8;"></div>
+        </div>
+        <div style="border-radius:12px;background:#ffffff;border:1px solid #d7ddd8;padding:10px;display:grid;grid-template-rows:auto 1fr auto;gap:8px;">
+          <strong style="font-size:12px;color:#28312c;">待确认</strong>
+          <div style="display:grid;align-content:start;gap:7px;">
+            <div style="height:18px;border-radius:6px;background:#fff3d8;"></div>
+            <div style="height:34px;border-radius:8px;background:#eef1ed;"></div>
+          </div>
+          <div style="display:grid;gap:6px;">
+            <span style="height:22px;border-radius:7px;background:#2f6c52;"></span>
+            <span style="height:22px;border-radius:7px;background:#f7f4ef;border:1px solid #ddd4c7;"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>右侧待办面板</h3>
+      <p>把授权当成运行控制台事项，适合多请求队列，但新手可能看不到要处理哪里。</p>
+    </div>
+  </div>
+</div>

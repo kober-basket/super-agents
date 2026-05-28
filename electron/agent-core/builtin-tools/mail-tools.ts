@@ -242,6 +242,7 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
         });
 
         if (approval.type === "deny") {
+          emitMailProgress(context, "Mail authorization cancelled");
           return {
             content: `Mail authorization cancelled: ${approval.reason}`,
             metadata: { cancelled: true },
@@ -251,6 +252,7 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
         const account = sanitizeMailAuthDecisionMetadata(approval.metadata);
         const email = typeof account.email === "string" ? account.email : "mail account";
         const providerName = typeof account.providerName === "string" ? account.providerName : "Mail";
+        emitMailProgress(context, `Mail account connected: ${providerName} <${email}>`);
         return {
           content: `Mail account connected: ${providerName} <${email}>. Credentials were saved locally and were not shared with the model.`,
           metadata: account,
@@ -287,7 +289,9 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
           if (!email) {
             throw new Error("email is required for infer_setup.");
           }
+          emitMailProgress(context, `Inferring mail setup for ${email}`);
           const setup = store?.inferSetup ? await store.inferSetup(email) : inferMailSetup(email);
+          emitMailProgress(context, "Mail setup inferred");
           return {
             content: formatSetup(setup),
             metadata: { action, setup },
@@ -296,18 +300,23 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
 
         const mailStore = requireStore(store);
         if (action === "list_accounts") {
+          emitMailProgress(context, "Listing mail accounts");
           const accounts = await mailStore.listAccounts();
+          emitMailProgress(context, `Found ${accounts.length} mail account${accounts.length === 1 ? "" : "s"}`);
           return {
             content: formatAccounts(accounts),
             metadata: { action, accounts },
           };
         }
         if (action === "search") {
+          const query = stringInput(input, "query");
+          emitMailProgress(context, `Searching mail messages${query ? ` for ${query}` : ""}`);
           const messages = await mailStore.searchMessages({
             accountId: stringInput(input, "accountId") || undefined,
-            query: stringInput(input, "query") || undefined,
+            query: query || undefined,
             limit: numberInput(input, "limit", 10),
           });
+          emitMailProgress(context, `Found ${messages.length} mail message${messages.length === 1 ? "" : "s"}`);
           return {
             content: formatMessages(messages),
             metadata: { action, messages },
@@ -318,10 +327,12 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
           if (!messageId) {
             throw new Error("messageId is required for read.");
           }
+          emitMailProgress(context, `Reading mail message ${messageId}`);
           const message = await mailStore.readMessage({
             accountId: stringInput(input, "accountId") || undefined,
             messageId,
           });
+          emitMailProgress(context, `Read mail message ${messageId}`);
           return {
             content: formatMessage(message),
             metadata: { action, message },
@@ -350,14 +361,17 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
       execute: async (input, context) => {
         const mailStore = requireStore(store);
         emitMailProgress(context, "Creating mail draft");
+        const to = stringArrayInput(input, "to");
+        emitMailProgress(context, `Draft recipients: ${to.length}`);
         const draft = await mailStore.createDraft({
           accountId: stringInput(input, "accountId").trim(),
-          to: stringArrayInput(input, "to"),
+          to,
           cc: stringArrayInput(input, "cc"),
           bcc: stringArrayInput(input, "bcc"),
           subject: stringInput(input, "subject"),
           body: stringInput(input, "body"),
         });
+        emitMailProgress(context, `Created mail draft ${draft.id}`);
         return {
           content: formatDraft(draft),
           metadata: { draft },
@@ -384,6 +398,7 @@ export function createMailToolDefinitions(store?: MailToolStore | null): ToolDef
           draftId: stringInput(input, "draftId").trim(),
           accountId: stringInput(input, "accountId") || undefined,
         });
+        emitMailProgress(context, `Sent mail draft ${result.draftId}`);
         return {
           content: `Sent draft ${result.draftId} from account ${result.accountId}.`,
           metadata: { ...result },

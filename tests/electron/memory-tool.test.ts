@@ -22,10 +22,14 @@ test("memory tool lists, adds, replaces, and removes memories through the store"
   const service = new MemoryService(path.join(tempDir, "memory"));
   const tool = createMemoryToolDefinition(service);
   const approvals: string[] = [];
+  const outputChunks: Array<{ stream: string; text: string }> = [];
 
   try {
     const context: ToolContext = {
       ...createContext(tempDir),
+      emitOutput: (output) => {
+        outputChunks.push(output);
+      },
       requestApproval: async (request) => {
         approvals.push(request.reason);
         return { type: "allow" };
@@ -47,7 +51,7 @@ test("memory tool lists, adds, replaces, and removes memories through the store"
     assert.ok(createdId);
     assert.equal(approvals.length, 1);
 
-    const listed = await tool.execute({ action: "list", query: "中文" }, createContext(tempDir));
+    const listed = await tool.execute({ action: "list", query: "中文" }, context);
     assert.match(listed.content, /回答语言/);
     assert.equal((listed.metadata?.entries as unknown[]).length, 1);
 
@@ -66,6 +70,13 @@ test("memory tool lists, adds, replaces, and removes memories through the store"
     const removed = await tool.execute({ action: "remove", id: createdId }, context);
     assert.match(removed.content, /Removed memory/);
     assert.equal(approvals.length, 3);
+    const progressText = outputChunks.map((output) => output.text).join("");
+    assert.match(progressText, /Running memory action add/);
+    assert.match(progressText, /Waiting for memory write approval/);
+    assert.match(progressText, /Saved memory/);
+    assert.match(progressText, /Searching memories/);
+    assert.match(progressText, /Waiting for memory update approval/);
+    assert.match(progressText, /Waiting for memory delete approval/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

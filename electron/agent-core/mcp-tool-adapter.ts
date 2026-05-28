@@ -67,6 +67,10 @@ export function createMcpToolDefinition(input: {
         toolName: input.tool.name,
         argumentsJson: stringifyJson(toolInput || {}),
       });
+      context.emitOutput?.({
+        stream: result.isError ? "stderr" : "info",
+        text: `MCP tool ${input.tool.serverName}/${input.tool.name} finished${result.isError ? " with error" : ""}\n`,
+      });
       if (result.isError) {
         throw new Error(formatMcpResult(result) || "MCP tool returned an error.");
       }

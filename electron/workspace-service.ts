@@ -426,8 +426,8 @@ function getAudioTranscriptionProviderCandidates(config: AppConfig, requestedPro
     requestedProvider && hasConfiguredAudioTranscriptionModel(requestedProvider)
       ? requestedProvider.id
       : "",
-    activeProvider && hasConfiguredAudioTranscriptionModel(activeProvider) ? activeProvider.id : "",
     ...speechProviderIds,
+    activeProvider && hasConfiguredAudioTranscriptionModel(activeProvider) ? activeProvider.id : "",
     requestedProvider?.id ?? "",
     activeProvider?.id ?? "",
     ...config.modelProviders.map((provider) => provider.id),

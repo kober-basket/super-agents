@@ -53,6 +53,12 @@ interface PendingDuplicateToolResult {
   slotIndex: number;
 }
 
+interface StreamedToolCallDraft {
+  id: string;
+  name: string;
+  inputJson: string;
+}
+
 function createMaxTurnsReachedMessage(maxTurns: number) {
   return `已达到本轮最大执行轮次（${maxTurns}）。上面的工具结果已经保留；你可以继续发送消息让我接着执行或基于现有结果整理结论。`;
 }
@@ -219,6 +225,45 @@ const COMMON_LOCAL_DIRECTORIES = [
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function appendStreamedToolCallDraft(
+  drafts: Map<string, StreamedToolCallDraft>,
+  event: { toolCallId?: string; name?: string; inputJsonDelta?: string },
+) {
+  if (!event.toolCallId) {
+    return;
+  }
+
+  const current = drafts.get(event.toolCallId);
+  drafts.set(event.toolCallId, {
+    id: event.toolCallId,
+    name: event.name ?? current?.name ?? "",
+    inputJson: `${current?.inputJson ?? ""}${event.inputJsonDelta ?? ""}`,
+  });
+}
+
+function parseStreamedToolCallInput(inputJson: string) {
+  const trimmed = inputJson.trim();
+  if (!trimmed) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return {};
+  }
+}
+
+function materializeStreamedToolCallDrafts(drafts: Map<string, StreamedToolCallDraft>): ToolCall[] {
+  return Array.from(drafts.values())
+    .filter((draft) => draft.id.trim() && draft.name.trim())
+    .map((draft) => ({
+      id: draft.id,
+      name: draft.name,
+      input: parseStreamedToolCallInput(draft.inputJson),
+    }));
 }
 
 function isExplicitToolSelfTestRequest(value: string) {
@@ -651,6 +696,146 @@ export class AgentCore {
       const toolMessageSlots: Array<AgentMessage | undefined> = [];
       const preparedToolCalls: PreparedToolExecution[] = [];
       const pendingDuplicateToolResults: PendingDuplicateToolResult[] = [];
+      const streamedToolCallDrafts = new Map<string, StreamedToolCallDraft>();
+      const agentCore = this;
+
+      const prepareToolCallForExecution = async function* (
+        incomingToolCall: ToolCall,
+      ): AsyncIterable<AgentEvent> {
+        let toolCall = repairImplicitLocalDirectoryToolCall(
+          incomingToolCall,
+          input.content,
+          input.workspacePrompt,
+        );
+        calledTool = true;
+        let tool = agentCore.options.tools.get(toolCall.name);
+        toolCall = repairToolSelfTestToolCall(toolCall, tool, input.content);
+        toolCall = createUniqueToolCallId(toolCall, toolCallIdsThisTurn, () => {
+          toolCallIdCollisionSequence += 1;
+          return toolCallIdCollisionSequence;
+        });
+        tool = agentCore.options.tools.get(toolCall.name);
+        const toolMessageSlotIndex = assistantToolCalls.length;
+        assistantToolCalls.push(toolCall);
+        toolMessageSlots.push(undefined);
+        const toolCallSignature = createToolCallSignature(toolCall);
+        const previousResult = completedToolResults.get(toolCallSignature);
+        if (previousResult) {
+          toolMessageSlots[toolMessageSlotIndex] = {
+            role: "tool",
+            name: toolCall.name,
+            toolCallId: toolCall.id,
+            content: createDuplicateToolResultMessage(toolCall, previousResult),
+          };
+          return;
+        }
+        if (preparedToolCalls.some((prepared) => prepared.signature === toolCallSignature)) {
+          pendingDuplicateToolResults.push({
+            toolCall,
+            signature: toolCallSignature,
+            slotIndex: toolMessageSlotIndex,
+          });
+          return;
+        }
+
+        const invalidInputReason = tool ? validateToolInput(tool, toolCall.input) : "";
+        if (invalidInputReason) {
+          const result: ToolResult = isExplicitToolSelfTestRequest(input.content)
+            ? createSelfTestSkippedToolResult(toolCall, invalidInputReason)
+            : {
+                content: [
+                  `[TOOL_ERROR] Invalid tool input: ${invalidInputReason}`,
+                  `Retry "${toolCall.name}" with valid JSON arguments matching its schema.`,
+                  "Do not write tool calls or tool arguments as plain text.",
+                ].join("\n"),
+                metadata: {
+                  isError: true,
+                  invalidInput: true,
+                },
+          };
+          toolCallsThisStep += 1;
+          completedToolResults.set(toolCallSignature, result);
+          toolMessageSlots[toolMessageSlotIndex] = createToolMessage(toolCall, result);
+          return;
+        }
+
+        const decision = agentCore.permissionManager.check({
+          agent,
+          tool,
+          toolCall,
+          toolCallsThisTurn: toolCallsThisStep,
+          fullFileSystemAccess: input.fullFileSystemAccess === true,
+        });
+
+        if (decision.type === "deny") {
+          const result: ToolResult = {
+            content: `Permission denied: ${decision.reason}`,
+            metadata: {
+              isError: true,
+              permissionDenied: true,
+            },
+          };
+          completedToolResults.set(toolCallSignature, result);
+          toolMessageSlots[toolMessageSlotIndex] = createToolMessage(toolCall, result);
+          yield {
+            type: "permission_denied",
+            sessionId: input.sessionId,
+            agentId: agent.id,
+            toolCall,
+            reason: decision.reason,
+          };
+          return;
+        }
+
+        if (decision.type === "ask") {
+          yield {
+            type: "permission_requested",
+            sessionId: input.sessionId,
+            agentId: agent.id,
+            toolCall,
+            reason: decision.reason,
+          };
+          const approval = agentCore.options.approvalHandler
+            ? await agentCore.options.approvalHandler({
+                sessionId: input.sessionId,
+                agentId: agent.id,
+                toolCall,
+                reason: decision.reason,
+                kind: "tool",
+              })
+            : { type: "deny" as const, reason: "No approval handler is configured." };
+
+          if (approval.type === "deny") {
+            const result: ToolResult = {
+              content: `Permission denied: ${approval.reason}`,
+              metadata: {
+                isError: true,
+                permissionDenied: true,
+              },
+            };
+            completedToolResults.set(toolCallSignature, result);
+            toolMessageSlots[toolMessageSlotIndex] = createToolMessage(toolCall, result);
+            yield {
+              type: "permission_denied",
+              sessionId: input.sessionId,
+              agentId: agent.id,
+              toolCall,
+              reason: approval.reason,
+            };
+            return;
+          }
+        }
+
+        const approvalRequired = decision.type === "ask";
+        toolCallsThisStep += 1;
+        preparedToolCalls.push({
+          tool: tool!,
+          toolCall,
+          signature: toolCallSignature,
+          slotIndex: toolMessageSlotIndex,
+          concurrencySafe: !approvalRequired && isToolCallConcurrencySafe(tool!, toolCall.input),
+        });
+      };
 
       for await (const event of this.options.modelGateway.stream({
         model: agent.model,
@@ -704,6 +889,7 @@ export class AgentCore {
         }
 
         if (event.type === "tool_call_delta") {
+          appendStreamedToolCallDraft(streamedToolCallDrafts, event);
           if (event.toolCallId) {
             yield {
               type: "tool_call_input_delta",
@@ -718,143 +904,25 @@ export class AgentCore {
         }
 
         if (event.type === "tool_call") {
-          let toolCall = repairImplicitLocalDirectoryToolCall(
-            event.toolCall,
-            input.content,
-            input.workspacePrompt,
-          );
-          calledTool = true;
-          let tool = this.options.tools.get(toolCall.name);
-          toolCall = repairToolSelfTestToolCall(toolCall, tool, input.content);
-          toolCall = createUniqueToolCallId(toolCall, toolCallIdsThisTurn, () => {
-            toolCallIdCollisionSequence += 1;
-            return toolCallIdCollisionSequence;
-          });
-          tool = this.options.tools.get(toolCall.name);
-          const toolMessageSlotIndex = assistantToolCalls.length;
-          assistantToolCalls.push(toolCall);
-          toolMessageSlots.push(undefined);
-          const toolCallSignature = createToolCallSignature(toolCall);
-          const previousResult = completedToolResults.get(toolCallSignature);
-          if (previousResult) {
-            toolMessageSlots[toolMessageSlotIndex] = {
-              role: "tool",
-              name: toolCall.name,
-              toolCallId: toolCall.id,
-              content: createDuplicateToolResultMessage(toolCall, previousResult),
-            };
-            continue;
+          for await (const preparationEvent of prepareToolCallForExecution(event.toolCall)) {
+            yield preparationEvent;
           }
-          if (preparedToolCalls.some((prepared) => prepared.signature === toolCallSignature)) {
-            pendingDuplicateToolResults.push({
-              toolCall,
-              signature: toolCallSignature,
-              slotIndex: toolMessageSlotIndex,
-            });
-            continue;
-          }
-
-          const invalidInputReason = tool ? validateToolInput(tool, toolCall.input) : "";
-          if (invalidInputReason) {
-            const result: ToolResult = isExplicitToolSelfTestRequest(input.content)
-              ? createSelfTestSkippedToolResult(toolCall, invalidInputReason)
-              : {
-                  content: [
-                    `[TOOL_ERROR] Invalid tool input: ${invalidInputReason}`,
-                    `Retry "${toolCall.name}" with valid JSON arguments matching its schema.`,
-                    "Do not write tool calls or tool arguments as plain text.",
-                  ].join("\n"),
-                  metadata: {
-                    isError: true,
-                    invalidInput: true,
-                  },
-            };
-            toolCallsThisStep += 1;
-            completedToolResults.set(toolCallSignature, result);
-            toolMessageSlots[toolMessageSlotIndex] = createToolMessage(toolCall, result);
-            continue;
-          }
-
-          const decision = this.permissionManager.check({
-            agent,
-            tool,
-            toolCall,
-            toolCallsThisTurn: toolCallsThisStep,
-            fullFileSystemAccess: input.fullFileSystemAccess === true,
-          });
-
-          if (decision.type === "deny") {
-            const result: ToolResult = {
-              content: `Permission denied: ${decision.reason}`,
-              metadata: {
-                isError: true,
-                permissionDenied: true,
-              },
-            };
-            completedToolResults.set(toolCallSignature, result);
-            toolMessageSlots[toolMessageSlotIndex] = createToolMessage(toolCall, result);
-            yield {
-              type: "permission_denied",
-              sessionId: input.sessionId,
-              agentId: agent.id,
-              toolCall,
-              reason: decision.reason,
-            };
-            continue;
-          }
-
-          if (decision.type === "ask") {
-            yield {
-              type: "permission_requested",
-              sessionId: input.sessionId,
-              agentId: agent.id,
-              toolCall,
-              reason: decision.reason,
-            };
-            const approval = this.options.approvalHandler
-              ? await this.options.approvalHandler({
-                  sessionId: input.sessionId,
-                  agentId: agent.id,
-                  toolCall,
-                  reason: decision.reason,
-                  kind: "tool",
-                })
-              : { type: "deny", reason: "No approval handler is configured." };
-
-            if (approval.type === "deny") {
-              const result: ToolResult = {
-                content: `Permission denied: ${approval.reason}`,
-                metadata: {
-                  isError: true,
-                  permissionDenied: true,
-                },
-              };
-              completedToolResults.set(toolCallSignature, result);
-              toolMessageSlots[toolMessageSlotIndex] = createToolMessage(toolCall, result);
-              yield {
-                type: "permission_denied",
-                sessionId: input.sessionId,
-                agentId: agent.id,
-                toolCall,
-                reason: approval.reason,
-              };
-              continue;
-            }
-          }
-
-          const approvalRequired = decision.type === "ask";
-          toolCallsThisStep += 1;
-          preparedToolCalls.push({
-            tool: tool!,
-            toolCall,
-            signature: toolCallSignature,
-            slotIndex: toolMessageSlotIndex,
-            concurrencySafe: !approvalRequired && isToolCallConcurrencySafe(tool!, toolCall.input),
-          });
           continue;
         }
 
         stopReason = event.stopReason;
+      }
+
+      if (stopReason === "tool_calls" && streamedToolCallDrafts.size > 0) {
+        const preparedToolCallIds = new Set(assistantToolCalls.map((toolCall) => toolCall.id));
+        const streamedToolCalls = materializeStreamedToolCallDrafts(streamedToolCallDrafts).filter(
+          (toolCall) => !preparedToolCallIds.has(toolCall.id),
+        );
+        for (const streamedToolCall of streamedToolCalls) {
+          for await (const preparationEvent of prepareToolCallForExecution(streamedToolCall)) {
+            yield preparationEvent;
+          }
+        }
       }
 
       for await (const toolEvent of this.executePreparedToolCalls({

@@ -46,3 +46,9 @@ test("knowledge base list mutations rely on visible UI changes instead of succes
   assert.doesNotMatch(appSource, /setToast\("网站已添加"\)/);
   assert.doesNotMatch(appSource, /setToast\("知识项已删除"\)/);
 });
+
+test("agent turn failures stay in conversation output instead of global toast", () => {
+  const appSource = readSource("src/App.tsx");
+
+  assert.doesNotMatch(appSource, /setToast\(event\.error\)/);
+});

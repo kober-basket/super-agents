@@ -359,6 +359,47 @@ test("native agent core forwards streamed write input deltas before the tool sta
   );
 });
 
+test("native agent core executes streamed tool deltas when the provider omits final tool call events", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      { type: "text_delta", text: "我先查一下。" },
+      { type: "tool_call_delta", toolCallId: "lookup-1", name: "lookup", inputJsonDelta: "" },
+      { type: "tool_call_delta", toolCallId: "lookup-1", inputJsonDelta: '{"key":"alpha"}' },
+      { type: "done", stopReason: "tool_calls" },
+    ],
+    [
+      { type: "text_delta", text: "查到了。" },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createCore(gateway);
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "streamed-delta-only-tools-session",
+    agentId: "neutral",
+    content: "lookup alpha",
+  })) {
+    events.push(event);
+  }
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "tool_call_started").map((event) => event.toolCall),
+    [{ id: "lookup-1", name: "lookup", input: { key: "alpha" } }],
+  );
+  assert.deepEqual(
+    events.filter((event) => event.type === "tool_call_finished").map((event) => event.result.content),
+    ["value:alpha"],
+  );
+  assert.equal(gateway.requests.length, 2);
+  assert.deepEqual(gateway.requests[1]?.messages.at(-2), {
+    role: "assistant",
+    content: "我先查一下。",
+    toolCalls: [{ id: "lookup-1", name: "lookup", input: { key: "alpha" } }],
+  });
+  assert.equal(events.at(-1)?.type, "turn_finished");
+});
+
 test("native agent core preserves reasoning content on assistant tool-call messages", async () => {
   const gateway = new ScriptedModelGateway([
     [
@@ -2022,6 +2063,204 @@ test("openai-compatible gateway requests automatic tool choice when tools are av
     }
 
     assert.equal(requestBody?.tool_choice, "auto");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openai-compatible gateway disables DashScope Qwen thinking for tool calls", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    return new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "No tool needed." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "qwen::qwen3.6-plus",
+      modelProviders: [
+        {
+          id: "qwen",
+          name: "Qwen",
+          kind: "openai-compatible",
+          baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          apiKey: "test-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [
+            {
+              id: "qwen3.6-plus",
+              label: "Qwen3.6 Plus",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }) as AppConfig);
+
+    for await (const _event of gateway.stream({
+      model: "qwen3.6-plus",
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          name: "web_search",
+          description: "Search the web",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+      ],
+    })) {
+      // Drain the stream so the request body is captured.
+    }
+
+    assert.equal(requestBody?.enable_thinking, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openai-compatible gateway retries DashScope Qwen tool calls without thinking toggle when rejected", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    requestBodies.push(requestBody);
+    if (requestBodies.length === 1) {
+      return new Response(
+        JSON.stringify({ error: { message: "Invalid parameter: enable_thinking is not supported by this model." } }),
+        { status: 400, statusText: "Bad Request" },
+      );
+    }
+
+    return new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "Fallback answer." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "qwen::qwen3.6-plus",
+      modelProviders: [
+        {
+          id: "qwen",
+          name: "Qwen",
+          kind: "openai-compatible",
+          baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          apiKey: "test-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [
+            {
+              id: "qwen3.6-plus",
+              label: "Qwen3.6 Plus",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }) as AppConfig);
+
+    const events = [];
+    for await (const event of gateway.stream({
+      model: "qwen3.6-plus",
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          name: "web_search",
+          description: "Search the web",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+      ],
+    })) {
+      events.push(event);
+    }
+
+    assert.equal(requestBodies.length, 2);
+    assert.equal(requestBodies[0]?.enable_thinking, false);
+    assert.equal("enable_thinking" in (requestBodies[1] ?? {}), false);
+    assert.deepEqual(
+      events.filter((event) => event.type === "text_delta").map((event) => event.text),
+      ["Fallback answer."],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openai-compatible gateway only applies DashScope Qwen thinking toggle to Qwen models", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    return new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "No tool needed." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "qwen::ZHIPU/GLM-5.1",
+      modelProviders: [
+        {
+          id: "qwen",
+          name: "Qwen",
+          kind: "openai-compatible",
+          baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          apiKey: "test-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [
+            {
+              id: "ZHIPU/GLM-5.1",
+              label: "GLM 5.1",
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    }) as AppConfig);
+
+    for await (const _event of gateway.stream({
+      model: "ZHIPU/GLM-5.1",
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          name: "web_search",
+          description: "Search the web",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+      ],
+    })) {
+      // Drain the stream so the request body is captured.
+    }
+
+    assert.equal("enable_thinking" in (requestBody ?? {}), false);
   } finally {
     globalThis.fetch = originalFetch;
   }

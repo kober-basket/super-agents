@@ -102,8 +102,13 @@ async function requireMemoryApproval(action: string, input: unknown, context: To
   });
 
   if (approval.type === "deny") {
+    emitMemoryProgress(context, `Memory ${action} cancelled`);
     throw new ToolPermissionDeniedError(approval.reason);
   }
+}
+
+function emitMemoryProgress(context: ToolContext, text: string) {
+  context.emitOutput?.({ stream: "info", text: `${text}\n` });
 }
 
 function formatMemoryEntries(entries: MemoryEntry[]) {
@@ -170,9 +175,10 @@ export function createMemoryToolDefinition(store?: MemoryToolStore | null): Tool
     execute: async (input, context) => {
       const memoryStore = requireStore(store);
       const action = stringInput(input, "action");
-      context.emitOutput?.({ stream: "info", text: `Running memory action ${action || "unknown"}\n` });
+      emitMemoryProgress(context, `Running memory action ${action || "unknown"}`);
 
       if (action === "list") {
+        emitMemoryProgress(context, "Searching memories");
         const payload = await memoryStore.searchMemories({
           query: stringInput(input, "query"),
           type: memoryTypeInput(input),
@@ -180,6 +186,7 @@ export function createMemoryToolDefinition(store?: MemoryToolStore | null): Tool
           workspaceRoot: context.workspaceRoot,
           limit: numberInput(input, "limit", 20),
         });
+        emitMemoryProgress(context, `Found ${payload.entries.length} memory entr${payload.entries.length === 1 ? "y" : "ies"}`);
         return {
           content: formatMemoryEntries(payload.entries),
           metadata: {
@@ -191,8 +198,10 @@ export function createMemoryToolDefinition(store?: MemoryToolStore | null): Tool
       }
 
       if (action === "add") {
+        emitMemoryProgress(context, "Waiting for memory write approval");
         await requireMemoryApproval("add", input, context);
         const title = stringInput(input, "title").trim();
+        emitMemoryProgress(context, `Saving memory ${title || "(untitled)"}`);
         const catalog = await memoryStore.createMemory({
           type: memoryTypeInput(input) ?? "project_context",
           scope: memoryScopeInput(input) ?? "workspace",
@@ -203,6 +212,7 @@ export function createMemoryToolDefinition(store?: MemoryToolStore | null): Tool
           enabled: booleanInput(input, "enabled", true),
         });
         const created = findNewestEntry(catalog, title);
+        emitMemoryProgress(context, `Saved memory ${created?.title ?? title}`);
         return {
           content: `Saved memory: ${created?.title ?? title}`,
           metadata: {
@@ -214,11 +224,13 @@ export function createMemoryToolDefinition(store?: MemoryToolStore | null): Tool
       }
 
       if (action === "replace") {
+        emitMemoryProgress(context, "Waiting for memory update approval");
         await requireMemoryApproval("replace", input, context);
         const id = stringInput(input, "id").trim();
         if (!id) {
           throw new Error("id is required for replace.");
         }
+        emitMemoryProgress(context, `Updating memory ${id}`);
         const catalog = await memoryStore.updateMemory({
           id,
           type: memoryTypeInput(input),
@@ -230,6 +242,7 @@ export function createMemoryToolDefinition(store?: MemoryToolStore | null): Tool
           enabled: booleanInput(input, "enabled"),
         });
         const updated = catalog.entries.find((entry) => entry.id === id) ?? null;
+        emitMemoryProgress(context, `Updated memory ${updated?.title ?? id}`);
         return {
           content: `Updated memory: ${updated?.title ?? id}`,
           metadata: {
@@ -241,12 +254,15 @@ export function createMemoryToolDefinition(store?: MemoryToolStore | null): Tool
       }
 
       if (action === "remove") {
+        emitMemoryProgress(context, "Waiting for memory delete approval");
         await requireMemoryApproval("remove", input, context);
         const id = stringInput(input, "id").trim();
         if (!id) {
           throw new Error("id is required for remove.");
         }
+        emitMemoryProgress(context, `Removing memory ${id}`);
         await memoryStore.deleteMemory(id);
+        emitMemoryProgress(context, `Removed memory ${id}`);
         return {
           content: `Removed memory: ${id}`,
           metadata: {

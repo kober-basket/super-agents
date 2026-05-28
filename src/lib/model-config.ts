@@ -1,6 +1,11 @@
 import type { ModelProviderConfig, ProviderModelConfig, RuntimeModelOption } from "../types";
 import { enrichProviderModel } from "./model-metadata";
 
+const RERANK_MODEL_REGEX =
+  /\b(?:rerank|reranker|re-rank|bge-reranker(?:-[\w.]+)?|jina-reranker(?:-[\w.]+)?|gte-rerank(?:-[\w.]+)?)\b/i;
+const NON_CHAT_ENDPOINT_MODEL_REGEX =
+  /\b(?:transcribe|transcription|whisper|asr|speech|tts|audio|realtime|image|images|gpt-image(?:-[\w.]+)?|dall-e(?:-[\w.]+)?|wanx(?:-[\w.]+)?|video|moderation)\b/i;
+
 export function sanitizeModelProviderId(value: string) {
   return value
     .trim()
@@ -56,19 +61,39 @@ export function isEmbeddingModel(model: ProviderModelConfig) {
   return /embedding|embeddings|text-embedding|bge-|e5-|gte-|voyage/.test(haystack);
 }
 
+function isRerankModel(model: ProviderModelConfig) {
+  if (model.capabilities?.rerank === true) {
+    return true;
+  }
+
+  const haystack = `${model.id} ${model.label}`.toLowerCase();
+  return RERANK_MODEL_REGEX.test(haystack);
+}
+
+export function isChatCompletionModel(model: ProviderModelConfig) {
+  if (isEmbeddingModel(model) || isRerankModel(model)) {
+    return false;
+  }
+
+  const haystack = `${model.id} ${model.label}`.toLowerCase();
+  return !NON_CHAT_ENDPOINT_MODEL_REGEX.test(haystack);
+}
+
 export function flattenModelProviders(modelProviders: ModelProviderConfig[]): RuntimeModelOption[] {
   return modelProviders.flatMap((provider) =>
-    normalizeProviderModels(provider.models, provider.id).map((model) => ({
-      id: createRuntimeModelId(provider.id, model.id),
-      label: `${provider.name} / ${model.label}`,
-      providerId: provider.id,
-      providerName: provider.name,
-      providerKind: provider.kind,
-      providerEnabled: provider.enabled !== false,
-      modelId: model.id,
-      modelLabel: model.label,
-      enabled: provider.enabled !== false && model.enabled !== false,
-    })),
+    normalizeProviderModels(provider.models, provider.id)
+      .filter(isChatCompletionModel)
+      .map((model) => ({
+        id: createRuntimeModelId(provider.id, model.id),
+        label: `${provider.name} / ${model.label}`,
+        providerId: provider.id,
+        providerName: provider.name,
+        providerKind: provider.kind,
+        providerEnabled: provider.enabled !== false,
+        modelId: model.id,
+        modelLabel: model.label,
+        enabled: provider.enabled !== false && model.enabled !== false,
+      })),
   );
 }
 

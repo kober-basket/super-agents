@@ -47,6 +47,7 @@ export function createSkillToolDefinition(workspaceService: WorkspaceService): T
       }
 
       const args = readString(input, "args");
+      context.emitOutput?.({ stream: "info", text: `Loaded skill ${skill.name}\n` });
       return {
         content: buildLoadedSkillContent(skill, args),
         metadata: {

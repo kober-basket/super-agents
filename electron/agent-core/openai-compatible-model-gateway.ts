@@ -186,8 +186,47 @@ function shouldRetryWithoutStreamingUsage(status: number, errorText: string) {
   return (status === 400 || status === 422) && /\b(?:stream_options|include_usage)\b/i.test(errorText);
 }
 
+function shouldRetryWithoutThinkingToggle(status: number, errorText: string) {
+  return (
+    (status === 400 || status === 422) &&
+    /\benable[_-]?thinking\b|\bthinking\b/i.test(errorText) &&
+    /\b(?:invalid|unknown|unsupported|unrecognized|not\s+support(?:ed)?|parameter|extra_forbidden)\b/i.test(errorText)
+  );
+}
+
+function omitRequestBodyField(body: Record<string, unknown>, field: string) {
+  const next = { ...body };
+  delete next[field];
+  return next;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isDashScopeQwenProvider(
+  provider: AppConfig["modelProviders"][number],
+  activeModel: NonNullable<ReturnType<typeof getActiveModelOption>>,
+) {
+  const providerText = `${provider.id} ${provider.name} ${provider.baseUrl}`.toLowerCase();
+  const modelText = `${activeModel.modelId} ${activeModel.modelLabel}`.toLowerCase();
+  const dashScopeProvider = /\b(?:dashscope|aliyuncs)\b/i.test(providerText);
+  const qwenProvider = /\b(?:qwen|qianwen)\b|千问/i.test(providerText);
+  const qwenModel = /\b(?:qwen|qwq|qvq)(?:[\w.-]+)?\b/i.test(modelText);
+  return qwenModel && (dashScopeProvider || qwenProvider);
+}
+
+function supportsQwenThinkingToggle(activeModel: NonNullable<ReturnType<typeof getActiveModelOption>>) {
+  const modelText = `${activeModel.modelId} ${activeModel.modelLabel}`.toLowerCase();
+  return !/(?:^|[-_.])thinking(?:$|[-_.])|\b(?:qwq|qvq|deepseek-r1|reasoner)\b/i.test(modelText);
+}
+
+function shouldDisableQwenThinkingForTools(
+  provider: AppConfig["modelProviders"][number],
+  activeModel: NonNullable<ReturnType<typeof getActiveModelOption>>,
+  input: ModelRequest,
+) {
+  return input.tools.length > 0 && isDashScopeQwenProvider(provider, activeModel) && supportsQwenThinkingToggle(activeModel);
 }
 
 function escapeRegExp(value: string) {
@@ -835,7 +874,7 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
       throw new Error(`Provider "${provider.name}" is missing a base URL.`);
     }
 
-    const body = {
+    const body: Record<string, unknown> = {
       model: activeModel.modelId || input.model,
       messages: [{ role: "system", content: input.system }, ...input.messages.map(mapAgentMessageToOpenAIMessage)],
       stream: true,
@@ -854,6 +893,9 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
           : undefined,
       tool_choice: input.tools.length > 0 ? (input.toolChoice ?? "auto") : undefined,
     };
+    if (shouldDisableQwenThinkingForTools(provider, activeModel, input)) {
+      body.enable_thinking = false;
+    }
 
     const requestChatCompletion = (requestBody: Record<string, unknown>) =>
       fetch(joinUrl(provider.baseUrl, "/chat/completions"), {
@@ -865,17 +907,24 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
         body: JSON.stringify(requestBody),
       });
 
-    let response = await requestChatCompletion({
+    let requestBody: Record<string, unknown> = {
       ...body,
       stream_options: { include_usage: true },
-    });
-    if (!response.ok) {
+    };
+    let response = await requestChatCompletion(requestBody);
+    while (!response.ok) {
       const errorText = await response.text().catch(() => "");
-      if (shouldRetryWithoutStreamingUsage(response.status, errorText)) {
-        response = await requestChatCompletion(body);
-      } else {
-        throw new Error(`Model request failed (${response.status}): ${errorText || response.statusText}`);
+      if (shouldRetryWithoutStreamingUsage(response.status, errorText) && "stream_options" in requestBody) {
+        requestBody = omitRequestBodyField(requestBody, "stream_options");
+        response = await requestChatCompletion(requestBody);
+        continue;
       }
+      if (shouldRetryWithoutThinkingToggle(response.status, errorText) && "enable_thinking" in requestBody) {
+        requestBody = omitRequestBodyField(requestBody, "enable_thinking");
+        response = await requestChatCompletion(requestBody);
+        continue;
+      }
+      throw new Error(`Model request failed (${response.status}): ${errorText || response.statusText}`);
     }
 
     if (!response.ok || !response.body) {
