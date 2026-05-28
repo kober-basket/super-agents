@@ -342,19 +342,33 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     const browserAutomation = bootstrap.config.skills.find((skill) => skill.id === "browser-automation");
     const emailAssistant = bootstrap.config.skills.find((skill) => skill.id === "email-assistant");
     const skillCreator = bootstrap.config.skills.find((skill) => skill.id === "skill-creator");
+    const docxSkill = bootstrap.config.skills.find((skill) => skill.id === "docx");
+    const xlsxSkill = bootstrap.config.skills.find((skill) => skill.id === "xlsx");
+    const pptxSkill = bootstrap.config.skills.find((skill) => skill.id === "pptx");
+    const pdfSkill = bootstrap.config.skills.find((skill) => skill.id === "pdf");
+    const pdfkitSkill = bootstrap.config.skills.find((skill) => skill.id === "pdfkit-py");
     const superAgentsAdmin = bootstrap.config.skills.find((skill) => skill.id === "super-agents-admin");
     const wxCli = bootstrap.config.skills.find((skill) => skill.id === "wx-cli");
     const stockResearch = bootstrap.config.skills.find((skill) => skill.id === "stock-market-research-expert");
 
     const expectedBuiltinSkillNames = [
       "browser-automation",
+      "docx",
       "email-assistant",
+      "pdf",
+      "pdfkit-py",
+      "pptx",
       "skill-creator",
       "stock-market-research-expert",
       "super-agents-admin",
       "wx-cli",
+      "xlsx",
     ];
     assert.deepEqual(skillNames.filter((name) => expectedBuiltinSkillNames.includes(name)), expectedBuiltinSkillNames);
+    for (const skill of bootstrap.config.skills.filter((item) => item.system)) {
+      await access(path.join(skill?.sourcePath ?? "", "assets", "icon.svg"));
+      assert.match(skill?.iconDataUrl ?? "", /^data:image\/svg\+xml;base64,/, `${skill.name} should expose a custom SVG icon`);
+    }
     assert.ok(browserAutomation);
     assert.equal(browserAutomation?.system, true);
     assert.equal(browserAutomation?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "browser-automation"));
@@ -381,6 +395,38 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     assert.equal(skillCreator?.displayName, "技能创建器");
     assert.equal(skillCreator?.shortDescription, "创建、更新和验证智能体技能结构、资源与触发说明");
     assert.match(skillCreator?.defaultPrompt ?? "", /\$skill-creator/);
+    assert.ok(docxSkill);
+    assert.equal(docxSkill?.system, true);
+    assert.equal(docxSkill?.suiteId, "document-skills");
+    assert.equal(docxSkill?.suiteDisplayName, "文档技能套件");
+    assert.equal(docxSkill?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "docx"));
+    await access(path.join(docxSkill?.sourcePath ?? "", "SKILL.md"));
+    await access(path.join(docxSkill?.sourcePath ?? "", "scripts", "accept_changes.py"));
+    assert.equal(docxSkill?.displayName, "Word 文档处理");
+    assert.match(docxSkill?.defaultPrompt ?? "", /\$docx/);
+    assert.ok(xlsxSkill);
+    assert.equal(xlsxSkill?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "xlsx"));
+    await access(path.join(xlsxSkill?.sourcePath ?? "", "SKILL.md"));
+    await access(path.join(xlsxSkill?.sourcePath ?? "", "scripts", "recalc.py"));
+    assert.equal(xlsxSkill?.displayName, "Excel 表格处理");
+    assert.ok(pptxSkill);
+    assert.equal(pptxSkill?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "pptx"));
+    await access(path.join(pptxSkill?.sourcePath ?? "", "SKILL.md"));
+    await access(path.join(pptxSkill?.sourcePath ?? "", "editing.md"));
+    await access(path.join(pptxSkill?.sourcePath ?? "", "scripts", "thumbnail.py"));
+    assert.equal(pptxSkill?.displayName, "PowerPoint 演示处理");
+    assert.ok(pdfSkill);
+    assert.equal(pdfSkill?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "pdf"));
+    await access(path.join(pdfSkill?.sourcePath ?? "", "SKILL.md"));
+    await access(path.join(pdfSkill?.sourcePath ?? "", "forms.md"));
+    await access(path.join(pdfSkill?.sourcePath ?? "", "scripts", "fill_pdf_form_with_annotations.py"));
+    assert.equal(pdfSkill?.displayName, "PDF 基础处理");
+    assert.ok(pdfkitSkill);
+    assert.equal(pdfkitSkill?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "pdfkit-py"));
+    await access(path.join(pdfkitSkill?.sourcePath ?? "", "SKILL.md"));
+    await access(path.join(pdfkitSkill?.sourcePath ?? "", "scripts", "pdfkit.py"));
+    await access(path.join(pdfkitSkill?.sourcePath ?? "", "scripts", "pdfkit", "commands", "smart_edit.py"));
+    assert.equal(pdfkitSkill?.displayName, "PDF 高级工具箱");
     assert.ok(superAgentsAdmin);
     assert.equal(superAgentsAdmin?.system, true);
     assert.equal(superAgentsAdmin?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "super-agents-admin"));
@@ -412,11 +458,16 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     const context = await service.getEnabledSkillPromptContext();
     assert.match(context, /Available workspace skills for this turn:/);
     assert.match(context, /- browser-automation:/);
+    assert.match(context, /- docx:/);
     assert.match(context, /- email-assistant:/);
+    assert.match(context, /- pdf:/);
+    assert.match(context, /- pdfkit-py:/);
+    assert.match(context, /- pptx:/);
     assert.match(context, /- skill-creator:/);
     assert.match(context, /- stock-market-research-expert:/);
     assert.match(context, /- super-agents-admin:/);
     assert.match(context, /- wx-cli:/);
+    assert.match(context, /- xlsx:/);
     assert.doesNotMatch(context, /Anatomy of a Skill/);
     for (const skill of bootstrap.config.skills.filter((item) => item.system)) {
       const visibleName = skill.displayName || skill.name;
@@ -461,20 +512,30 @@ test("workspace service serializes concurrent bootstrap skill syncs", async () =
           .filter((name) =>
             [
               "browser-automation",
+              "docx",
               "email-assistant",
+              "pdf",
+              "pdfkit-py",
+              "pptx",
               "skill-creator",
               "stock-market-research-expert",
               "super-agents-admin",
               "wx-cli",
+              "xlsx",
             ].includes(name),
           ),
         [
           "browser-automation",
+          "docx",
           "email-assistant",
+          "pdf",
+          "pdfkit-py",
+          "pptx",
           "skill-creator",
           "stock-market-research-expert",
           "super-agents-admin",
           "wx-cli",
+          "xlsx",
         ],
       );
     }

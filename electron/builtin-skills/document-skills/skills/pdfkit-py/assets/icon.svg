@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="8" y1="5" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C4B5FD"/>
+      <stop offset="0.48" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#312E81"/>
+    </linearGradient>
+    <filter id="shadow" x="6" y="7" width="53" height="53" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#1E1B4B" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#bg)"/>
+  <g filter="url(#shadow)">
+    <circle cx="29" cy="29" r="17" fill="#F5F3FF"/>
+    <circle cx="29" cy="29" r="10" fill="#DDD6FE" stroke="#7C3AED" stroke-width="3.2"/>
+    <path d="M41 41L54 54" stroke="#F5F3FF" stroke-width="8" stroke-linecap="round"/>
+    <path d="M41 41L54 54" stroke="#6D28D9" stroke-width="4.2" stroke-linecap="round"/>
+  </g>
+  <path d="M23 23H33M23 29H29M23 35H31" stroke="#7C3AED" stroke-width="3" stroke-linecap="round"/>
+  <path d="M43 14L45.8 18.8L51 20L47.2 23.8L47.7 29L43 26.6L38.3 29L38.8 23.8L35 20L40.2 18.8L43 14Z" fill="#FACC15"/>
+  <path d="M16 50L23 43M22.2 42.3L27.7 47.8" stroke="#67E8F9" stroke-width="3" stroke-linecap="round"/>
+</svg>

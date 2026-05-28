@@ -18,16 +18,18 @@ async function pathExists(filePath: string) {
   }
 }
 
-test("runtime manifest pins Electron-aligned Node and Windows embedded Python", async () => {
+test("runtime manifest pins Electron-aligned Node, stable Python, and uv", async () => {
   const manifestPath = path.join(repoRoot(), "vendor", "runtime", "manifest.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
     node: { version: string };
     python: { version: string };
-    assets: Array<{ id: string; sha256: string }>;
+    uv: { version: string };
+    assets: Array<{ id: string; kind: string; sha256?: string; pythonTarget?: string }>;
   };
 
   assert.equal(manifest.node.version, "24.15.0");
-  assert.equal(manifest.python.version, "3.14.5");
+  assert.equal(manifest.python.version, "3.13.13");
+  assert.equal(manifest.uv.version, "0.11.16");
 
   const assetIds = manifest.assets.map((asset) => asset.id).sort();
   assert.deepEqual(assetIds, [
@@ -35,12 +37,18 @@ test("runtime manifest pins Electron-aligned Node and Windows embedded Python", 
     "node-darwin-x64",
     "node-win32-arm64",
     "node-win32-x64",
+    "python-darwin-arm64",
+    "python-darwin-x64",
     "python-win32-arm64",
     "python-win32-x64",
   ]);
 
   for (const asset of manifest.assets) {
-    assert.match(asset.sha256, /^[a-f0-9]{64}$/);
+    if (asset.kind === "uv-python") {
+      assert.match(asset.pythonTarget ?? "", /^cpython-3\.13\.13-macos-(aarch64|x86_64)-none$/);
+    } else {
+      assert.match(asset.sha256 ?? "", /^[a-f0-9]{64}$/);
+    }
   }
 });
 
@@ -70,6 +78,16 @@ test("runtime install dry-run prints the selected manifest assets without instal
               stripComponents: 1,
               destination: "darwin-arm64/node",
               executablePaths: ["bin/node"],
+            },
+            {
+              id: "python-darwin-arm64",
+              kind: "uv-python",
+              platform: "darwin",
+              arch: "arm64",
+              version: "3.13.13",
+              pythonTarget: "cpython-3.13.13-macos-aarch64-none",
+              destination: "darwin-arm64/python",
+              executablePaths: ["../bin/python3"],
             },
             {
               id: "python-win32-x64",
@@ -115,9 +133,10 @@ test("runtime install dry-run prints the selected manifest assets without instal
     assert.equal(plan.dryRun, true);
     assert.equal(plan.runtimeRoot, runtimeRoot);
     assert.deepEqual(
-      plan.assets.map((asset) => [asset.id, asset.destination, asset.url]),
+      plan.assets.map((asset) => [asset.id, asset.destination, asset.url ?? ""]),
       [
         ["node-darwin-arm64", path.join(runtimeRoot, "darwin-arm64", "node"), "https://example.test/node.tar.gz"],
+        ["python-darwin-arm64", path.join(runtimeRoot, "darwin-arm64", "python"), ""],
         ["python-win32-x64", path.join(runtimeRoot, "win32-x64", "python"), "https://example.test/python.zip"],
       ],
     );

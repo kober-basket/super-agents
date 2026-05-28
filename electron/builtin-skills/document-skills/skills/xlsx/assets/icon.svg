@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#49D18C"/>
+      <stop offset="0.52" stop-color="#168A4A"/>
+      <stop offset="1" stop-color="#0B4C2C"/>
+    </linearGradient>
+    <linearGradient id="sheet" x1="28" y1="12" x2="52" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4FFF8"/>
+      <stop offset="1" stop-color="#D6F8E4"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="11" y1="17" x2="34" y2="49" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#20A962"/>
+      <stop offset="1" stop-color="#0B6B3A"/>
+    </linearGradient>
+    <filter id="shadow" x="7" y="8" width="50" height="51" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#06351F" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#bg)"/>
+  <g filter="url(#shadow)">
+    <rect x="24" y="11" width="29" height="43" rx="7" fill="url(#sheet)"/>
+    <path d="M32 18V48M40 18V48M48 18V48M28 27H51M28 36H51M28 45H51" stroke="#1A9B55" stroke-opacity="0.38" stroke-width="2"/>
+    <rect x="11" y="17" width="26" height="31" rx="7" fill="url(#panel)"/>
+  </g>
+  <path d="M18 27L30 39M30 27L18 39" stroke="#FFFFFF" stroke-width="3.6" stroke-linecap="round"/>
+</svg>

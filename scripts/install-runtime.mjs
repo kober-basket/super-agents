@@ -119,7 +119,24 @@ function selectAssets(assets, options) {
 }
 
 function validateAsset(asset) {
-  const required = ["id", "kind", "platform", "arch", "version", "url", "sha256", "archive", "destination"];
+  const baseRequired = ["id", "kind", "platform", "arch", "version", "destination"];
+  for (const key of baseRequired) {
+    if (typeof asset[key] !== "string" || !asset[key]) {
+      throw new Error(`Manifest asset ${asset.id || "<unknown>"} is missing ${key}`);
+    }
+  }
+
+  if (asset.kind === "uv-python") {
+    if (typeof asset.pythonTarget !== "string" || !asset.pythonTarget) {
+      throw new Error(`Manifest asset ${asset.id} is missing pythonTarget`);
+    }
+    if (path.isAbsolute(asset.destination) || asset.destination.includes("..")) {
+      throw new Error(`Manifest asset ${asset.id} has unsafe destination ${asset.destination}`);
+    }
+    return;
+  }
+
+  const required = ["url", "sha256", "archive"];
   for (const key of required) {
     if (typeof asset[key] !== "string" || !asset[key]) {
       throw new Error(`Manifest asset ${asset.id || "<unknown>"} is missing ${key}`);
@@ -171,6 +188,9 @@ async function isInstalled(destination, asset) {
   const metadataPath = path.join(destination, metadataFile);
   try {
     const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    if (asset.kind === "uv-python") {
+      return metadata.id === asset.id && metadata.version === asset.version && metadata.pythonTarget === asset.pythonTarget;
+    }
     return metadata.id === asset.id && metadata.version === asset.version && metadata.sha256 === asset.sha256;
   } catch {
     return false;
@@ -275,6 +295,7 @@ async function writeMetadata(destination, asset) {
         version: asset.version,
         url: asset.url,
         sha256: asset.sha256,
+        pythonTarget: asset.pythonTarget,
         installedAt: new Date().toISOString(),
       },
       null,
@@ -283,7 +304,114 @@ async function writeMetadata(destination, asset) {
   );
 }
 
+function platformRoot(runtimeRoot, asset) {
+  return path.join(runtimeRoot, `${asset.platform}-${asset.arch}`);
+}
+
+function managedPythonShortTarget(asset) {
+  return asset.pythonTarget.replace(/^cpython-(\d+\.\d+)\.\d+/, "cpython-$1");
+}
+
+function managedPythonExecutablePath(asset) {
+  const pythonFile = asset.platform === "win32" ? "python.exe" : "bin/python3";
+  return path.join(managedPythonShortTarget(asset), pythonFile);
+}
+
+function hostUvCandidates(runtimeRoot) {
+  const hostRoot = path.join(runtimeRoot, `${process.platform}-${process.arch}`);
+  const executableName = process.platform === "win32" ? "uv.exe" : "uv";
+  return [
+    path.join(hostRoot, "bin", executableName),
+    executableName,
+  ];
+}
+
+async function resolveUvCommand(runtimeRoot) {
+  for (const candidate of hostUvCandidates(runtimeRoot)) {
+    if (path.isAbsolute(candidate) && !(await exists(candidate))) {
+      continue;
+    }
+    return candidate;
+  }
+  return process.platform === "win32" ? "uv.exe" : "uv";
+}
+
+function posixPythonShim(relativePythonPath) {
+  return [
+    "#!/bin/sh",
+    'SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)',
+    `exec "$SCRIPT_DIR/${relativePythonPath}" "$@"`,
+    "",
+  ].join("\n");
+}
+
+function windowsPythonShim(relativePythonPath) {
+  return [
+    "@echo off",
+    "setlocal",
+    "set \"SCRIPT_DIR=%~dp0\"",
+    `"%SCRIPT_DIR%${relativePythonPath.replaceAll("/", "\\")}" %*`,
+    "",
+  ].join("\r\n");
+}
+
+async function writePythonShims(runtimeRoot, asset) {
+  const binDir = path.join(platformRoot(runtimeRoot, asset), "bin");
+  await mkdir(binDir, { recursive: true });
+
+  const executablePath = managedPythonExecutablePath(asset);
+  const relativeFromBin = path.relative(binDir, path.join(destinationPath(runtimeRoot, asset), executablePath));
+
+  if (asset.platform === "win32") {
+    const content = windowsPythonShim(relativeFromBin);
+    await writeFile(path.join(binDir, "python3.cmd"), content, "utf8");
+    await writeFile(path.join(binDir, "python.cmd"), content, "utf8");
+    return;
+  }
+
+  const content = posixPythonShim(relativeFromBin);
+  for (const name of ["python3", "python"]) {
+    const shimPath = path.join(binDir, name);
+    await writeFile(shimPath, content, "utf8");
+    await chmod(shimPath, 0o755);
+  }
+}
+
+async function installManagedPython(asset, runtimeRoot, options) {
+  const destination = destinationPath(runtimeRoot, asset);
+  if (!options.force && (await isInstalled(destination, asset))) {
+    console.log(`skip ${asset.id}: already installed at ${path.relative(repoRoot, destination)}`);
+    return;
+  }
+
+  if (options.force) {
+    await rm(destination, { recursive: true, force: true });
+  }
+
+  const uvCommand = await resolveUvCommand(runtimeRoot);
+  await mkdir(destination, { recursive: true });
+
+  console.log(`install ${asset.id}: ${asset.pythonTarget}`);
+  await run(uvCommand, [
+    "python",
+    "install",
+    asset.pythonTarget,
+    "--install-dir",
+    destination,
+    "--no-bin",
+    "--no-progress",
+  ]);
+
+  await writePythonShims(runtimeRoot, asset);
+  await writeMetadata(destination, asset);
+}
+
 async function installAsset(asset, runtimeRoot, options) {
+  if (asset.kind === "uv-python") {
+    await installManagedPython(asset, runtimeRoot, options);
+    return;
+  }
+
   const destination = destinationPath(runtimeRoot, asset);
   if (!options.force && (await isInstalled(destination, asset))) {
     console.log(`skip ${asset.id}: already installed at ${path.relative(repoRoot, destination)}`);

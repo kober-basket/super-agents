@@ -5,7 +5,10 @@
     "electronVersion": "42.2.0"
   },
   "python": {
-    "version": "3.14.5"
+    "version": "3.13.13"
+  },
+  "uv": {
+    "version": "0.11.16"
   },
   "assets": [
     {
@@ -33,6 +36,26 @@
       "stripComponents": 1,
       "destination": "darwin-x64/node",
       "executablePaths": ["bin/node", "bin/npm", "bin/npx"]
+    },
+    {
+      "id": "python-darwin-arm64",
+      "kind": "uv-python",
+      "platform": "darwin",
+      "arch": "arm64",
+      "version": "3.13.13",
+      "pythonTarget": "cpython-3.13.13-macos-aarch64-none",
+      "destination": "darwin-arm64/python",
+      "executablePaths": ["../bin/python3", "../bin/python"]
+    },
+    {
+      "id": "python-darwin-x64",
+      "kind": "uv-python",
+      "platform": "darwin",
+      "arch": "x64",
+      "version": "3.13.13",
+      "pythonTarget": "cpython-3.13.13-macos-x86_64-none",
+      "destination": "darwin-x64/python",
+      "executablePaths": ["../bin/python3", "../bin/python"]
     },
     {
       "id": "node-win32-x64",
@@ -65,9 +88,9 @@
       "kind": "python",
       "platform": "win32",
       "arch": "x64",
-      "version": "3.14.5",
-      "url": "https://www.python.org/ftp/python/3.14.5/python-3.14.5-embed-amd64.zip",
-      "sha256": "ba6bd811c4eedb19195cf275770ef127e893d63701e24152606e2cb76f6d876a",
+      "version": "3.13.13",
+      "url": "https://www.python.org/ftp/python/3.13.13/python-3.13.13-embed-amd64.zip",
+      "sha256": "8766a8775746235e23cf5aee5027ab1060bb981d93110577adcf3508aa0cbd55",
       "archive": "zip",
       "stripComponents": 0,
       "destination": "win32-x64/python",
@@ -78,9 +101,9 @@
       "kind": "python",
       "platform": "win32",
       "arch": "arm64",
-      "version": "3.14.5",
-      "url": "https://www.python.org/ftp/python/3.14.5/python-3.14.5-embed-arm64.zip",
-      "sha256": "0c078f7646c3b13c2dce0bb690994e431ed5269788803deffb459ee9e78b684e",
+      "version": "3.13.13",
+      "url": "https://www.python.org/ftp/python/3.13.13/python-3.13.13-embed-arm64.zip",
+      "sha256": "1230310118a6330cd6385cfc04de48bc77c7d18c240fd5fa23d054e50b1ebb85",
       "archive": "zip",
       "stripComponents": 0,
       "destination": "win32-arm64/python",

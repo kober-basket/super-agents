@@ -24,15 +24,29 @@ test("installCliShims copies packaged CLI scripts and writes PATH-visible comman
     await mkdir(scriptsDir, { recursive: true });
     await writeFile(path.join(scriptsDir, "super-agents.mjs"), "console.log('main cli');\n", "utf8");
     await writeFile(path.join(scriptsDir, "super-agents-admin.mjs"), "console.log('admin cli');\n", "utf8");
+    await writeFile(
+      path.join(scriptsDir, "super-agents-document-runtime.mjs"),
+      "console.log('document runtime cli');\n",
+      "utf8",
+    );
 
     const result = await installCliShims({ appPath, runtimeRoot });
     const commandExtension = process.platform === "win32" ? ".cmd" : "";
 
     assert.equal(await readFile(path.join(runtimeRoot, "cli", "super-agents.mjs"), "utf8"), "console.log('main cli');\n");
     assert.equal(await readFile(path.join(runtimeRoot, "cli", "super-agents-admin.mjs"), "utf8"), "console.log('admin cli');\n");
+    assert.equal(
+      await readFile(path.join(runtimeRoot, "cli", "super-agents-document-runtime.mjs"), "utf8"),
+      "console.log('document runtime cli');\n",
+    );
     assert.equal(await fileExists(path.join(runtimeRoot, "common", "bin", `super-agents${commandExtension}`)), true);
     assert.equal(await fileExists(path.join(runtimeRoot, "common", "bin", `super-agents-admin${commandExtension}`)), true);
-    assert.deepEqual(result.commands.map((command) => command.name), ["super-agents", "super-agents-admin"]);
+    assert.equal(await fileExists(path.join(runtimeRoot, "common", "bin", `super-agents-document-runtime${commandExtension}`)), true);
+    assert.deepEqual(result.commands.map((command) => command.name), [
+      "super-agents",
+      "super-agents-admin",
+      "super-agents-document-runtime",
+    ]);
   } finally {
     await rm(appPath, { recursive: true, force: true });
     await rm(runtimeRoot, { recursive: true, force: true });
@@ -50,6 +64,11 @@ test("installCliShims resolves CLI scripts when dev Electron appPath points at d
     await mkdir(scriptsDir, { recursive: true });
     await writeFile(path.join(scriptsDir, "super-agents.mjs"), "console.log('main cli from repo root');\n", "utf8");
     await writeFile(path.join(scriptsDir, "super-agents-admin.mjs"), "console.log('admin cli from repo root');\n", "utf8");
+    await writeFile(
+      path.join(scriptsDir, "super-agents-document-runtime.mjs"),
+      "console.log('document runtime cli from repo root');\n",
+      "utf8",
+    );
 
     await installCliShims({ appPath, runtimeRoot });
 

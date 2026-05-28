@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "document-skills",
+  "name": "document-skills",
+  "displayName": "文档技能套件",
+  "description": "Word、Excel、PowerPoint 与 PDF 的内置文档处理能力集合",
+  "skills": [
+    {
+      "path": "skills/docx",
+      "name": "docx",
+      "displayName": "Word 文档处理",
+      "shortDescription": "创建、读取、编辑、校验 Word .docx 文档",
+      "defaultPrompt": "Use $docx to create, read, edit, or validate a Word document.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/xlsx",
+      "name": "xlsx",
+      "displayName": "Excel 表格处理",
+      "shortDescription": "创建、清洗、编辑、计算和校验 Excel/CSV 表格",
+      "defaultPrompt": "Use $xlsx to create, edit, analyze, or validate a spreadsheet.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/pptx",
+      "name": "pptx",
+      "displayName": "PowerPoint 演示处理",
+      "shortDescription": "创建、读取、编辑和检查 PowerPoint 演示文稿",
+      "defaultPrompt": "Use $pptx to create, read, edit, or inspect a presentation deck.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/pdf",
+      "name": "pdf",
+      "displayName": "PDF 基础处理",
+      "shortDescription": "读取、合并、拆分、旋转、提取和填写 PDF 文件",
+      "defaultPrompt": "Use $pdf to read, edit, merge, split, convert, or fill a PDF.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/pdfkit-py",
+      "name": "pdfkit-py",
+      "displayName": "PDF 高级工具箱",
+      "shortDescription": "处理 PDF 编辑、OCR、表单、安全、转换和结构化分析",
+      "defaultPrompt": "Use $pdfkit-py for advanced PDF editing, OCR, form, conversion, or IR tasks.",
+      "allowImplicitInvocation": true
+    }
+  ]
+}

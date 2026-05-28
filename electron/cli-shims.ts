@@ -21,6 +21,7 @@ export interface InstalledCliCommand {
 const CLI_COMMANDS: CliCommand[] = [
   { name: "super-agents", scriptFile: "super-agents.mjs" },
   { name: "super-agents-admin", scriptFile: "super-agents-admin.mjs" },
+  { name: "super-agents-document-runtime", scriptFile: "super-agents-document-runtime.mjs" },
 ];
 
 async function pathExists(filePath: string) {

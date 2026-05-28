@@ -40,7 +40,7 @@ test("runtime check requires uv command shims on Windows", { skip: process.platf
   }
 });
 
-test("runtime check requires uv commands on macOS runtimes", async () => {
+test("runtime check requires uv commands and Python on macOS runtimes", async () => {
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "super-agents-runtime-check-"));
   const platformRoot = path.join(runtimeRoot, "darwin-arm64");
 
@@ -63,8 +63,8 @@ test("runtime check requires uv commands on macOS runtimes", async () => {
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /vendor[\\/]runtime[\\/]darwin-arm64[\\/]bin[\\/]uv/);
     assert.match(result.stderr, /vendor[\\/]runtime[\\/]darwin-arm64[\\/]bin[\\/]uvx/);
+    assert.match(result.stderr, /vendor[\\/]runtime[\\/]darwin-arm64[\\/]bin[\\/]python3/);
     assert.doesNotMatch(result.stderr, /uvw/);
-    assert.doesNotMatch(result.stderr, /python/);
   } finally {
     await rm(runtimeRoot, { recursive: true, force: true });
   }

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF9A4D"/>
+      <stop offset="0.52" stop-color="#D95B16"/>
+      <stop offset="1" stop-color="#7A2E10"/>
+    </linearGradient>
+    <linearGradient id="slide" x1="27" y1="12" x2="53" y2="51" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF8EF"/>
+      <stop offset="1" stop-color="#FFE1C2"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="11" y1="17" x2="35" y2="49" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F26F21"/>
+      <stop offset="1" stop-color="#B63C0A"/>
+    </linearGradient>
+    <filter id="shadow" x="7" y="8" width="50" height="51" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#431407" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#bg)"/>
+  <g filter="url(#shadow)">
+    <rect x="24" y="11" width="29" height="43" rx="7" fill="url(#slide)"/>
+    <path d="M31 23H45M31 30H40" stroke="#E66A21" stroke-width="2.8" stroke-linecap="round"/>
+    <circle cx="43" cy="39" r="6.8" fill="#F97316" opacity="0.86"/>
+    <path d="M43 32.2V39H49.8" fill="#B63C0A"/>
+    <rect x="11" y="17" width="26" height="31" rx="7" fill="url(#panel)"/>
+  </g>
+  <path d="M19 40V26H25C28.1 26 30.3 28.1 30.3 31C30.3 33.9 28.1 36 25 36H19" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -43,19 +43,33 @@ vendor/runtime/
     bin/
       uv
       uvx
+      python
+      python3
     node/bin/node
     node/bin/npm
     node/bin/npx
+    python/
+      cpython-3.13-macos-aarch64-none -> cpython-3.13.13-macos-aarch64-none
   darwin-x64/
     bin/
       uv
       uvx
+      python
+      python3
     node/bin/node
     node/bin/npm
     node/bin/npx
+    python/
+      cpython-3.13-macos-x86_64-none -> cpython-3.13.13-macos-x86_64-none
   common/
     bin/
 ```
+
+macOS Python is installed by `scripts/install-runtime.mjs` through the bundled
+`uv` binary, using the pinned Python target in `manifest.json`. Python package
+dependencies for large optional capabilities, such as document processing, are
+not bundled here. They are installed lazily into the generated runtime support
+directory by `super-agents-document-runtime`.
 
 Set `SUPER_AGENTS_RUNTIME_ROOT` to test another runtime directory locally.
 Run `npm run runtime:install` after cloning or when refreshing runtime binaries.

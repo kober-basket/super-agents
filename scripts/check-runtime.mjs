@@ -39,6 +39,7 @@ if (runtimePlatform === "win32") {
 } else if (runtimePlatform === "darwin") {
   required.push(path.join(platformRoot, "bin", "uv"));
   required.push(path.join(platformRoot, "bin", "uvx"));
+  required.push(path.join(platformRoot, "bin", "python3"));
 }
 
 const missing = [];
@@ -65,6 +66,7 @@ if (missing.length > 0) {
   } else if (runtimePlatform === "darwin") {
     console.error(`- vendor/runtime/${platformKey}/bin/uv`);
     console.error(`- vendor/runtime/${platformKey}/bin/uvx`);
+    console.error(`- vendor/runtime/${platformKey}/bin/python3`);
   }
   process.exit(1);
 }

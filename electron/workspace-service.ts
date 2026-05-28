@@ -101,6 +101,23 @@ interface SkillOpenAiMetadata {
   allowImplicitInvocation?: boolean;
 }
 
+interface BuiltinSkillSuiteSkillConfig extends SkillOpenAiMetadata {
+  path: string;
+  id?: string;
+  name?: string;
+  description?: string;
+  enabled?: boolean;
+}
+
+interface BuiltinSkillSuiteManifest {
+  schemaVersion: number;
+  id: string;
+  name: string;
+  displayName?: string;
+  description?: string;
+  skills: BuiltinSkillSuiteSkillConfig[];
+}
+
 const LEGACY_DEFAULT_PROVIDER_BASE_URL = "https://oneapi.iflyrpa.com/v1";
 const LEGACY_DEFAULT_PROVIDER_MODEL_IDS = [
   "azure/gpt-5",
@@ -798,26 +815,124 @@ function readBuiltinSkillConfigs(): SkillConfig[] {
 
   try {
     return readdirSync(root, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => {
-        const skillRoot = path.join(root, entry.name);
-        const content = readFileSync(path.join(skillRoot, "SKILL.md"), "utf8");
-        const parsed = parseSkillFrontmatter(content);
-        const name = parsed.name || entry.name;
-        return {
-          id: sanitizeModelProviderId(name),
-          name,
-          description: parsed.description || "Built-in skill",
-          ...readSkillOpenAiMetadataSync(skillRoot),
-          iconDataUrl: readSkillIconDataUrlSync(skillRoot),
-          kind: "command" as const,
-          command: stripSkillFrontmatter(content, name),
-          enabled: true,
-          sourcePath: skillRoot,
-          system: true,
-        };
+      .flatMap((entry): SkillConfig[] => {
+        if (!entry.isDirectory()) return [];
+        return readBuiltinSkillEntryConfigs(path.join(root, entry.name), entry.name);
       })
       .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+  } catch {
+    return [];
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function readJsonRecordSync(filePath: string) {
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, "utf8"));
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function readSuiteString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function normalizeSuiteSkill(rawSkill: unknown): BuiltinSkillSuiteSkillConfig | null {
+  if (!isRecord(rawSkill)) return null;
+  const skillPath = readSuiteString(rawSkill.path);
+  if (!skillPath) return null;
+  return {
+    path: skillPath,
+    id: readSuiteString(rawSkill.id) || undefined,
+    name: readSuiteString(rawSkill.name) || undefined,
+    description: readSuiteString(rawSkill.description) || undefined,
+    displayName: readSuiteString(rawSkill.displayName) || undefined,
+    shortDescription: readSuiteString(rawSkill.shortDescription) || undefined,
+    brandColor: readSuiteString(rawSkill.brandColor) || undefined,
+    defaultPrompt: readSuiteString(rawSkill.defaultPrompt) || undefined,
+    allowImplicitInvocation:
+      typeof rawSkill.allowImplicitInvocation === "boolean" ? rawSkill.allowImplicitInvocation : undefined,
+    enabled: rawSkill.enabled === false ? false : undefined,
+  };
+}
+
+function readBuiltinSkillSuiteManifest(suiteRoot: string): BuiltinSkillSuiteManifest | null {
+  const manifest = readJsonRecordSync(path.join(suiteRoot, "suite.json"));
+  if (!manifest) return null;
+
+  const id = readSuiteString(manifest.id);
+  const name = readSuiteString(manifest.name) || id;
+  const skills = Array.isArray(manifest.skills) ? manifest.skills.flatMap((item) => {
+    const normalized = normalizeSuiteSkill(item);
+    return normalized ? [normalized] : [];
+  }) : [];
+
+  if (!id || !name || skills.length === 0) return null;
+
+  return {
+    schemaVersion: typeof manifest.schemaVersion === "number" ? manifest.schemaVersion : 1,
+    id,
+    name,
+    displayName: readSuiteString(manifest.displayName) || undefined,
+    description: readSuiteString(manifest.description) || undefined,
+    skills,
+  };
+}
+
+function readBuiltinSkillEntryConfigs(skillRoot: string, fallbackName: string): SkillConfig[] {
+  const suite = readBuiltinSkillSuiteManifest(skillRoot);
+  if (suite) {
+    return suite.skills.flatMap((suiteSkill): SkillConfig[] => {
+      const resolvedSkillRoot = path.resolve(skillRoot, suiteSkill.path);
+      if (!isPathInside(skillRoot, resolvedSkillRoot)) return [];
+      return readBuiltinSingleSkillConfig(resolvedSkillRoot, path.basename(resolvedSkillRoot), suiteSkill, suite);
+    });
+  }
+
+  return readBuiltinSingleSkillConfig(skillRoot, fallbackName);
+}
+
+function readBuiltinSingleSkillConfig(
+  skillRoot: string,
+  fallbackName: string,
+  overrides: BuiltinSkillSuiteSkillConfig = { path: "" },
+  suite?: BuiltinSkillSuiteManifest,
+): SkillConfig[] {
+  try {
+    const content = readFileSync(path.join(skillRoot, "SKILL.md"), "utf8");
+    const parsed = parseSkillFrontmatter(content);
+    const name = overrides.name || parsed.name || fallbackName;
+    const id = sanitizeModelProviderId(overrides.id || name);
+    const metadata = {
+      ...readSkillOpenAiMetadataSync(skillRoot),
+      ...overrides,
+    };
+    return [
+      {
+        id,
+        name,
+        description: overrides.description || parsed.description || "Built-in skill",
+        displayName: metadata.displayName,
+        shortDescription: metadata.shortDescription,
+        brandColor: metadata.brandColor,
+        defaultPrompt: metadata.defaultPrompt,
+        allowImplicitInvocation: metadata.allowImplicitInvocation,
+        iconDataUrl: readSkillIconDataUrlSync(skillRoot),
+        kind: "command" as const,
+        command: stripSkillFrontmatter(content, name),
+        enabled: overrides.enabled === false ? false : true,
+        sourcePath: skillRoot,
+        system: true,
+        suiteId: suite?.id,
+        suiteName: suite?.name,
+        suiteDisplayName: suite?.displayName,
+      },
+    ];
   } catch {
     return [];
   }
@@ -868,6 +983,9 @@ function normalizeSkillList(rawSkills: unknown, builtinSkills: SkillConfig[] = D
         enabled: item?.enabled !== false,
         sourcePath,
         system: item?.system === true,
+        suiteId: typeof item?.suiteId === "string" ? item.suiteId : undefined,
+        suiteName: typeof item?.suiteName === "string" ? item.suiteName : undefined,
+        suiteDisplayName: typeof item?.suiteDisplayName === "string" ? item.suiteDisplayName : undefined,
       },
     ];
   });

@@ -132,6 +132,9 @@ export interface SkillConfig {
   enabled: boolean;
   sourcePath?: string;
   system?: boolean;
+  suiteId?: string;
+  suiteName?: string;
+  suiteDisplayName?: string;
 }
 
 export interface RuntimeSkill {

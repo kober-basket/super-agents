@@ -6,7 +6,8 @@
   "main": "dist-electron/main.js",
   "bin": {
     "super-agents": "scripts/super-agents.mjs",
-    "super-agents-admin": "scripts/super-agents-admin.mjs"
+    "super-agents-admin": "scripts/super-agents-admin.mjs",
+    "super-agents-document-runtime": "scripts/super-agents-document-runtime.mjs"
   },
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
@@ -90,6 +91,7 @@
       "node_modules/node-pty/**",
       "scripts/super-agents.mjs",
       "scripts/super-agents-admin.mjs",
+      "scripts/super-agents-document-runtime.mjs",
       "package.json"
     ],
     "asar": true,

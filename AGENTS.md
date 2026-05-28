@@ -52,7 +52,7 @@ npm run preview
 - 修改 TypeScript 或 Electron 逻辑后，优先运行 `npm run test:electron`。
 - 修改前端纯逻辑后，仍使用 `npm run test:electron`，当前测试脚本会先编译 `tsconfig.test.json` 并运行 `.test-dist` 下的 Node tests。
 - 修改打包入口、预加载、Electron 主进程或 Vite 配置后，运行 `npm run build`。
-- 发布开箱即用安装包前，先运行 `npm run runtime:install` 按 `vendor/runtime/manifest.json` 下载固定版本的 Node/npm 和 Windows Python runtime；Windows 版还需要 `vendor/runtime/<platform>-<arch>/bin/uv.exe`，macOS 版还需要 `vendor/runtime/<platform>-<arch>/bin/uv`。当前平台包运行 `npm run runtime:check` 和 `npm run package:runtime`；Windows x64/arm64 双架构包运行 `npm run runtime:check:win` 和 `npm run package:runtime:win`。
+- 发布开箱即用安装包前，先运行 `npm run runtime:install` 按 `vendor/runtime/manifest.json` 准备固定版本的 Node/npm、Python 和 uv；文档类 Python 包不随 app 打包，由 `super-agents-document-runtime` 在用户数据目录按需安装。当前平台包运行 `npm run runtime:check` 和 `npm run package:runtime`；Windows x64/arm64 双架构包运行 `npm run runtime:check:win` 和 `npm run package:runtime:win`。
 - UI 交互改动需要人工或浏览器实际检查，尤其是聊天、工具、技能和设置页面。
 
 ## Architecture Principles
