@@ -79,6 +79,11 @@ const PROVIDER_PRESET_INPUTS: ProviderPresetInput[] = [
   },
 ];
 
+function findProviderPreset(providerId: string) {
+  const normalizedId = sanitizeModelProviderId(providerId);
+  return PROVIDER_PRESET_INPUTS.find((provider) => sanitizeModelProviderId(provider.id) === normalizedId) ?? null;
+}
+
 function cloneModels(models: ModelProviderConfig["models"]) {
   return models.map((model) => ({
     ...model,
@@ -106,17 +111,31 @@ export function getDefaultModelProviders() {
 }
 
 export function mergeWithDefaultModelProviders(existingProviders: ModelProviderConfig[]) {
-  const existingIds = new Set(existingProviders.map((provider) => sanitizeModelProviderId(provider.id)));
+  const normalizedExistingProviders = existingProviders.map((provider) => {
+    const preset = findProviderPreset(provider.id);
+
+    if (!preset) {
+      return provider;
+    }
+
+    return {
+      ...provider,
+      id: sanitizeModelProviderId(preset.id),
+      name: preset.name,
+      system: true,
+    };
+  });
+
+  const existingIds = new Set(normalizedExistingProviders.map((provider) => sanitizeModelProviderId(provider.id)));
   const missingProviders = PROVIDER_PRESET_INPUTS
     .filter((provider) => !existingIds.has(sanitizeModelProviderId(provider.id)))
     .map(createProviderFromPreset);
 
-  return [...existingProviders, ...missingProviders];
+  return [...normalizedExistingProviders, ...missingProviders];
 }
 
 export function isSystemModelProviderId(providerId: string) {
-  const normalizedId = sanitizeModelProviderId(providerId);
-  return PROVIDER_PRESET_INPUTS.some((provider) => sanitizeModelProviderId(provider.id) === normalizedId);
+  return Boolean(findProviderPreset(providerId));
 }
 
 export function createCustomModelProvider(providerId: string): ModelProviderConfig {

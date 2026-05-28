@@ -11,7 +11,7 @@ import {
   normalizeProviderModels,
   sanitizeModelProviderId,
 } from "./lib/model-config";
-import { getNextModelProvider } from "./lib/provider-presets";
+import { getNextModelProvider, isSystemModelProviderId } from "./lib/provider-presets";
 import type {
   AppConfig,
   AppSection,
@@ -1475,7 +1475,19 @@ export default function App() {
   }
 
   function updateModelProvider(providerId: string, patch: Partial<ModelProviderConfig>) {
-    const modelProviders = config.modelProviders.map((item) => (item.id === providerId ? { ...item, ...patch } : item));
+    const modelProviders = config.modelProviders.map((item) => {
+      if (item.id !== providerId) {
+        return item;
+      }
+
+      if ((item.system || isSystemModelProviderId(item.id)) && "name" in patch) {
+        const { name: _ignoredName, ...safePatch } = patch;
+        setToast("内置提供商不可更名");
+        return { ...item, ...safePatch };
+      }
+
+      return { ...item, ...patch };
+    });
     scheduleModelProvidersPersist(modelProviders);
   }
 

@@ -36,6 +36,17 @@ const BUILTIN_TOOLS = [
   { name: "write", risk: "write", source: "builtin" },
 ];
 
+const BUILTIN_MODEL_PROVIDER_PRESETS = [
+  { id: "openai", name: "OpenAI" },
+  { id: "anthropic", name: "Anthropic" },
+  { id: "openrouter", name: "OpenRouter" },
+  { id: "qwen", name: "Qwen" },
+  { id: "z-ai", name: "Z.ai" },
+  { id: "deepseek", name: "DeepSeek" },
+  { id: "volcengine", name: "Volcengine Ark" },
+  { id: "ollama", name: "Ollama" },
+];
+
 function usage(executableName = "super-agents") {
   return [
     `Usage: ${executableName} [global options] <command> [options]`,
@@ -232,7 +243,9 @@ function normalizeState(raw) {
       ...config,
       appearance: { ...defaults.appearance, ...(config.appearance ?? {}) },
       proxy: { ...defaults.proxy, ...(config.proxy ?? {}) },
-      modelProviders: Array.isArray(config.modelProviders) ? config.modelProviders : [],
+      modelProviders: Array.isArray(config.modelProviders)
+        ? config.modelProviders.map(normalizeModelProviderIdentity)
+        : [],
       mcpServers: Array.isArray(config.mcpServers) ? config.mcpServers : [],
       skills: Array.isArray(config.skills) ? config.skills : [],
       knowledgeBase: { ...defaults.knowledgeBase, ...(config.knowledgeBase ?? {}) },
@@ -470,6 +483,26 @@ function sanitizeModelProviderId(value) {
   return safeSegment(value, "provider");
 }
 
+function findBuiltinModelProviderPreset(providerId) {
+  const normalizedId = sanitizeModelProviderId(providerId);
+  return BUILTIN_MODEL_PROVIDER_PRESETS.find((provider) => provider.id === normalizedId) ?? null;
+}
+
+function isBuiltinModelProviderId(providerId) {
+  return Boolean(findBuiltinModelProviderPreset(providerId));
+}
+
+function normalizeModelProviderIdentity(provider) {
+  const preset = findBuiltinModelProviderPreset(provider?.id);
+  if (!preset) return provider;
+  return {
+    ...provider,
+    id: preset.id,
+    name: preset.name,
+    system: true,
+  };
+}
+
 function createRuntimeModelId(providerId, modelId) {
   return `${sanitizeModelProviderId(providerId)}::${String(modelId ?? "").trim()}`;
 }
@@ -666,11 +699,12 @@ async function providerAddCommand(context, args) {
   const afterState = normalizeState(JSON.parse(JSON.stringify(beforeState)));
   const existingProviders = afterState.config.modelProviders;
   const existing = existingProviders.find((provider) => sanitizeModelProviderId(provider?.id) === providerId);
+  const builtinPreset = findBuiltinModelProviderPreset(providerId);
   const incomingModels = optionValues(args, "--model").map(parseModel);
   const provider = {
     ...(existing ?? {}),
-    id: providerId,
-    name,
+    id: builtinPreset?.id ?? providerId,
+    name: builtinPreset?.name ?? name,
     kind: "openai-compatible",
     baseUrl,
     apiKey: optionValue(args, "--api-key", existing?.apiKey ?? ""),
@@ -679,6 +713,9 @@ async function providerAddCommand(context, args) {
     enabled: !hasFlag(args, "--disabled"),
     models: mergeModels(existing?.models, incomingModels),
   };
+  if (builtinPreset) {
+    provider.system = true;
+  }
 
   afterState.config.modelProviders = [
     ...existingProviders.filter((item) => sanitizeModelProviderId(item?.id) !== providerId),
@@ -725,6 +762,7 @@ async function providerToggleCommand(context, args, enabled) {
 
 async function providerRemoveCommand(context, args) {
   const providerId = sanitizeModelProviderId(optionValue(args, "--provider", optionValue(args, "--id")));
+  if (isBuiltinModelProviderId(providerId)) fail("内置模型提供商不可删除。");
   ensureYes(context, args, "model provider remove");
   const beforeState = await readState(context.statePath);
   const afterState = normalizeState(JSON.parse(JSON.stringify(beforeState)));

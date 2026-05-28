@@ -53,3 +53,28 @@ test("merge helper preserves existing providers and appends missing presets", ()
   assert.equal(merged.find((provider) => provider.id === "openai")?.system, true);
   assert.equal(merged.some((provider) => provider.id === "ollama"), true);
 });
+
+test("merge helper restores immutable names for existing builtin providers", () => {
+  const merged = mergeWithDefaultModelProviders([
+    {
+      id: "openai",
+      name: "Renamed OpenAI",
+      kind: "openai-compatible",
+      baseUrl: "https://proxy.example.com/v1",
+      apiKey: "sk-local",
+      temperature: 0.7,
+      maxTokens: 4096,
+      enabled: false,
+      system: false,
+      models: [{ id: "gpt-local", label: "GPT Local", enabled: true }],
+    },
+  ]);
+
+  const provider = merged.find((item) => item.id === "openai");
+
+  assert.equal(provider?.name, "OpenAI");
+  assert.equal(provider?.system, true);
+  assert.equal(provider?.baseUrl, "https://proxy.example.com/v1");
+  assert.equal(provider?.apiKey, "sk-local");
+  assert.equal(provider?.models[0]?.id, "gpt-local");
+});

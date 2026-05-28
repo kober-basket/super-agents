@@ -135,3 +135,52 @@ test("workspace service preserves existing providers and appends missing presets
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("workspace service restores builtin provider names while preserving configuration", async () => {
+  const tempDir = await createWorkspaceServiceTempDir("super-agents-workspace-");
+  const statePath = path.join(tempDir, "data", "workspace.json");
+  const service = new WorkspaceService(statePath);
+
+  await mkdir(path.dirname(statePath), { recursive: true });
+  await writeFile(
+    statePath,
+    JSON.stringify(
+      {
+        config: {
+          activeModelId: "openai::gpt-local",
+          modelProviders: [
+            {
+              id: "openai",
+              name: "Renamed OpenAI",
+              kind: "openai-compatible",
+              baseUrl: "https://proxy.example.com/v1",
+              apiKey: "sk-local",
+              temperature: 0.7,
+              maxTokens: 4096,
+              enabled: false,
+              system: false,
+              models: [{ id: "gpt-local", label: "GPT Local", enabled: true }],
+            },
+          ],
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  try {
+    const config = await service.getConfigSnapshot();
+    const provider = config.modelProviders.find((item) => item.id === "openai");
+
+    assert.equal(provider?.name, "OpenAI");
+    assert.equal(provider?.system, true);
+    assert.equal(provider?.baseUrl, "https://proxy.example.com/v1");
+    assert.equal(provider?.apiKey, "sk-local");
+    assert.equal(provider?.models[0]?.id, "gpt-local");
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});

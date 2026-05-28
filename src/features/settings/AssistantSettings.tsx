@@ -245,7 +245,7 @@ export function AssistantSettings({
                 <div className="provider-detail-head">
                   <div className="provider-detail-copy">
                     <h3>{currentProvider.name}</h3>
-                    {currentProvider.system ? <small>内置提供商，可配置但不可删除。</small> : null}
+                    {currentProvider.system ? <small>内置提供商，可配置，但不可删除或更名。</small> : null}
                   </div>
 
                   <div className="mcp-card-actions">

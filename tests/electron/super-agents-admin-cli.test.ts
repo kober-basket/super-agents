@@ -189,6 +189,56 @@ test("super-agents CLI manages providers, models, permissions, and MCP servers",
   }
 });
 
+test("super-agents CLI preserves builtin provider names and refuses removal", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-cli-"));
+  const statePath = path.join(tempDir, "workspace.json");
+
+  try {
+    const provider = parseStdout(runCli([
+      "--user-data",
+      tempDir,
+      "--json",
+      "model",
+      "provider",
+      "add",
+      "--id",
+      "openai",
+      "--name",
+      "Renamed OpenAI",
+      "--base-url",
+      "https://proxy.example.com/v1",
+      "--model",
+      "gpt-local:GPT Local",
+    ]));
+
+    assert.equal(provider.result.provider.id, "openai");
+    assert.equal(provider.result.provider.name, "OpenAI");
+    assert.equal(provider.result.provider.system, true);
+
+    const remove = runCli([
+      "--user-data",
+      tempDir,
+      "--json",
+      "--yes",
+      "model",
+      "provider",
+      "remove",
+      "--provider",
+      "openai",
+    ]);
+
+    assert.notEqual(remove.status, 0);
+    const errorPayload = JSON.parse(String(remove.stdout));
+    assert.equal(errorPayload.ok, false);
+    assert.match(errorPayload.error.message, /内置模型提供商不可删除/);
+
+    const state = await readState(statePath);
+    assert.equal(state.config.modelProviders.find((item: any) => item.id === "openai")?.name, "OpenAI");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("super-agents CLI manages memory, knowledge bases, skills, and tool discovery", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-cli-"));
 

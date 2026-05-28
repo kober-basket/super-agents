@@ -50,3 +50,28 @@ test("assistant settings masks provider API keys by default", () => {
   assert.match(html, /aria-label="显示接口密钥"/);
   assert.doesNotMatch(html, /type="text"[^>]*value="sk-secret-value"/);
 });
+
+test("assistant settings explains builtin providers cannot be renamed or removed", () => {
+  const html = renderToStaticMarkup(
+    <AssistantSettings
+      activeModel={null}
+      composerModelId=""
+      modelProviders={[{ ...provider, system: true }]}
+      providerRefreshingId={null}
+      selectedModelProviderId={provider.id}
+      selectableModels={[]}
+      onAddModelProvider={() => undefined}
+      onModelChange={() => undefined}
+      onRefreshProviderModels={() => undefined}
+      onRemoveModelProvider={() => undefined}
+      onReorderModelProviders={() => undefined}
+      onSelectProvider={() => undefined}
+      onSetDefaultProviderModel={() => undefined}
+      onSetProviderModelsEnabled={() => undefined}
+      onToggleProviderModel={() => undefined}
+      onUpdateModelProvider={() => undefined}
+    />,
+  );
+
+  assert.match(html, /内置提供商，可配置，但不可删除或更名。/);
+});
