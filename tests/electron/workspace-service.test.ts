@@ -317,14 +317,15 @@ test("audio transcription tries the next speech provider after a connection fail
   }
 });
 
-test("workspace service keeps full filesystem access enabled by default", async () => {
+test("workspace service uses smart review permissions by default", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
   const statePath = path.join(tempDir, "data", "workspace.json");
   const service = new WorkspaceService(statePath);
 
   try {
     const bootstrap = await service.bootstrap();
-    assert.equal(bootstrap.config.security.fullFileSystemAccess, true);
+    assert.equal(bootstrap.config.security.permissionMode, "smart-review");
+    assert.equal(bootstrap.config.security.fullFileSystemAccess, false);
   } finally {
     await service.shutdown();
     await rm(tempDir, { recursive: true, force: true });
@@ -347,6 +348,7 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     const pptxSkill = bootstrap.config.skills.find((skill) => skill.id === "pptx");
     const pdfSkill = bootstrap.config.skills.find((skill) => skill.id === "pdf");
     const pdfkitSkill = bootstrap.config.skills.find((skill) => skill.id === "pdfkit-py");
+    const superpowersTdd = bootstrap.config.skills.find((skill) => skill.id === "test-driven-development");
     const superAgentsAdmin = bootstrap.config.skills.find((skill) => skill.id === "super-agents-admin");
     const wxCli = bootstrap.config.skills.find((skill) => skill.id === "wx-cli");
     const stockResearch = bootstrap.config.skills.find((skill) => skill.id === "stock-market-research-expert");
@@ -361,6 +363,7 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
       "skill-creator",
       "stock-market-research-expert",
       "super-agents-admin",
+      "test-driven-development",
       "wx-cli",
       "xlsx",
     ];
@@ -398,7 +401,18 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     assert.ok(docxSkill);
     assert.equal(docxSkill?.system, true);
     assert.equal(docxSkill?.suiteId, "document-skills");
-    assert.equal(docxSkill?.suiteDisplayName, "文档技能套件");
+    assert.equal(docxSkill?.suiteDisplayName, "文档能力");
+    assert.equal(docxSkill?.suiteDescription, "Word、Excel、PowerPoint 与 PDF 的内置文档处理能力集合");
+    assert.deepEqual(
+      docxSkill?.suiteItems?.map((item) => ({ id: item.id, typeLabel: item.typeLabel })),
+      [
+        { id: "docx", typeLabel: "技能" },
+        { id: "xlsx", typeLabel: "技能" },
+        { id: "pptx", typeLabel: "技能" },
+        { id: "pdf", typeLabel: "技能" },
+        { id: "pdfkit-py", typeLabel: "技能" },
+      ],
+    );
     assert.equal(docxSkill?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "docx"));
     await access(path.join(docxSkill?.sourcePath ?? "", "SKILL.md"));
     await access(path.join(docxSkill?.sourcePath ?? "", "scripts", "accept_changes.py"));
@@ -427,6 +441,16 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     await access(path.join(pdfkitSkill?.sourcePath ?? "", "scripts", "pdfkit.py"));
     await access(path.join(pdfkitSkill?.sourcePath ?? "", "scripts", "pdfkit", "commands", "smart_edit.py"));
     assert.equal(pdfkitSkill?.displayName, "PDF 高级工具箱");
+    assert.ok(superpowersTdd);
+    assert.equal(superpowersTdd?.system, true);
+    assert.equal(superpowersTdd?.suiteId, "superpowers");
+    assert.equal(superpowersTdd?.suiteDisplayName, "Superpowers");
+    assert.equal(superpowersTdd?.suiteDescription, "系统化规划、调试、测试、评审与交付流程技能集合");
+    assert.equal(superpowersTdd?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "test-driven-development"));
+    await access(path.join(superpowersTdd?.sourcePath ?? "", "SKILL.md"));
+    await access(path.join(superpowersTdd?.sourcePath ?? "", "agents", "openai.yaml"));
+    assert.equal(superpowersTdd?.displayName, "Superpowers：测试驱动开发");
+    assert.match(superpowersTdd?.defaultPrompt ?? "", /\$test-driven-development/);
     assert.ok(superAgentsAdmin);
     assert.equal(superAgentsAdmin?.system, true);
     assert.equal(superAgentsAdmin?.sourcePath, path.join(tempDir, "data", "skills", "builtin", "super-agents-admin"));
@@ -457,6 +481,8 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
 
     const context = await service.getEnabledSkillPromptContext();
     assert.match(context, /Available workspace skills for this turn:/);
+    assert.match(context, /- document-skills \(suite\): Word、Excel、PowerPoint 与 PDF 的内置文档处理能力集合/);
+    assert.match(context, /- superpowers \(suite\): 系统化规划、调试、测试、评审与交付流程技能集合/);
     assert.match(context, /- browser-automation:/);
     assert.match(context, /- docx:/);
     assert.match(context, /- email-assistant:/);
@@ -465,10 +491,24 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
     assert.match(context, /- pptx:/);
     assert.match(context, /- skill-creator:/);
     assert.match(context, /- stock-market-research-expert:/);
+    assert.match(context, /- test-driven-development:/);
     assert.match(context, /- super-agents-admin:/);
     assert.match(context, /- wx-cli:/);
     assert.match(context, /- xlsx:/);
     assert.doesNotMatch(context, /Anatomy of a Skill/);
+    const loadedSuite = findEnabledSkill(bootstrap.config, "document-skills");
+    assert.ok(loadedSuite);
+    assert.equal(loadedSuite?.name, "document-skills");
+    assert.equal(loadedSuite?.displayName, "文档能力");
+    assert.match(loadedSuite?.command ?? "", /# Skill: docx/);
+    assert.match(loadedSuite?.command ?? "", /# Skill: xlsx/);
+    assert.match(loadedSuite?.command ?? "", /Base directory for this skill:/);
+    const loadedSuperpowers = findEnabledSkill(bootstrap.config, "Superpowers");
+    assert.ok(loadedSuperpowers);
+    assert.equal(loadedSuperpowers?.name, "superpowers");
+    assert.equal(loadedSuperpowers?.displayName, "Superpowers");
+    assert.match(loadedSuperpowers?.command ?? "", /# Skill: test-driven-development/);
+    assert.match(loadedSuperpowers?.command ?? "", /# Skill: verification-before-completion/);
     for (const skill of bootstrap.config.skills.filter((item) => item.system)) {
       const visibleName = skill.displayName || skill.name;
       const visibleDescription = skill.shortDescription || skill.description;
@@ -483,7 +523,9 @@ test("workspace service bootstraps copied built-in skills without legacy sample 
         skill.defaultPrompt,
         skill.command,
       ].join("\n");
-      assert.doesNotMatch(visibleText, /\bCodex\b/i, `${skill.id} should use product-neutral wording`);
+      if (skill.suiteId !== "superpowers") {
+        assert.doesNotMatch(visibleText, /\bCodex\b/i, `${skill.id} should use product-neutral wording`);
+      }
     }
   } finally {
     await service.shutdown();
@@ -545,7 +587,7 @@ test("workspace service serializes concurrent bootstrap skill syncs", async () =
   }
 });
 
-test("workspace service persists disabled full filesystem access setting", async () => {
+test("workspace service persists permission mode setting", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-workspace-"));
   const statePath = path.join(tempDir, "data", "workspace.json");
   const service = new WorkspaceService(statePath);
@@ -553,13 +595,15 @@ test("workspace service persists disabled full filesystem access setting", async
   try {
     await service.updateConfig({
       security: {
-        fullFileSystemAccess: false,
+        permissionMode: "full-access",
+        fullFileSystemAccess: true,
       },
     });
 
     const nextService = new WorkspaceService(statePath);
     const bootstrap = await nextService.bootstrap();
-    assert.equal(bootstrap.config.security.fullFileSystemAccess, false);
+    assert.equal(bootstrap.config.security.permissionMode, "full-access");
+    assert.equal(bootstrap.config.security.fullFileSystemAccess, true);
     await nextService.shutdown();
   } finally {
     await service.shutdown();

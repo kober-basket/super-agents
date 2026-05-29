@@ -33,6 +33,7 @@ interface ConversationRow {
   selected_knowledge_base_ids_json: string | null;
   agent_core: string | null;
   agent_session_id: string | null;
+  latest_completed_turn_id: string | null;
 }
 
 interface MessageRow {
@@ -235,6 +236,7 @@ function buildAssistantReply(content: string, attachments: FileDropEntry[]) {
 
 function mapConversationSummary(row: ConversationRow): ChatConversationSummary {
   const parsedPreview = parseChatMessageContent(row.preview ?? "");
+  const latestCompletedTurnId = row.latest_completed_turn_id?.trim() || "";
   return {
     id: row.id,
     title: row.title,
@@ -247,6 +249,7 @@ function mapConversationSummary(row: ConversationRow): ChatConversationSummary {
     selectedKnowledgeBaseIds: parseKnowledgeBaseIds(row.selected_knowledge_base_ids_json),
     agentCore: row.agent_core?.trim() || undefined,
     agentSessionId: row.agent_session_id?.trim() || undefined,
+    completedTurnId: latestCompletedTurnId || undefined,
   };
 }
 
@@ -335,6 +338,7 @@ export class ConversationService {
     this.ensureConversationColumn(database, "agent_session_id", "TEXT NOT NULL DEFAULT ''");
     this.ensureConversationColumn(database, "workspace_root", "TEXT NOT NULL DEFAULT ''");
     this.ensureConversationColumn(database, "selected_knowledge_base_ids_json", "TEXT NOT NULL DEFAULT '[]'");
+    this.ensureConversationColumn(database, "latest_completed_turn_id", "TEXT NOT NULL DEFAULT ''");
     this.ensureMessageColumn(database, "visuals_json", "TEXT NOT NULL DEFAULT '[]'");
     this.ensureMessageColumn(database, "runtime_trace_json", "TEXT NOT NULL DEFAULT ''");
 
@@ -360,6 +364,7 @@ export class ConversationService {
           conversations.selected_knowledge_base_ids_json,
           conversations.agent_core,
           conversations.agent_session_id,
+          conversations.latest_completed_turn_id,
           COUNT(messages.id) AS message_count
         FROM conversations
         LEFT JOIN messages ON messages.conversation_id = conversations.id
@@ -475,9 +480,10 @@ export class ConversationService {
               selected_knowledge_base_ids_json,
               workspace_root,
               agent_core,
-              agent_session_id
+              agent_session_id,
+              latest_completed_turn_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '')
           `)
           .run(
             conversationId,
@@ -543,14 +549,6 @@ export class ConversationService {
           now + 1,
         );
 
-      database
-        .prepare(`
-          UPDATE conversations
-          SET updated_at = ?, last_message_at = ?
-          WHERE id = ?
-        `)
-        .run(now + 1, now + 1, conversationId);
-
       database.exec("COMMIT");
       transactionStarted = false;
     } catch (error) {
@@ -600,10 +598,55 @@ export class ConversationService {
     database
       .prepare(`
         UPDATE conversations
-        SET updated_at = ?, last_message_at = ?, preview = ?
+        SET updated_at = ?, preview = ?
         WHERE id = ?
       `)
-      .run(now, now, preview, conversationId);
+      .run(now, preview, conversationId);
+  }
+
+  async markConversationTurnCompleted(
+    conversationId: string,
+    payload: { turnId: string; stopReason?: string },
+  ): Promise<ChatConversation> {
+    const turnId = payload.turnId.trim();
+    if (!turnId) {
+      throw new Error("Turn id is required");
+    }
+
+    const cancelled = payload.stopReason === "cancelled";
+    if (cancelled) {
+      return await this.getConversation(conversationId);
+    }
+
+    const result = this.getDatabase()
+      .prepare(`
+        UPDATE conversations
+        SET latest_completed_turn_id = ?
+        WHERE id = ?
+      `)
+      .run(turnId, conversationId);
+
+    if (result.changes === 0) {
+      throw new Error("Conversation not found");
+    }
+
+    return await this.getConversation(conversationId);
+  }
+
+  async markConversationViewed(conversationId: string): Promise<ChatConversation> {
+    const result = this.getDatabase()
+      .prepare(`
+        UPDATE conversations
+        SET latest_completed_turn_id = ''
+        WHERE id = ?
+      `)
+      .run(conversationId);
+
+    if (result.changes === 0) {
+      throw new Error("Conversation not found");
+    }
+
+    return await this.getConversation(conversationId);
   }
 
   async updateConversationTitle(conversationId: string, title: string): Promise<ChatConversation> {
@@ -771,14 +814,6 @@ export class ConversationService {
           now + 1,
         );
 
-      database
-        .prepare(`
-          UPDATE conversations
-          SET updated_at = ?, last_message_at = ?, preview = ?
-          WHERE id = ?
-        `)
-        .run(now + 1, now + 1, preview, conversationId);
-
       database.exec("COMMIT");
       transactionStarted = false;
     } catch (error) {
@@ -808,6 +843,7 @@ export class ConversationService {
           conversations.selected_knowledge_base_ids_json,
           conversations.agent_core,
           conversations.agent_session_id,
+          conversations.latest_completed_turn_id,
           COUNT(messages.id) AS message_count
         FROM conversations
         LEFT JOIN messages ON messages.conversation_id = conversations.id

@@ -130,8 +130,21 @@ function scriptName(baseName) {
 }
 
 async function resolveUv(runtimeRoot) {
-  const candidate = path.join(runtimeRoot, platformKey(), "bin", commandName("uv"));
-  return (await exists(candidate)) ? candidate : "uv";
+  const platformRoot = path.join(runtimeRoot, platformKey());
+  const candidates =
+    process.platform === "win32"
+      ? [
+          path.join(platformRoot, "bin", "uv.exe"),
+          path.join(platformRoot, "bin", "uv.cmd"),
+        ]
+      : [path.join(platformRoot, "bin", "uv")];
+
+  for (const candidate of candidates) {
+    if (await exists(candidate)) {
+      return candidate;
+    }
+  }
+  return commandName("uv");
 }
 
 async function resolveBundledPython(runtimeRoot) {
@@ -191,6 +204,7 @@ async function run(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env || process.env,
+      shell: process.platform === "win32" && /\.(?:bat|cmd)$/i.test(command),
       stdio: options.forwardOutputToStderr ? ["ignore", "pipe", "pipe"] : options.stdio || "inherit",
     });
     if (options.forwardOutputToStderr) {

@@ -13,6 +13,7 @@
   Mic,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Square,
   TerminalSquare,
   Wrench,
@@ -109,6 +110,7 @@ import type {
   KnowledgeBaseSummary,
   MailAuthDesktopApprovalRequest,
   QuestionDesktopApprovalRequest,
+  RuntimePermissionMode,
   RuntimeModelOption,
   SkillConfig,
 } from "../../types";
@@ -128,6 +130,7 @@ interface ChatWorkspaceProps {
   knowledgeBases: KnowledgeBaseSummary[];
   knowledgeEnabled: boolean;
   knowledgeRefreshing: boolean;
+  permissionMode: RuntimePermissionMode;
   runtimeState?: ChatConversationRuntimeState | null;
   workspaceFolderControl?: ReactNode;
   selectableModels: RuntimeModelOption[];
@@ -138,6 +141,7 @@ interface ChatWorkspaceProps {
   onManageKnowledgeBases: () => void;
   onAddAttachments: (files: FileDropEntry[]) => void | Promise<void>;
   onModelChange: (modelId: string) => void;
+  onPermissionModeChange: (mode: RuntimePermissionMode) => void;
   onOpenAttachment: (file: FileDropEntry) => void;
   onOpenPreviewLink: (url: string) => void;
   onPickFiles: () => void;
@@ -689,6 +693,7 @@ export function ChatWorkspace({
   knowledgeBases,
   knowledgeEnabled,
   knowledgeRefreshing,
+  permissionMode,
   runtimeState,
   workspaceFolderControl,
   selectableModels,
@@ -699,6 +704,7 @@ export function ChatWorkspace({
   onManageKnowledgeBases,
   onAddAttachments,
   onModelChange,
+  onPermissionModeChange,
   onOpenAttachment,
   onOpenPreviewLink,
   onPickFiles,
@@ -1435,6 +1441,30 @@ export function ChatWorkspace({
     );
   }
 
+  function renderPermissionModeControl() {
+    const labels: Record<RuntimePermissionMode, string> = {
+      default: "默认权限",
+      "smart-review": "智能审查",
+      "full-access": "完全访问",
+    };
+
+    return (
+      <label className="chat-permission-mode" title="全局权限模式，切换后立即影响后续工具调用">
+        <ShieldCheck size={15} />
+        <span className="chat-permission-mode-label">{labels[permissionMode]}</span>
+        <select
+          aria-label="权限模式"
+          value={permissionMode}
+          onChange={(event) => onPermissionModeChange(event.target.value as RuntimePermissionMode)}
+        >
+          <option value="default">默认权限</option>
+          <option value="smart-review">智能审查</option>
+          <option value="full-access">完全访问</option>
+        </select>
+      </label>
+    );
+  }
+
   function renderModelPicker() {
     const disabled = busy || selectableModels.length === 0;
     const activeModelFullLabel = activeModelOption?.modelLabel?.trim() || activeModelLabel;
@@ -1640,6 +1670,27 @@ export function ChatWorkspace({
       <div className="chat-attachment-card-list">
         {files.map((file) => {
           const meta = attachmentCardMeta(file);
+          const imageSource = meta.kind === "image" ? file.dataUrl || file.url : "";
+
+          if (imageSource) {
+            return (
+              <button
+                key={file.id}
+                className="chat-image-attachment-card"
+                onClick={() => onOpenAttachment(file)}
+                type="button"
+              >
+                <img className="chat-image-attachment-thumb" src={imageSource} alt={`图片附件 ${file.name}`} />
+                <div className="chat-image-attachment-meta">
+                  <div className="chat-image-attachment-copy">
+                    <strong title={file.name}>{file.name}</strong>
+                    <span>{formatBytes(file.size)}</span>
+                  </div>
+                  <span className="chat-image-attachment-tag">{meta.extensionLabel}</span>
+                </div>
+              </button>
+            );
+          }
 
           return (
             <button
@@ -2460,6 +2511,7 @@ export function ChatWorkspace({
             </div>
 
             <div className="chat-composer-right">
+              {renderPermissionModeControl()}
               {renderModelPicker()}
 
               <button

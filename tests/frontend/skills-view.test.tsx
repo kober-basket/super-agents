@@ -92,6 +92,83 @@ test("skills view separates built-in and user installed skills", async () => {
   assert.ok(html.indexOf("skill-creator") < html.indexOf("local-helper"));
 });
 
+test("skills view merges suite members into one labeled suite row", async () => {
+  (globalThis as any).window = {};
+  const { SkillsView } = await import("../../src/features/skills/SkillsView.js");
+  const source = readSource("src/features/skills/SkillsView.tsx");
+
+  const html = renderToStaticMarkup(
+    <SkillsView
+      filteredInstalledSkills={[
+        {
+          id: "docx",
+          name: "docx",
+          description: "Create Word documents",
+          displayName: "Word 文档处理",
+          shortDescription: "创建、读取、编辑 Word 文档",
+          kind: "command",
+          command: "Docx instructions",
+          enabled: true,
+          system: true,
+          suiteId: "document-skills",
+          suiteName: "document-skills",
+          suiteDisplayName: "文档能力",
+          suiteDescription: "Word、Excel、PowerPoint 与 PDF 的内置文档处理能力集合",
+          suiteItems: [
+            { id: "docx", name: "docx", displayName: "Word 文档处理", typeLabel: "技能" },
+            { id: "xlsx", name: "xlsx", displayName: "Excel 表格处理", typeLabel: "技能" },
+          ],
+          sourcePath: "/app/electron/builtin-skills/document-skills/skills/docx",
+          location: "内置技能",
+        },
+        {
+          id: "xlsx",
+          name: "xlsx",
+          description: "Create spreadsheets",
+          displayName: "Excel 表格处理",
+          shortDescription: "创建、清洗、编辑 Excel 表格",
+          kind: "command",
+          command: "Xlsx instructions",
+          enabled: false,
+          system: true,
+          suiteId: "document-skills",
+          suiteName: "document-skills",
+          suiteDisplayName: "文档能力",
+          suiteDescription: "Word、Excel、PowerPoint 与 PDF 的内置文档处理能力集合",
+          suiteItems: [
+            { id: "docx", name: "docx", displayName: "Word 文档处理", typeLabel: "技能" },
+            { id: "xlsx", name: "xlsx", displayName: "Excel 表格处理", typeLabel: "技能" },
+          ],
+          sourcePath: "/app/electron/builtin-skills/document-skills/skills/xlsx",
+          location: "内置技能",
+        },
+      ]}
+      hasResults={true}
+      skillQuery=""
+      skillsImporting={false}
+      skillsRefreshing={false}
+      onImportLocalSkill={() => undefined}
+      onPrepareSkillDraft={() => undefined}
+      onRefresh={() => undefined}
+      onSkillQueryChange={() => undefined}
+      onUninstallSkill={() => undefined}
+      onUpdateInstalledSkill={() => undefined}
+    />,
+  );
+
+  assert.equal((html.match(/class="skill-list-row skill-tile/g) ?? []).length, 1);
+  assert.equal((html.match(/role="switch"/g) ?? []).length, 1);
+  assert.match(html, /文档能力/);
+  assert.match(html, /套件/);
+  assert.doesNotMatch(html, /个内容/);
+  assert.match(html, /aria-checked="false"/);
+  assert.doesNotMatch(html, />Word 文档处理<\/strong>/);
+  assert.doesNotMatch(html, />Excel 表格处理<\/strong>/);
+  assert.match(source, /className="skill-entry-title-line"/);
+  assert.match(source, /className="skill-entry-title-badge"/);
+  assert.doesNotMatch(source, /skill-suite-inline-meta/);
+});
+
 test("skills view prefers openai interface metadata for skill labels", async () => {
   (globalThis as any).window = {};
   const { SkillsView } = await import("../../src/features/skills/SkillsView.js");
@@ -170,9 +247,11 @@ test("skills view prefers bundled asset icons when a skill provides one", async 
   assert.doesNotMatch(html, /skill-icon-orbit/);
 });
 
-test("skills view keeps skill rows simple with status only", async () => {
+test("skills view uses row switches for enable state and keeps details free of enable controls", async () => {
   (globalThis as any).window = {};
   const { SkillsView } = await import("../../src/features/skills/SkillsView.js");
+  const source = readSource("src/features/skills/SkillsView.tsx");
+  const css = readSource("src/styles.css");
 
   const html = renderToStaticMarkup(
     <SkillsView
@@ -212,8 +291,22 @@ test("skills view keeps skill rows simple with status only", async () => {
     />,
   );
 
-  assert.match(html, /启用/);
-  assert.match(html, /停用/);
+  assert.equal((html.match(/role="switch"/g) ?? []).length, 2);
+  assert.match(html, /aria-checked="true"/);
+  assert.match(html, /aria-checked="false"/);
+  assert.match(html, /aria-label="停用 skill-creator"/);
+  assert.match(html, /aria-label="启用 local-helper"/);
+  assert.match(html, /class="skill-enable-switch active"/);
+  assert.match(html, /class="skill-enable-switch"/);
+  assert.doesNotMatch(html, /skill-enable-switch-label/);
+  assert.match(css, /\.skill-enable-switch\s*{[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s);
+  assert.match(css, /\.skill-enable-switch:focus-visible\s+\.skill-enable-switch-track\s*{[^}]*outline:\s*3px/s);
+  assert.doesNotMatch(html, /<span class="skill-status-chip/);
+  assert.match(source, /event\.stopPropagation\(\);[\s\S]*onUpdateInstalledSkill\(entry\.id/);
+  assert.doesNotMatch(source, /skill-enable-switch-label/);
+  assert.doesNotMatch(source, /className=\{clsx\("toggle-button"/);
+  assert.match(source, /resolveEntryScopeLabel\(activeSkill\)/);
+  assert.doesNotMatch(source, /activeSkill\.items\.length/);
   assert.doesNotMatch(html, /skill-status-chip subtle/);
   assert.doesNotMatch(html, /skill-tile-folder/);
 });

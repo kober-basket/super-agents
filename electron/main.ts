@@ -466,6 +466,10 @@ app.whenReady().then(async () => {
     return await conversationService!.getConversation(conversationId);
   });
 
+  ipcMain.handle("desktop:mark-conversation-viewed", async (_event, conversationId: string) => {
+    return await conversationService!.markConversationViewed(conversationId);
+  });
+
   ipcMain.handle("desktop:start-chat-turn", async (_event, payload) => {
     return await chatOrchestrator!.startTurn(payload);
   });

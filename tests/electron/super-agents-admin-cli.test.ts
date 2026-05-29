@@ -80,7 +80,8 @@ test("super-agents CLI reports status and runs config mutations through session 
     assert.equal(undo.result.undone.command, "config patch");
     state = await readState(statePath);
     assert.equal(state.config.contextTier, "high");
-    assert.equal(state.config.security.fullFileSystemAccess, true);
+    assert.equal(state.config.security.permissionMode, "smart-review");
+    assert.equal(state.config.security.fullFileSystemAccess, false);
 
     const redo = parseStdout(runCli(["--user-data", tempDir, "--session", "work", "--json", "session", "redo"]));
     assert.equal(redo.result.redone.command, "config patch");
@@ -149,6 +150,7 @@ test("super-agents CLI manages providers, models, permissions, and MCP servers",
     assert.equal(active.result.activeModelId, "acme-ai::acme-embed");
 
     const permission = parseStdout(runCli(["--user-data", tempDir, "--json", "permission", "full-access", "on"]));
+    assert.equal(permission.result.permissionMode, "full-access");
     assert.equal(permission.result.fullFileSystemAccess, true);
 
     const mcp = parseStdout(runCli([
@@ -178,6 +180,7 @@ test("super-agents CLI manages providers, models, permissions, and MCP servers",
 
     const state = await readState(statePath);
     assert.equal(state.config.activeModelId, "acme-ai::acme-embed");
+    assert.equal(state.config.security.permissionMode, "full-access");
     assert.equal(state.config.security.fullFileSystemAccess, true);
     assert.deepEqual(state.config.mcpServers[0].args, ["server.js"]);
     assert.deepEqual(JSON.parse(state.config.mcpServers[0].envJson), {

@@ -75,6 +75,7 @@ export interface RuntimeModelOption {
   modelId: string;
   modelLabel: string;
   enabled: boolean;
+  capabilities?: ProviderModelConfig["capabilities"];
 }
 
 export interface ModelProviderFetchInput {
@@ -135,6 +136,19 @@ export interface SkillConfig {
   suiteId?: string;
   suiteName?: string;
   suiteDisplayName?: string;
+  suiteDescription?: string;
+  suiteItems?: SkillSuiteItem[];
+}
+
+export interface SkillSuiteItem {
+  id: string;
+  name: string;
+  displayName?: string;
+  description?: string;
+  shortDescription?: string;
+  type?: string;
+  typeLabel?: string;
+  path?: string;
 }
 
 export interface RuntimeSkill {
@@ -456,7 +470,10 @@ export interface RemoteControlConfig {
   wecom: WecomRemoteControlConfig;
 }
 
+export type RuntimePermissionMode = "default" | "smart-review" | "full-access";
+
 export interface SecurityConfig {
+  permissionMode: RuntimePermissionMode;
   fullFileSystemAccess: boolean;
 }
 
@@ -1028,6 +1045,7 @@ export interface ChatConversationSummary {
   selectedKnowledgeBaseIds: string[];
   agentCore?: string;
   agentSessionId?: string;
+  completedTurnId?: string;
 }
 
 export interface ChatConversation extends ChatConversationSummary {
@@ -1146,6 +1164,7 @@ export type ChatEvent =
       conversationId: string;
       turnId: string;
       stopReason: string;
+      conversation?: ChatConversation;
     }
   | {
       type: "turn_failed";

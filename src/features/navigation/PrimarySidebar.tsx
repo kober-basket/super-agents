@@ -11,11 +11,13 @@ import {
 
 import { formatRelativeTime } from "../../lib/format";
 import type { AppSection } from "../../types";
+import type { SidebarConversationRunStatus } from "./conversation-status";
 
 export interface SidebarConversationItem {
   id: string;
   title: string;
   createdAt: number;
+  runStatus?: SidebarConversationRunStatus;
   isGenerating?: boolean;
 }
 
@@ -27,6 +29,18 @@ interface PrimarySidebarProps {
   onDeleteConversation: (conversationId: string) => void;
   onOpenConversation: (conversationId: string) => void;
   onSetView: (view: AppSection) => void;
+}
+
+function normalizeConversationRunStatus(conversation: SidebarConversationItem): SidebarConversationRunStatus {
+  return conversation.runStatus ?? (conversation.isGenerating ? "running" : "idle");
+}
+
+function conversationRunStatusLabel(status: SidebarConversationRunStatus) {
+  if (status === "running") return "执行中";
+  if (status === "completed") return "已完成";
+  if (status === "failed") return "执行出错";
+  if (status === "cancelled") return "已取消";
+  return "空闲";
 }
 
 export function PrimarySidebar({
@@ -96,13 +110,16 @@ export function PrimarySidebar({
               {conversations.length > 0
                 ? conversations.map((conversation) => {
                     const isActive = view === "chat" && activeConversationId === conversation.id;
+                    const runStatus = normalizeConversationRunStatus(conversation);
+                    const runStatusLabel = conversationRunStatusLabel(runStatus);
                     return (
                       <div
                         key={conversation.id}
                         className={clsx(
                           "sidebar-conversation-item",
                           isActive && "active",
-                          conversation.isGenerating && "is-generating",
+                          runStatus !== "idle" && `status-${runStatus}`,
+                          runStatus === "running" && "is-generating",
                         )}
                       >
                         <button
@@ -110,7 +127,12 @@ export function PrimarySidebar({
                           onClick={() => onOpenConversation(conversation.id)}
                           type="button"
                         >
-                          <div className="sidebar-conversation-dot" aria-hidden="true" />
+                          <span
+                            aria-label={`会话状态：${runStatusLabel}`}
+                            className="sidebar-conversation-dot"
+                            role="img"
+                            title={runStatusLabel}
+                          />
                           <div className="sidebar-conversation-copy">
                             <strong title={conversation.title}>{conversation.title}</strong>
                           </div>

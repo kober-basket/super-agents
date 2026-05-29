@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 
-import type { AppConfig, ChatSendInput } from "../../src/types";
+import type { AppConfig, ChatSendInput, RuntimePermissionMode } from "../../src/types";
 import type { WorkspaceService } from "../workspace-service";
 import { buildLoadedSkillContent, findEnabledSkill, parseSkillInvocations } from "./skill-invocation";
 
@@ -11,6 +11,7 @@ export interface PreparedPrompt {
   workspacePrompt: string;
   workspaceRoot: string;
   fullFileSystemAccess: boolean;
+  runtimePermissionMode: RuntimePermissionMode;
 }
 
 function uniquePaths(values: string[]) {
@@ -266,6 +267,7 @@ export async function prepareChatPrompt(input: {
     memoryPrompt,
     workspacePrompt,
     workspaceRoot: cwd,
-    fullFileSystemAccess: config.security.fullFileSystemAccess === true,
+    fullFileSystemAccess: config.security.permissionMode === "full-access",
+    runtimePermissionMode: config.security.permissionMode,
   };
 }

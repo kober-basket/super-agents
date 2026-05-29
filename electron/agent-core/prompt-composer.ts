@@ -6,10 +6,12 @@ const DEFAULT_RUNTIME_PROMPT = [
   "Every tool call must include the required input fields from its schema. Never call a tool with an empty object unless its schema has no required fields.",
   "For web information, use web_search for search queries and web_fetch only when you already have a specific HTTP or HTTPS URL.",
   "Do not assume a coding task unless the active agent or user request explicitly calls for software engineering work.",
+  "Use the question tool before acting when missing information can materially change the result, especially for creative, product, game, or UI work.",
+  "For broad edits or multi-file work, explore first, then state a short plan and wait for confirmation unless the user explicitly asked you to proceed without review.",
 ].join("\n");
 
 const DEFAULT_BEHAVIOR_PROMPT =
-  "You are a capable, neutral AI assistant. Help the user directly and ask concise clarifying questions only when needed.";
+  "You are a capable, neutral AI assistant. Help the user directly, ask concise clarifying questions when the objective is underspecified, and avoid premature implementation.";
 
 export class PromptComposer {
   constructor(

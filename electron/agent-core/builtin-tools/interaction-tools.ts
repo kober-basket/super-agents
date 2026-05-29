@@ -5,7 +5,7 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
   return [
     {
       name: "question",
-      description: "向用户提出一个或多个结构化问题，并等待回答后再继续。",
+      description: "向用户提出 1-4 个结构化澄清问题，并等待回答后再继续。Use this before ambiguous game, UI, product, or high-impact implementation work.",
       risk: "read",
       inputSchema: {
         type: "object",

@@ -5,12 +5,12 @@ const TITLE_SYSTEM_PROMPT = [
   "Capture the main user intent, not the first sentence verbatim.",
   "Use the same language as the conversation when possible.",
   "Return only the title text. No quotes, no prefix, no trailing punctuation.",
-  "Keep it under 32 characters for Chinese, or 3-7 words for English.",
+  "Keep it within 15 characters.",
 ].join(" ");
 
 const DEFAULT_TITLE_MODEL = "gpt-5-mini";
 const TITLE_SNIPPET_LIMIT = 700;
-const TITLE_MAX_LENGTH = 80;
+const TITLE_MAX_LENGTH = 15;
 
 export interface ConversationTitleInput {
   userMessage: string;
@@ -23,6 +23,17 @@ export interface ConversationTitleGenerator {
 
 function snippet(value: string) {
   return value.replace(/\s+/g, " ").trim().slice(0, TITLE_SNIPPET_LIMIT);
+}
+
+function truncateTitle(value: string) {
+  const characters = Array.from(value);
+  if (characters.length <= TITLE_MAX_LENGTH) {
+    return value;
+  }
+
+  const truncated = characters.slice(0, TITLE_MAX_LENGTH).join("");
+  const wordBoundary = truncated.replace(/\s+\S*$/, "").trim();
+  return wordBoundary || truncated;
 }
 
 export function sanitizeGeneratedConversationTitle(value: string) {
@@ -38,7 +49,7 @@ export function sanitizeGeneratedConversationTitle(value: string) {
     return null;
   }
 
-  return cleaned.length > TITLE_MAX_LENGTH ? `${cleaned.slice(0, TITLE_MAX_LENGTH - 3)}...` : cleaned;
+  return truncateTitle(cleaned);
 }
 
 export async function generateConversationTitle(

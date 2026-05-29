@@ -60,7 +60,7 @@ function createConfig(): AppConfig {
       },
       wecom: { enabled: false, botId: "", secret: "", websocketUrl: "" },
     },
-    security: { fullFileSystemAccess: false },
+    security: { permissionMode: "smart-review", fullFileSystemAccess: false },
   };
 }
 

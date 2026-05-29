@@ -377,6 +377,10 @@ export class ChatOrchestrator {
     });
     activeTurn.runtimeTrace.events = activeTurn.eventLog.snapshot();
     await this.persistRuntimeTrace(activeTurn);
+    await this.conversationService.markConversationTurnCompleted(activeTurn.conversationId, {
+      turnId: activeTurn.turnId,
+      stopReason: "cancelled",
+    });
     activeTurn.completion.resolve({
       conversation: await this.conversationService.getConversation(activeTurn.conversationId),
       assistantMessage: {
@@ -428,6 +432,7 @@ export class ChatOrchestrator {
         workspacePrompt: prepared.workspacePrompt,
         workspaceRoot: prepared.workspaceRoot,
         fullFileSystemAccess: prepared.fullFileSystemAccess,
+        runtimePermissionMode: prepared.runtimePermissionMode,
         imageAttachments,
       })) {
         if (activeTurn.closed) {
@@ -466,6 +471,11 @@ export class ChatOrchestrator {
           updatedAt: Date.now(),
         } satisfies ChatMessage);
 
+      const completedConversation = await this.conversationService.markConversationTurnCompleted(activeTurn.conversationId, {
+        turnId: activeTurn.turnId,
+        stopReason,
+      });
+
       activeTurn.completion.resolve({
         conversation,
         assistantMessage,
@@ -481,6 +491,7 @@ export class ChatOrchestrator {
         conversationId: activeTurn.conversationId,
         turnId: activeTurn.turnId,
         stopReason,
+        conversation: completedConversation,
       });
     } catch (error) {
       await activeTurn.messagePersister.flush();

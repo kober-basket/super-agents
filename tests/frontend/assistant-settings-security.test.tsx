@@ -29,11 +29,13 @@ test("assistant settings masks provider API keys by default", () => {
     <AssistantSettings
       activeModel={null}
       composerModelId=""
+      fallbackModelId=""
       modelProviders={[provider]}
       providerRefreshingId={null}
       selectedModelProviderId={provider.id}
       selectableModels={[]}
       onAddModelProvider={() => undefined}
+      onFallbackModelChange={() => undefined}
       onModelChange={() => undefined}
       onRefreshProviderModels={() => undefined}
       onRemoveModelProvider={() => undefined}
@@ -51,16 +53,18 @@ test("assistant settings masks provider API keys by default", () => {
   assert.doesNotMatch(html, /type="text"[^>]*value="sk-secret-value"/);
 });
 
-test("assistant settings explains builtin providers cannot be renamed or removed", () => {
+test("assistant settings locks builtin provider identity fields and hides header actions", () => {
   const html = renderToStaticMarkup(
     <AssistantSettings
       activeModel={null}
       composerModelId=""
+      fallbackModelId=""
       modelProviders={[{ ...provider, system: true }]}
       providerRefreshingId={null}
       selectedModelProviderId={provider.id}
       selectableModels={[]}
       onAddModelProvider={() => undefined}
+      onFallbackModelChange={() => undefined}
       onModelChange={() => undefined}
       onRefreshProviderModels={() => undefined}
       onRemoveModelProvider={() => undefined}
@@ -73,5 +77,39 @@ test("assistant settings explains builtin providers cannot be renamed or removed
     />,
   );
 
-  assert.match(html, /内置提供商，可配置，但不可删除或更名。/);
+  assert.match(html, /内置提供商，可配置密钥和模型，名称与接口地址不可修改。/);
+  assert.match(html, /<input disabled="" value="OpenAI"\/>/);
+  assert.match(html, /<input disabled="" placeholder="https:\/\/api\.example\.com\/v1" value="https:\/\/api\.example\.com\/v1"\/>/);
+  assert.doesNotMatch(html, /provider-detail-actions/);
+  assert.doesNotMatch(html, /删除提供商/);
+});
+
+test("assistant settings keeps custom provider deletion available", () => {
+  const html = renderToStaticMarkup(
+    <AssistantSettings
+      activeModel={null}
+      composerModelId=""
+      fallbackModelId=""
+      modelProviders={[{ ...provider, system: false }]}
+      providerRefreshingId={null}
+      selectedModelProviderId={provider.id}
+      selectableModels={[]}
+      onAddModelProvider={() => undefined}
+      onFallbackModelChange={() => undefined}
+      onModelChange={() => undefined}
+      onRefreshProviderModels={() => undefined}
+      onRemoveModelProvider={() => undefined}
+      onReorderModelProviders={() => undefined}
+      onSelectProvider={() => undefined}
+      onSetDefaultProviderModel={() => undefined}
+      onSetProviderModelsEnabled={() => undefined}
+      onToggleProviderModel={() => undefined}
+      onUpdateModelProvider={() => undefined}
+    />,
+  );
+
+  assert.match(html, /provider-detail-actions/);
+  assert.match(html, /删除提供商/);
+  assert.doesNotMatch(html, /<input disabled="" value="OpenAI"\/>/);
+  assert.doesNotMatch(html, /<input disabled="" placeholder="https:\/\/api\.example\.com\/v1" value="https:\/\/api\.example\.com\/v1"\/>/);
 });

@@ -4558,6 +4558,91 @@ test("permission manager supports deny and ask modes at agent level", () => {
   );
 });
 
+test("permission manager supports runtime permission presets", () => {
+  const manager = new PermissionManager();
+  const baseAgent = {
+    id: "agent",
+    name: "Agent",
+    description: "Agent",
+    role: "assistant" as const,
+    prompt: "prompt",
+    model: "test-model",
+    tools: ["read_note", "write_note", "run_shell"],
+    permissionPolicy: {
+      allowedTools: ["read_note", "write_note", "run_shell"],
+      allowRisk: ["read" as const, "network" as const],
+    },
+  };
+  const createTool = (name: string, risk: ToolDefinition["risk"]): ToolDefinition => ({
+    name,
+    description: name,
+    inputSchema: { type: "object" },
+    risk,
+    async execute() {
+      return { content: "ok" };
+    },
+  });
+
+  assert.deepEqual(
+    manager.check({
+      agent: baseAgent,
+      tool: createTool("read_note", "read"),
+      toolCall: { id: "call-read", name: "read_note", input: {} },
+      toolCallsThisTurn: 0,
+      runtimePermissionMode: "smart-review",
+    }),
+    { type: "allow" },
+  );
+
+  assert.deepEqual(
+    manager.check({
+      agent: baseAgent,
+      tool: createTool("write_note", "write"),
+      toolCall: { id: "call-write", name: "write_note", input: {} },
+      toolCallsThisTurn: 0,
+      runtimePermissionMode: "smart-review",
+    }),
+    { type: "ask", reason: 'Tool "write_note" requires smart review before write access.' },
+  );
+
+  assert.deepEqual(
+    manager.check({
+      agent: baseAgent,
+      tool: createTool("write_note", "write"),
+      toolCall: { id: "call-write", name: "write_note", input: {} },
+      toolCallsThisTurn: 0,
+      runtimePermissionMode: "default",
+    }),
+    { type: "deny", reason: 'Tool risk "write" is not allowed for agent "agent".' },
+  );
+
+  assert.deepEqual(
+    manager.check({
+      agent: baseAgent,
+      tool: createTool("write_note", "write"),
+      toolCall: { id: "call-write", name: "write_note", input: {} },
+      toolCallsThisTurn: 0,
+      runtimePermissionMode: "full-access",
+    }),
+    { type: "allow" },
+  );
+});
+
+test("default prompt asks before ambiguous creative builds and plans before broad edits", () => {
+  const registry = createDefaultAgentRegistry();
+  const agent = registry.get(DEFAULT_AGENT_ID);
+  assert.ok(agent);
+
+  const prompt = new PromptComposer().compose({
+    agent,
+    skills: [],
+  });
+
+  assert.match(prompt, /question tool/i);
+  assert.match(prompt, /creative, product, game, or UI/i);
+  assert.match(prompt, /explore first, then state a short plan/i);
+});
+
 test("native agent core skips approval gates when full filesystem access is enabled", async () => {
   const agents = new AgentRegistry();
   const skills = new SkillRegistry();
@@ -5210,7 +5295,7 @@ test("agent core truncates oversized successful tool results before the next mod
   assert.equal((toolMessage?.content.length ?? 0) < 31_000, true);
 });
 
-test("openai-compatible gateway sends image attachments to the active model first", async () => {
+test("openai-compatible gateway sends image attachments to the active vision model", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: Array<Record<string, unknown>> = [];
 
@@ -5238,7 +5323,7 @@ test("openai-compatible gateway sends image attachments to the active model firs
           temperature: 0,
           maxTokens: 256,
           enabled: true,
-          models: [{ id: "text-model", label: "Text Model", enabled: true }],
+          models: [{ id: "text-model", label: "Text Model", enabled: true, capabilities: { vision: true } }],
         },
         {
           id: "vision",
@@ -5288,20 +5373,13 @@ test("openai-compatible gateway sends image attachments to the active model firs
   }
 });
 
-test("openai-compatible gateway uses image recognition fallback only after active model rejects images", async () => {
+test("openai-compatible gateway uses image parser before text-only active models", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: Array<Record<string, unknown>> = [];
 
   globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
     requestBodies.push(body);
-
-    if (requestBodies.length === 1) {
-      return new Response(JSON.stringify({ error: { message: "This model does not support image input." } }), {
-        status: 400,
-        statusText: "Bad Request",
-      });
-    }
 
     if (body.model === "vision-model") {
       return new Response(
@@ -5365,12 +5443,11 @@ test("openai-compatible gateway uses image recognition fallback only after activ
       events.push(event);
     }
 
-    assert.equal(requestBodies.length, 3);
-    assert.equal(requestBodies[0]?.model, "text-model");
-    assert.equal(requestBodies[1]?.model, "vision-model");
-    assert.equal(requestBodies[2]?.model, "text-model");
+    assert.equal(requestBodies.length, 2);
+    assert.equal(requestBodies[0]?.model, "vision-model");
+    assert.equal(requestBodies[1]?.model, "text-model");
 
-    const fallbackMessages = requestBodies[1]?.messages as Array<{ role: string; content: unknown }>;
+    const fallbackMessages = requestBodies[0]?.messages as Array<{ role: string; content: unknown }>;
     assert.equal(fallbackMessages.at(-1)?.role, "user");
     assert.deepEqual(fallbackMessages.at(-1)?.content, [
       {
@@ -5380,10 +5457,10 @@ test("openai-compatible gateway uses image recognition fallback only after activ
       { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
     ]);
 
-    const retryMessages = requestBodies[2]?.messages as Array<{ role: string; content: unknown }>;
+    const retryMessages = requestBodies[1]?.messages as Array<{ role: string; content: unknown }>;
     const retryUser = retryMessages.find((message) => message.role === "user");
     assert.equal(typeof retryUser?.content, "string");
-    assert.match(String(retryUser?.content), /图片识别结果/);
+    assert.match(String(retryUser?.content), /图片解析结果/);
     assert.match(String(retryUser?.content), /仪表盘截图/);
     assert.doesNotMatch(JSON.stringify(retryMessages), /image_url/);
     assert.deepEqual(
@@ -5395,14 +5472,17 @@ test("openai-compatible gateway uses image recognition fallback only after activ
   }
 });
 
-test("openai-compatible gateway reports missing image recognition fallback when active model rejects images", async () => {
+test("openai-compatible gateway reports missing image parser before text-only active models receive images", async () => {
   const originalFetch = globalThis.fetch;
+  let fetchCount = 0;
 
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ error: { message: "This model does not support image input." } }), {
+  globalThis.fetch = (async () => {
+    fetchCount += 1;
+    return new Response(JSON.stringify({ error: { message: "This model does not support image input." } }), {
       status: 400,
       statusText: "Bad Request",
-    })) as typeof fetch;
+    });
+  }) as typeof fetch;
 
   try {
     const gateway = new OpenAICompatibleModelGateway(async () => ({
@@ -5443,8 +5523,9 @@ test("openai-compatible gateway reports missing image recognition fallback when 
           // Drain the stream.
         }
       },
-      /请在设置 > 智能识图中选择一个模型/,
+      /图片解析模型未启用/,
     );
+    assert.equal(fetchCount, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }

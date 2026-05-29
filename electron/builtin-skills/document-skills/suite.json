@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "document-skills",
   "name": "document-skills",
-  "displayName": "文档技能套件",
+  "displayName": "文档能力",
   "description": "Word、Excel、PowerPoint 与 PDF 的内置文档处理能力集合",
   "skills": [
     {

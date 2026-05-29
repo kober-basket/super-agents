@@ -65,6 +65,19 @@ test("composer attachments render as removable file cards", () => {
   assert.match(css, /:root\[data-theme="graphite"\] \.composer-attachment-card \.chat-attachment-card-copy strong[\s\S]*color:\s*var\(--text\)/);
 });
 
+test("sent image attachments render inline thumbnails", () => {
+  const source = readRepoFile("src/features/chat/ChatWorkspace.tsx");
+  const css = readRepoFile("src/styles.css");
+
+  assert.match(source, /const imageSource = meta\.kind === "image" \? file\.dataUrl \|\| file\.url : ""/);
+  assert.match(source, /className="chat-image-attachment-card"/);
+  assert.match(source, /className="chat-image-attachment-thumb"/);
+  assert.match(source, /alt=\{`图片附件 \$\{file\.name\}`\}/);
+  assert.match(css, /\.chat-image-attachment-card\s*{[^}]*width:\s*min\(294px,\s*100%\)[^}]*overflow:\s*hidden/s);
+  assert.match(css, /\.chat-image-attachment-thumb\s*{[^}]*aspect-ratio:\s*16\s*\/\s*10[^}]*object-fit:\s*cover/s);
+  assert.match(css, /\.chat-image-attachment-meta\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s);
+});
+
 test("clipboard image files become composer image attachments", async () => {
   const file = new File(["image-bytes"], "screen.png", { type: "image/png" });
 

@@ -233,6 +233,115 @@ test("conversation title updates do not move the conversation in the message tim
   }
 });
 
+test("assistant message updates do not move the conversation in the message timeline", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-conversations-"));
+  const service = new ConversationService(path.join(tempDir, "data", "app.db"));
+
+  await service.initialize();
+
+  try {
+    const older = await service.startTurn(
+      {
+        content: "First question",
+      },
+      { agentCore: "native" },
+    );
+    const before = await service.getConversation(older.conversation.id);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const newer = await service.startTurn(
+      {
+        content: "Second question",
+      },
+      { agentCore: "native" },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await service.updateAssistantMessage(
+      older.conversation.id,
+      older.assistantMessage.id,
+      "Finished the first answer",
+    );
+
+    const updatedOlder = await service.getConversation(older.conversation.id);
+    assert.equal(updatedOlder.lastMessageAt, before.lastMessageAt);
+    assert.notEqual(updatedOlder.updatedAt, before.updatedAt);
+
+    const listed = await service.listConversations();
+    assert.deepEqual(
+      listed.conversations.map((conversation) => conversation.id),
+      [newer.conversation.id, older.conversation.id],
+    );
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("conversation service clears completed turn markers after the conversation is viewed", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-conversations-"));
+  const service = new ConversationService(path.join(tempDir, "data", "app.db"));
+
+  await service.initialize();
+
+  try {
+    const started = await service.startTurn(
+      {
+        content: "Run this in the background",
+      },
+      { agentCore: "native" },
+    );
+
+    await service.markConversationTurnCompleted(started.conversation.id, {
+      turnId: "turn-background-1",
+      stopReason: "end_turn",
+    });
+
+    const completedList = await service.listConversations();
+    assert.equal(completedList.conversations[0]?.completedTurnId, "turn-background-1");
+
+    const completedConversation = await service.getConversation(started.conversation.id);
+    assert.equal(completedConversation.completedTurnId, "turn-background-1");
+
+    const viewedConversation = await service.markConversationViewed(started.conversation.id);
+    assert.equal(viewedConversation.completedTurnId, undefined);
+
+    const viewedList = await service.listConversations();
+    assert.equal(viewedList.conversations[0]?.completedTurnId, undefined);
+
+    await service.markConversationTurnCompleted(started.conversation.id, {
+      turnId: "turn-background-2",
+      stopReason: "end_turn",
+    });
+
+    await service.markConversationTurnCompleted(started.conversation.id, {
+      turnId: "turn-cancelled",
+      stopReason: "cancelled",
+    });
+
+    const cancelledList = await service.listConversations();
+    assert.equal(cancelledList.conversations[0]?.completedTurnId, "turn-background-2");
+
+    const cancelledOnly = await service.startTurn(
+      {
+        content: "Cancel this before any successful completion",
+      },
+      { agentCore: "native" },
+    );
+
+    await service.markConversationTurnCompleted(cancelledOnly.conversation.id, {
+      turnId: "turn-cancelled-only",
+      stopReason: "cancelled",
+    });
+
+    const cancelledOnlyConversation = await service.getConversation(cancelledOnly.conversation.id);
+    assert.equal(cancelledOnlyConversation.completedTurnId, undefined);
+  } finally {
+    await service.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("conversation service persists assistant visuals separately from text", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-conversations-"));
   const service = new ConversationService(path.join(tempDir, "data", "app.db"));

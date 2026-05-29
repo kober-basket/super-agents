@@ -68,7 +68,8 @@ function usage(executableName = "super-agents") {
     "  model provider list|add|remove|enable|disable",
     "  model list|add|set-active|enable|disable",
     "  provider list|add|set-active             # compatibility alias",
-    "  permission full-access <on|off>",
+    "  permission mode <default|smart-review|full-access>",
+    "  permission full-access <on|off>        # compatibility alias",
     "  conversation list|show|rename|export|delete",
     "  memory list|add|search|update|delete",
     "  knowledge base list|create|delete",
@@ -228,7 +229,21 @@ function createDefaultConfig() {
       },
       wecom: { enabled: false, botId: "", secret: "", websocketUrl: "wss://openws.work.weixin.qq.com" },
     },
-    security: { fullFileSystemAccess: true },
+    security: { permissionMode: "smart-review", fullFileSystemAccess: false },
+  };
+}
+
+function normalizeSecurityConfig(rawSecurity, defaults) {
+  const rawMode = rawSecurity?.permissionMode;
+  const permissionMode =
+    rawMode === "default" || rawMode === "smart-review" || rawMode === "full-access"
+      ? rawMode
+      : rawSecurity?.fullFileSystemAccess === true
+        ? "full-access"
+        : defaults.security.permissionMode;
+  return {
+    permissionMode,
+    fullFileSystemAccess: permissionMode === "full-access",
   };
 }
 
@@ -250,13 +265,7 @@ function normalizeState(raw) {
       skills: Array.isArray(config.skills) ? config.skills : [],
       knowledgeBase: { ...defaults.knowledgeBase, ...(config.knowledgeBase ?? {}) },
       remoteControl: { ...defaults.remoteControl, ...(config.remoteControl ?? {}) },
-      security: {
-        ...defaults.security,
-        ...(config.security ?? {}),
-        fullFileSystemAccess: config.security?.fullFileSystemAccess === false
-          ? false
-          : defaults.security.fullFileSystemAccess,
-      },
+      security: normalizeSecurityConfig(config.security, defaults),
     },
   };
 }
@@ -854,15 +863,32 @@ async function providerAliasCommand(context, action, args) {
 }
 
 async function permissionCommand(context, action, args) {
-  if (action !== "full-access") fail(`Unknown permission command: ${action || ""}`);
   const value = args[0];
-  if (value !== "on" && value !== "off") fail("permission full-access requires on or off.");
+  let permissionMode;
+  let commandName;
+  let changedPaths;
+  if (action === "mode") {
+    if (value !== "default" && value !== "smart-review" && value !== "full-access") {
+      fail("permission mode requires default, smart-review, or full-access.");
+    }
+    permissionMode = value;
+    commandName = "permission mode";
+    changedPaths = ["security.permissionMode", "security.fullFileSystemAccess"];
+  } else if (action === "full-access") {
+    if (value !== "on" && value !== "off") fail("permission full-access requires on or off.");
+    permissionMode = value === "on" ? "full-access" : "smart-review";
+    commandName = "permission full-access";
+    changedPaths = ["security.permissionMode", "security.fullFileSystemAccess"];
+  } else {
+    fail(`Unknown permission command: ${action || ""}`);
+  }
   const beforeState = await readState(context.statePath);
   const afterState = normalizeState(JSON.parse(JSON.stringify(beforeState)));
-  afterState.config.security.fullFileSystemAccess = value === "on";
+  afterState.config.security.permissionMode = permissionMode;
+  afterState.config.security.fullFileSystemAccess = permissionMode === "full-access";
   await writeState(context.statePath, afterState);
-  const session = await recordStateMutation(context, "permission full-access", beforeState, afterState, ["security.fullFileSystemAccess"]);
-  return { result: { fullFileSystemAccess: afterState.config.security.fullFileSystemAccess }, session };
+  const session = await recordStateMutation(context, commandName, beforeState, afterState, changedPaths);
+  return { result: { ...afterState.config.security }, session };
 }
 
 async function openDatabase(dbPath) {

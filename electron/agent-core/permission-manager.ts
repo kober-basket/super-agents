@@ -1,6 +1,15 @@
-import type { AgentDefinition, PermissionDecision, ToolCall, ToolDefinition, ToolRisk } from "./types";
+import type {
+  AgentDefinition,
+  PermissionDecision,
+  RuntimePermissionMode,
+  ToolCall,
+  ToolDefinition,
+  ToolRisk,
+} from "./types";
 
 const DEFAULT_ALLOWED_RISKS: ToolRisk[] = ["read"];
+const SMART_REVIEW_ALLOW_RISKS: ToolRisk[] = ["read", "network"];
+const SMART_REVIEW_ASK_RISKS: ToolRisk[] = ["write", "shell", "destructive"];
 
 function listedToolMatches(tool: ToolDefinition, toolCall: ToolCall, names: string[] | undefined) {
   if (!names) return false;
@@ -15,10 +24,12 @@ export class PermissionManager {
     toolCall: ToolCall;
     toolCallsThisTurn: number;
     fullFileSystemAccess?: boolean;
+    runtimePermissionMode?: RuntimePermissionMode;
   }): PermissionDecision {
-    const { agent, fullFileSystemAccess, tool, toolCall, toolCallsThisTurn } = input;
+    const { agent, fullFileSystemAccess, runtimePermissionMode, tool, toolCall, toolCallsThisTurn } = input;
     const policy = agent.permissionPolicy ?? {};
     const permissionMode = agent.permissionMode ?? "default";
+    const runtimeMode = fullFileSystemAccess ? "full-access" : runtimePermissionMode ?? "default";
 
     if (!tool) {
       return { type: "deny", reason: `Tool "${toolCall.name}" is not registered.` };
@@ -40,7 +51,7 @@ export class PermissionManager {
       return { type: "deny", reason: `Tool "${tool.name}" is not allowed for agent "${agent.id}".` };
     }
 
-    if (fullFileSystemAccess) {
+    if (runtimeMode === "full-access") {
       return { type: "allow" };
     }
 
@@ -50,6 +61,15 @@ export class PermissionManager {
 
     if (permissionMode === "ask") {
       return { type: "ask", reason: `Agent "${agent.id}" requires approval before using tools.` };
+    }
+
+    if (runtimeMode === "smart-review") {
+      if (SMART_REVIEW_ALLOW_RISKS.includes(tool.risk)) {
+        return { type: "allow" };
+      }
+      if (SMART_REVIEW_ASK_RISKS.includes(tool.risk)) {
+        return { type: "ask", reason: `Tool "${tool.name}" requires smart review before ${tool.risk} access.` };
+      }
     }
 
     const allowedRisks = policy.allowRisk ?? DEFAULT_ALLOWED_RISKS;

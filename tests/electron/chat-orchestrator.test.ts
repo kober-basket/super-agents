@@ -47,7 +47,7 @@ function createConfig(workspaceRoot: string): AppConfig {
       },
       wecom: { enabled: false, botId: "", secret: "", websocketUrl: "" },
     },
-    security: { fullFileSystemAccess: false },
+    security: { permissionMode: "smart-review", fullFileSystemAccess: false },
   };
 }
 
@@ -123,6 +123,10 @@ test("chat orchestrator forwards agent thoughts into runtime trace and thought e
       ["turn_started", "thought_delta", "message_delta", "turn_finished"],
     );
     assert.equal(assistantMessage?.runtimeTrace?.events[1]?.text, "Planning. ");
+    const finishedEvent = events.find((event) => event.type === "turn_finished");
+    assert.equal(finishedEvent?.type, "turn_finished");
+    assert.ok(finishedEvent.conversation);
+    assert.equal(finishedEvent.conversation.completedTurnId, execution.result.turnId);
   } finally {
     await conversationService.shutdown();
     await rm(tempDir, { recursive: true, force: true });

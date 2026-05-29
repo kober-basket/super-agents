@@ -42,7 +42,7 @@ function createConfig(skills: SkillConfig[] = []): AppConfig {
       },
       wecom: { enabled: false, botId: "", secret: "", websocketUrl: "" },
     },
-    security: { fullFileSystemAccess: false },
+    security: { permissionMode: "smart-review", fullFileSystemAccess: false },
   };
 }
 
@@ -154,4 +154,28 @@ test("market research prompts do not get a hard-coded core evidence gate", async
 
   assert.doesNotMatch(prepared.workspacePrompt, /Market research evidence gate/);
   assert.doesNotMatch(prepared.workspacePrompt, /GoldSilver|ProfitByFriday/);
+});
+
+test("permission mode controls whether prompt context grants full filesystem access", async () => {
+  const smartReview = await prepareChatPrompt({
+    chatInput: { content: "check the project" },
+    selectedKnowledgeBaseIds: [],
+    workspaceService: createWorkspaceService({
+      ...createConfig(),
+      security: { permissionMode: "smart-review", fullFileSystemAccess: true },
+    }),
+  });
+
+  assert.equal(smartReview.fullFileSystemAccess, false);
+
+  const fullAccess = await prepareChatPrompt({
+    chatInput: { content: "check the project" },
+    selectedKnowledgeBaseIds: [],
+    workspaceService: createWorkspaceService({
+      ...createConfig(),
+      security: { permissionMode: "full-access", fullFileSystemAccess: false },
+    }),
+  });
+
+  assert.equal(fullAccess.fullFileSystemAccess, true);
 });

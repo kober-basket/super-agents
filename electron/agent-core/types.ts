@@ -1,6 +1,7 @@
 export type AgentRole = "assistant" | "coordinator" | "worker" | "specialist";
 export type AgentPromptMode = "replace-default" | "append-default";
 export type PermissionMode = "default" | "allow" | "ask" | "deny";
+export type RuntimePermissionMode = "default" | "smart-review" | "full-access";
 
 import type { ChatModelTokenUsage } from "../../src/types";
 

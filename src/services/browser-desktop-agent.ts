@@ -89,7 +89,8 @@ const EMPTY_CONFIG: AppConfig = {
     chunkOverlap: 160,
   },
   security: {
-    fullFileSystemAccess: true,
+    permissionMode: "smart-review",
+    fullFileSystemAccess: false,
   },
   remoteControl: {
     dingtalk: {
@@ -188,6 +189,7 @@ function toConversationSummary(conversation: ChatConversation): ChatConversation
     selectedKnowledgeBaseIds: conversation.selectedKnowledgeBaseIds,
     agentCore: conversation.agentCore,
     agentSessionId: conversation.agentSessionId,
+    completedTurnId: conversation.completedTurnId,
   };
 }
 
@@ -252,6 +254,17 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
       conversations: conversations.map(toConversationSummary).sort((left, right) => right.updatedAt - left.updatedAt),
     }),
     getConversation: async (conversationId: string) => getConversationOrThrow(conversationId),
+    markConversationViewed: async (conversationId: string) => {
+      const conversation = getConversationOrThrow(conversationId);
+      const nextConversation = {
+        ...conversation,
+        completedTurnId: undefined,
+      };
+      conversations = conversations.map((item) =>
+        item.id === conversationId ? nextConversation : item,
+      );
+      return nextConversation;
+    },
     startChatTurn: async (payload: ChatSendInput) => {
       const content = payload.content.trim();
       const selectedKnowledgeBaseIds = payload.selectedKnowledgeBaseIds ?? [];
@@ -299,6 +312,9 @@ export function createBrowserDesktopAgent(): DesktopAgentApi {
 
       const turnId = `turn_${Math.random().toString(36).slice(2, 10)}`;
       window.setTimeout(() => {
+        conversations = conversations.map((item) =>
+          item.id === conversation.id ? { ...item, completedTurnId: turnId } : item,
+        );
         emitChatEvent({
           type: "message_updated",
           conversationId: conversation.id,

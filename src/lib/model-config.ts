@@ -93,6 +93,7 @@ export function flattenModelProviders(modelProviders: ModelProviderConfig[]): Ru
         modelId: model.id,
         modelLabel: model.label,
         enabled: provider.enabled !== false && model.enabled !== false,
+        capabilities: model.capabilities,
       })),
   );
 }

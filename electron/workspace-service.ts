@@ -59,6 +59,7 @@ import type {
   RuntimeSkill,
   SkillConfig,
   SkillImportResult,
+  SkillSuiteItem,
   TerminalCommandResult,
   WorkspaceDirectoryEntry,
   WorkspaceDirectoryListing,
@@ -109,6 +110,17 @@ interface BuiltinSkillSuiteSkillConfig extends SkillOpenAiMetadata {
   enabled?: boolean;
 }
 
+interface BuiltinSkillSuiteItemConfig {
+  id?: string;
+  name?: string;
+  displayName?: string;
+  description?: string;
+  shortDescription?: string;
+  type?: string;
+  typeLabel?: string;
+  path?: string;
+}
+
 interface BuiltinSkillSuiteManifest {
   schemaVersion: number;
   id: string;
@@ -116,6 +128,7 @@ interface BuiltinSkillSuiteManifest {
   displayName?: string;
   description?: string;
   skills: BuiltinSkillSuiteSkillConfig[];
+  items: SkillSuiteItem[];
 }
 
 const LEGACY_DEFAULT_PROVIDER_BASE_URL = "https://oneapi.iflyrpa.com/v1";
@@ -168,7 +181,8 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   remoteControl: DEFAULT_REMOTE_CONTROL_CONFIG,
   security: {
-    fullFileSystemAccess: true,
+    permissionMode: "smart-review",
+    fullFileSystemAccess: false,
   },
 };
 
@@ -208,6 +222,21 @@ function isLegacyDefaultProviderList(modelProviders: ModelProviderConfig[]) {
     modelIds.length === LEGACY_DEFAULT_PROVIDER_MODEL_IDS.length &&
     modelIds.every((modelId, index) => modelId === LEGACY_DEFAULT_PROVIDER_MODEL_IDS[index])
   );
+}
+
+function normalizeSecurityConfig(rawSecurity: Partial<AppConfig["security"]> | undefined): AppConfig["security"] {
+  const rawMode = rawSecurity?.permissionMode;
+  const permissionMode =
+    rawMode === "default" || rawMode === "smart-review" || rawMode === "full-access"
+      ? rawMode
+      : rawSecurity?.fullFileSystemAccess === true
+        ? "full-access"
+        : DEFAULT_CONFIG.security.permissionMode;
+
+  return {
+    permissionMode,
+    fullFileSystemAccess: permissionMode === "full-access",
+  };
 }
 
 function migrateLegacyModels(legacyModels: any[], legacyActiveModelId?: string) {
@@ -344,13 +373,7 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
           : [],
       },
       remoteControl: normalizeRemoteControlConfig(rawConfig.remoteControl),
-      security: {
-        ...DEFAULT_CONFIG.security,
-        ...(rawConfig.security ?? {}),
-        fullFileSystemAccess: rawConfig.security?.fullFileSystemAccess === false
-          ? false
-          : DEFAULT_CONFIG.security.fullFileSystemAccess,
-      },
+      security: normalizeSecurityConfig(rawConfig.security),
       mcpServers: Array.isArray(rawConfig.mcpServers) ? rawConfig.mcpServers : DEFAULT_CONFIG.mcpServers,
     },
   };
@@ -872,6 +895,52 @@ function normalizeSuiteSkill(rawSkill: unknown): BuiltinSkillSuiteSkillConfig | 
   };
 }
 
+function suiteSkillToItem(skill: BuiltinSkillSuiteSkillConfig): SkillSuiteItem {
+  const name = skill.name || path.basename(skill.path);
+  return {
+    id: sanitizeModelProviderId(skill.id || name),
+    name,
+    displayName: skill.displayName,
+    description: skill.description,
+    shortDescription: skill.shortDescription,
+    type: "skill",
+    typeLabel: "技能",
+    path: skill.path,
+  };
+}
+
+function normalizeSuiteItem(rawItem: unknown): SkillSuiteItem | null {
+  if (!isRecord(rawItem)) return null;
+  const name = readSuiteString(rawItem.name);
+  const id = readSuiteString(rawItem.id) || (name ? sanitizeModelProviderId(name) : "");
+  if (!id || !name) return null;
+
+  const type = readSuiteString(rawItem.type) || "element";
+  const explicitTypeLabel = readSuiteString(rawItem.typeLabel);
+
+  return {
+    id,
+    name,
+    displayName: readSuiteString(rawItem.displayName) || undefined,
+    description: readSuiteString(rawItem.description) || undefined,
+    shortDescription: readSuiteString(rawItem.shortDescription) || undefined,
+    type,
+    typeLabel: explicitTypeLabel || (type === "skill" ? "技能" : "元素"),
+    path: readSuiteString(rawItem.path) || undefined,
+  };
+}
+
+function normalizeSkillSuiteItems(value: unknown): SkillSuiteItem[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const items = value.flatMap((item): SkillSuiteItem[] => {
+    const normalized = normalizeSuiteItem(item);
+    return normalized ? [normalized] : [];
+  });
+
+  return items.length > 0 ? items : undefined;
+}
+
 function readBuiltinSkillSuiteManifest(suiteRoot: string): BuiltinSkillSuiteManifest | null {
   const manifest = readJsonRecordSync(path.join(suiteRoot, "suite.json"));
   if (!manifest) return null;
@@ -880,6 +949,10 @@ function readBuiltinSkillSuiteManifest(suiteRoot: string): BuiltinSkillSuiteMani
   const name = readSuiteString(manifest.name) || id;
   const skills = Array.isArray(manifest.skills) ? manifest.skills.flatMap((item) => {
     const normalized = normalizeSuiteSkill(item);
+    return normalized ? [normalized] : [];
+  }) : [];
+  const additionalItems = Array.isArray(manifest.items) ? manifest.items.flatMap((item): SkillSuiteItem[] => {
+    const normalized = normalizeSuiteItem(item);
     return normalized ? [normalized] : [];
   }) : [];
 
@@ -892,6 +965,7 @@ function readBuiltinSkillSuiteManifest(suiteRoot: string): BuiltinSkillSuiteMani
     displayName: readSuiteString(manifest.displayName) || undefined,
     description: readSuiteString(manifest.description) || undefined,
     skills,
+    items: [...skills.map(suiteSkillToItem), ...additionalItems],
   };
 }
 
@@ -942,6 +1016,8 @@ function readBuiltinSingleSkillConfig(
         suiteId: suite?.id,
         suiteName: suite?.name,
         suiteDisplayName: suite?.displayName,
+        suiteDescription: suite?.description,
+        suiteItems: suite?.items,
       },
     ];
   } catch {
@@ -997,6 +1073,8 @@ function normalizeSkillList(rawSkills: unknown, builtinSkills: SkillConfig[] = D
         suiteId: typeof item?.suiteId === "string" ? item.suiteId : undefined,
         suiteName: typeof item?.suiteName === "string" ? item.suiteName : undefined,
         suiteDisplayName: typeof item?.suiteDisplayName === "string" ? item.suiteDisplayName : undefined,
+        suiteDescription: typeof item?.suiteDescription === "string" ? item.suiteDescription : undefined,
+        suiteItems: normalizeSkillSuiteItems(item?.suiteItems),
       },
     ];
   });

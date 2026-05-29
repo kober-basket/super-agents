@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { generateConversationTitle } from "../../electron/chat-title-generator";
+import {
+  generateConversationTitle,
+  sanitizeGeneratedConversationTitle,
+} from "../../electron/chat-title-generator";
 import type { ModelRequest } from "../../electron/agent-core";
 
 test("AI conversation title generation uses the model output instead of truncating the first prompt", async () => {
@@ -22,9 +25,37 @@ test("AI conversation title generation uses the model output instead of truncati
     },
   );
 
-  assert.equal(title, "Token refresh fix");
+  assert.equal(title, "Token refresh");
   assert.equal(capturedRequest?.toolChoice, "none");
   assert.deepEqual(capturedRequest?.tools, []);
   assert.match(capturedRequest?.system ?? "", /Return only the title/i);
   assert.notEqual(title, "Please inspect the login flow, che...");
+});
+
+test("AI conversation title generation keeps the saved title within 15 characters", async () => {
+  const title = await generateConversationTitle(
+    {
+      userMessage: "帮我检查模型设置页面里图片识别模型的保存逻辑为什么不生效。",
+      assistantMessage: "我已经定位到配置映射缺失，并修复了保存和恢复流程。",
+    },
+    {
+      stream: async function* () {
+        yield {
+          type: "text_delta",
+          text: "模型设置页面图片识别模型保存逻辑修复和回归验证",
+        };
+        yield { type: "done", stopReason: "stop" };
+      },
+    },
+  );
+
+  assert.equal(title, "模型设置页面图片识别模型保存逻");
+  assert.ok(Array.from(title ?? "").length <= 15);
+});
+
+test("conversation title sanitization truncates by Unicode characters", () => {
+  const title = sanitizeGeneratedConversationTitle("Title: 🚀模型设置页面图片识别模型保存逻辑修复。");
+
+  assert.equal(title, "🚀模型设置页面图片识别模型保存");
+  assert.ok(Array.from(title ?? "").length <= 15);
 });

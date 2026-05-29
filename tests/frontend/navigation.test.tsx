@@ -68,6 +68,88 @@ test("conversation rows swap time for delete in the same action slot on hover", 
   );
 });
 
+test("conversation status dots use blue running green completed red failure and gray idle colors", () => {
+  const html = renderToStaticMarkup(
+    <PrimarySidebar
+      view="chat"
+      conversations={[
+        {
+          id: "conversation-running",
+          title: "运行任务",
+          createdAt: Date.UTC(2026, 4, 17, 8, 0, 0),
+          runStatus: "running",
+        },
+        {
+          id: "conversation-completed",
+          title: "完成任务",
+          createdAt: Date.UTC(2026, 4, 17, 8, 1, 0),
+          runStatus: "completed",
+        },
+        {
+          id: "conversation-read",
+          title: "已读任务",
+          createdAt: Date.UTC(2026, 4, 17, 8, 2, 0),
+          runStatus: "idle",
+        },
+        {
+          id: "conversation-failed",
+          title: "失败任务",
+          createdAt: Date.UTC(2026, 4, 17, 8, 3, 0),
+          runStatus: "failed",
+        },
+      ] as any}
+      activeConversationId={null}
+      onCreateConversation={() => undefined}
+      onDeleteConversation={() => undefined}
+      onOpenConversation={() => undefined}
+      onSetView={() => undefined}
+    />,
+  );
+
+  assert.match(html, /status-running/);
+  assert.match(html, /status-completed/);
+  assert.doesNotMatch(html, /status-needs_attention/);
+  assert.match(html, /status-failed/);
+  assert.match(html, /aria-label="会话状态：执行中"/);
+  assert.match(html, /aria-label="会话状态：已完成"/);
+  assert.match(html, /aria-label="会话状态：空闲"/);
+  assert.match(html, /aria-label="会话状态：执行出错"/);
+
+  const css = readFileSync(path.resolve(process.cwd(), "..", "src/styles.css"), "utf8");
+  assert.match(css, /\.sidebar-conversation-item\.status-running\s+\.sidebar-conversation-dot\s*{[^}]*background:\s*#2563eb/s);
+  assert.match(css, /\.sidebar-conversation-item\.status-completed\s+\.sidebar-conversation-dot\s*{[^}]*background:\s*#12b76a/s);
+  assert.match(css, /\.sidebar-conversation-item\.status-failed\s+\.sidebar-conversation-dot\s*{[^}]*background:\s*#d92d20/s);
+  assert.doesNotMatch(css, /\.sidebar-conversation-item\.active\s+\.sidebar-conversation-dot\s*{[^}]*background:/s);
+  assert.doesNotMatch(css, /\.sidebar-conversation-item\.status-needs_attention/);
+  assert.doesNotMatch(css, /\.sidebar-conversation-item\.status-completed\s+\.sidebar-conversation-dot\s*{[^}]*animation:/s);
+  assert.doesNotMatch(css, /\.sidebar-conversation-item\.status-failed\s+\.sidebar-conversation-dot\s*{[^}]*animation:/s);
+});
+
+test("conversation A turns green after finishing while the user is reading conversation B", () => {
+  const appSource = readFileSync(path.resolve(process.cwd(), "..", "src/App.tsx"), "utf8");
+  const serviceSource = readFileSync(path.resolve(process.cwd(), "..", "electron/conversation-service.ts"), "utf8");
+  const orchestratorSource = readFileSync(path.resolve(process.cwd(), "..", "electron/chat-orchestrator.ts"), "utf8");
+
+  assert.match(serviceSource, /latest_completed_turn_id/);
+  assert.doesNotMatch(serviceSource, /viewed_completed_turn_id/);
+  assert.match(orchestratorSource, /markConversationTurnCompleted\(activeTurn\.conversationId/);
+  assert.match(orchestratorSource, /conversation:\s*completedConversation/);
+  assert.match(appSource, /workspaceClient\s*\.\s*markConversationViewed\(event\.conversationId\)/);
+  assert.match(appSource, /const\s+completedConversation\s*=\s*event\.conversation/);
+  assert.match(appSource, /workspaceClient\s*\.\s*getConversation\(event\.conversationId\)/);
+  assert.match(appSource, /workspaceClient\.markConversationViewed\(conversationId\)/);
+  assert.match(appSource, /const\s+hasCompletion\s*=\s*conversation\.id\s*!==\s*activeConversationId\s*&&\s*Boolean\(conversation\.completedTurnId\)/);
+  assert.match(appSource, /shouldApplyStartedConversationAsActive\(activeConversationIdRef\.current,\s*nextConversationId\)/);
+  assert.doesNotMatch(appSource, /UNREAD_COMPLETED_CONVERSATIONS_STORAGE_KEY/);
+  assert.doesNotMatch(appSource, /unreadCompletedConversations/);
+  assert.doesNotMatch(appSource, /localStorage\.setItem\([^)]*unread-completed-conversations/s);
+  assert.doesNotMatch(appSource, /activeConversation\?\.(?:id|lastMessageAt)/);
+  assert.match(
+    appSource,
+    /resolveSidebarConversationRunStatus\(\s*runtimeState,\s*hasPendingApproval,\s*hasCompletion,\s*\)/s,
+  );
+});
+
 test("primary sidebar leaves browser out of the left navigation", () => {
   const html = renderToStaticMarkup(
     <PrimarySidebar

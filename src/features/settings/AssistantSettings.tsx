@@ -6,9 +6,7 @@ import {
   EyeOff,
   Globe,
   GripVertical,
-  LoaderCircle,
   Plus,
-  RefreshCw,
   Settings2,
   Sparkles,
   Wrench,
@@ -17,17 +15,20 @@ import {
 
 import { compareModelGroupNames, enrichProviderModel } from "../../lib/model-metadata";
 import type { ModelProviderConfig, RuntimeModelOption } from "../../types";
+import { SurfaceSelect, type SurfaceSelectOption } from "../shared/SurfaceSelect";
 import { ProviderModelPickerModal } from "./ProviderModelPickerModal";
 
 interface AssistantSettingsProps {
   activeModel: RuntimeModelOption | null;
   composerModelId: string;
+  fallbackModelId: string;
   modelProviders: ModelProviderConfig[];
   providerRefreshError?: string | null;
   providerRefreshingId: string | null;
   selectedModelProviderId: string;
   selectableModels: RuntimeModelOption[];
   onAddModelProvider: () => void;
+  onFallbackModelChange: (modelId: string) => void;
   onModelChange: (modelId: string) => void;
   onReorderModelProviders: (providerId: string, targetProviderId: string) => void;
   onRefreshProviderModels: (providerId: string) => void | Promise<void>;
@@ -56,12 +57,14 @@ function tagItems(model: EnrichedProviderModel) {
 export function AssistantSettings({
   activeModel,
   composerModelId,
+  fallbackModelId,
   modelProviders,
   providerRefreshError,
   providerRefreshingId,
   selectedModelProviderId,
   selectableModels,
   onAddModelProvider,
+  onFallbackModelChange,
   onModelChange,
   onReorderModelProviders,
   onRefreshProviderModels,
@@ -85,6 +88,33 @@ export function AssistantSettings({
   const currentProviderRefreshing = currentProvider
     ? providerRefreshingId === currentProvider.id
     : false;
+  const fallbackModelAvailable =
+    !fallbackModelId || selectableModels.some((model) => model.id === fallbackModelId);
+  const providerSourceById = useMemo(
+    () =>
+      new Map(
+        modelProviders.map((provider) => [
+          provider.id,
+          provider.system ? ("builtin" as const) : ("custom" as const),
+        ]),
+      ),
+    [modelProviders],
+  );
+  const fallbackModelOptions = useMemo<SurfaceSelectOption[]>(
+    () => [
+      { value: "", label: "不启用" },
+      ...selectableModels.map((model) => {
+        const source = providerSourceById.get(model.providerId) ?? "custom";
+        return {
+          value: model.id,
+          label: model.modelLabel.trim() || model.label,
+          badgeLabel: model.providerName.trim(),
+          badgeTone: source,
+        };
+      }),
+    ],
+    [providerSourceById, selectableModels],
+  );
 
   const currentProviderModels = useMemo(() => {
     if (!currentProvider) return [];
@@ -141,11 +171,34 @@ export function AssistantSettings({
         <div className="settings-stage-heading">
           <h1>模型</h1>
         </div>
-        <button className="secondary-button" onClick={onAddModelProvider}>
-          <Plus size={14} />
-          添加提供商
-        </button>
+        <div className="assistant-settings-actions">
+          <label className="assistant-header-model-select">
+            <span>图片解析模型</span>
+            <SurfaceSelect
+              value={fallbackModelAvailable ? fallbackModelId : ""}
+              options={fallbackModelOptions}
+              onChange={onFallbackModelChange}
+              disabled={selectableModels.length === 0}
+              ariaLabel="图片解析模型"
+              className="assistant-image-model-select"
+              panelClassName="assistant-image-model-select-panel"
+              panelTitle="选择模型"
+              align="right"
+              fullWidth
+              showCheck={false}
+            />
+          </label>
+
+          <button className="secondary-button" onClick={onAddModelProvider}>
+            <Plus size={14} />
+            添加提供商
+          </button>
+        </div>
       </header>
+
+      {fallbackModelId && !fallbackModelAvailable ? (
+        <p className="provider-inline-error assistant-model-setting-error">当前配置不可用，请重新选择。</p>
+      ) : null}
 
       <div className="settings-block">
         {modelProviders.length > 0 ? (
@@ -211,7 +264,14 @@ export function AssistantSettings({
                             <strong>{provider.name}</strong>
                           </div>
                           <div className="provider-nav-meta">
-                            <span className="stack-badge">{provider.system ? "内置" : "自定义"}</span>
+                            <span
+                              className={clsx(
+                                "provider-source-badge",
+                                provider.system ? "builtin" : "custom",
+                              )}
+                            >
+                              {provider.system ? "内置" : "自定义"}
+                            </span>
                             <span className="provider-count-pill">
                               {enabledCount}/{provider.models.length}
                             </span>
@@ -245,33 +305,22 @@ export function AssistantSettings({
                 <div className="provider-detail-head">
                   <div className="provider-detail-copy">
                     <h3>{currentProvider.name}</h3>
-                    {currentProvider.system ? <small>内置提供商，可配置，但不可删除或更名。</small> : null}
+                    {currentProvider.system ? <small>内置提供商，可配置密钥和模型，名称与接口地址不可修改。</small> : null}
                   </div>
 
-                  <div className="mcp-card-actions">
-                    <button
-                      className="ghost-text-button"
-                      onClick={() => void onRefreshProviderModels(currentProvider.id)}
-                      disabled={currentProviderRefreshing}
-                    >
-                      {currentProviderRefreshing ? (
-                        <LoaderCircle size={14} className="spin" />
-                      ) : (
-                        <RefreshCw size={14} />
-                      )}
-                    </button>
-                    <button className="ghost-text-button" onClick={() => setModelPickerOpen(true)} title="管理模型">
-                      <Settings2 size={14} />
-                    </button>
-                    <button
-                      className="ghost-text-button danger"
-                      onClick={() => onRemoveModelProvider(currentProvider.id)}
-                      disabled={currentProvider.system}
-                      title="删除提供商"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
+                  {!currentProvider.system ? (
+                    <div className="provider-detail-actions">
+                      <button
+                        className="secondary-button danger provider-delete-button"
+                        onClick={() => onRemoveModelProvider(currentProvider.id)}
+                        title="删除提供商"
+                        type="button"
+                      >
+                        <X size={14} />
+                        删除提供商
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
 
                 {providerRefreshError ? <p className="provider-inline-error">{providerRefreshError}</p> : null}
@@ -296,6 +345,7 @@ export function AssistantSettings({
                         onChange={(event) =>
                           onUpdateModelProvider(currentProvider.id, { baseUrl: event.target.value })
                         }
+                        disabled={currentProvider.system}
                         placeholder="https://api.example.com/v1"
                       />
                     </label>

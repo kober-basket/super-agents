@@ -50,7 +50,30 @@ interface SkillsViewProps {
   onUpdateInstalledSkill: (skillId: string, patch: Partial<SkillConfig>) => void;
 }
 
-type SkillModalState = { kind: "installed"; skill: InstalledSkillView };
+type SkillListEntry =
+  | { kind: "skill"; id: string; skill: InstalledSkillView }
+  | {
+      kind: "suite";
+      id: string;
+      name: string;
+      displayName: string;
+      description: string;
+      enabled: boolean;
+      system: boolean;
+      skills: InstalledSkillView[];
+      items: SkillSuiteElementView[];
+      representativeSkill: InstalledSkillView;
+    };
+
+type SkillModalState = SkillListEntry;
+
+interface SkillSuiteElementView {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  typeLabel: string;
+}
 
 const SKILL_ACCENTS = [
   "skill-accent-sky",
@@ -106,6 +129,11 @@ export function SkillsView({
 
   useEffect(() => {
     if (!activeSkill) return undefined;
+    if (activeSkill.kind === "suite") {
+      setModalMarkdown("");
+      setModalLoading(false);
+      return undefined;
+    }
 
     let cancelled = false;
 
@@ -241,14 +269,16 @@ export function SkillsView({
               skills={builtinSkills}
               emptyText="没有匹配的内置技能。"
               accentOffset={0}
-              onSelectSkill={(skill) => setActiveSkill({ kind: "installed", skill })}
+              onSelectSkill={setActiveSkill}
+              onUpdateInstalledSkill={onUpdateInstalledSkill}
             />
             <SkillSection
               title="用户安装"
               skills={userSkills}
               emptyText="没有匹配的用户安装技能。"
               accentOffset={builtinSkills.length}
-              onSelectSkill={(skill) => setActiveSkill({ kind: "installed", skill })}
+              onSelectSkill={setActiveSkill}
+              onUpdateInstalledSkill={onUpdateInstalledSkill}
             />
           </>
         ) : (
@@ -276,20 +306,19 @@ export function SkillsView({
           <div className="skill-detail-modal" onClick={(event) => event.stopPropagation()}>
             <div className="skill-detail-head">
               <div className="skill-detail-title-wrap compact">
-                <SkillIcon accent={resolveAccent(activeSkill.skill.name.length)} large skill={activeSkill.skill} />
+                <SkillIcon
+                  accent={resolveAccent(resolveEntryDisplayName(activeSkill).length)}
+                  large
+                  skill={resolveEntryIconSkill(activeSkill)}
+                />
                 <div className="skill-detail-title-copy">
                   <div className="skill-detail-title-row">
-                    <h3>{resolveSkillDisplayName(activeSkill.skill)}</h3>
-                    {activeSkill.kind === "installed" ? (
-                      <>
-                        {activeSkill.skill.system ? <span className="skill-status-chip subtle">内置技能</span> : null}
-                        <span className={clsx("skill-status-chip", activeSkill.skill.enabled ? "enabled" : "disabled")}>
-                          {activeSkill.skill.enabled ? "启用" : "停用"}
-                        </span>
-                      </>
-                    ) : null}
+                    <h3>{resolveEntryDisplayName(activeSkill)}</h3>
+                    <div className="skill-detail-badges">
+                      <span>{resolveEntryScopeLabel(activeSkill)}</span>
+                    </div>
                   </div>
-                  <p>{resolveSkillShortDescription(activeSkill.skill, "暂无描述")}</p>
+                  <p>{resolveEntryDescription(activeSkill)}</p>
                 </div>
               </div>
 
@@ -311,7 +340,22 @@ export function SkillsView({
             </div>
 
             <div className="skill-detail-body">
-              {modalLoading ? (
+              {activeSkill.kind === "suite" ? (
+                <div className="skill-suite-elements">
+                  <h4>包含内容</h4>
+                  <div className="skill-suite-element-list">
+                    {activeSkill.items.map((item) => (
+                      <div className="skill-suite-element-row" key={item.id}>
+                        <span className="skill-suite-element-type">{item.typeLabel}</span>
+                        <div className="skill-suite-element-copy">
+                          <strong>{item.displayName}</strong>
+                          {item.description ? <p>{item.description}</p> : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : modalLoading ? (
                 <div className="skill-detail-loading">
                   <LoaderCircle size={18} className="spin" />
                   <span>正在读取技能内容...</span>
@@ -321,19 +365,8 @@ export function SkillsView({
               )}
             </div>
 
-            <div className="skill-detail-footer">
-              <button
-                className={clsx("toggle-button", activeSkill.skill.enabled && "active")}
-                onClick={() =>
-                  onUpdateInstalledSkill(activeSkill.skill.id, {
-                    enabled: !activeSkill.skill.enabled,
-                  })
-                }
-                type="button"
-              >
-                {activeSkill.skill.enabled ? "停用" : "启用"}
-              </button>
-              {activeSkill.skill.system ? null : (
+            {activeSkill.kind === "skill" && !activeSkill.skill.system ? (
+              <div className="skill-detail-footer">
                 <button
                   className="ghost-text-button danger"
                   onClick={() => void onUninstallSkill(activeSkill.skill)}
@@ -342,8 +375,8 @@ export function SkillsView({
                   <X size={14} />
                   卸载
                 </button>
-              )}
-            </div>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -356,49 +389,60 @@ interface SkillSectionProps {
   skills: InstalledSkillView[];
   emptyText: string;
   accentOffset: number;
-  onSelectSkill: (skill: InstalledSkillView) => void;
+  onSelectSkill: (entry: SkillListEntry) => void;
+  onUpdateInstalledSkill: (skillId: string, patch: Partial<SkillConfig>) => void;
 }
 
-function SkillSection({ title, skills, emptyText, accentOffset, onSelectSkill }: SkillSectionProps) {
+function SkillSection({ title, skills, emptyText, accentOffset, onSelectSkill, onUpdateInstalledSkill }: SkillSectionProps) {
+  const entries = buildSkillListEntries(skills);
+
   return (
     <section className="skills-section">
       <div className="skills-section-head">
         <div>
           <h3>{title}</h3>
         </div>
-        <span className="section-count">{skills.length}</span>
+        <span className="section-count">{entries.length}</span>
       </div>
 
-      {skills.length > 0 ? (
+      {entries.length > 0 ? (
         <div className="skills-list">
-          {skills.map((skill, index) => {
-            const displayName = resolveSkillDisplayName(skill);
-            const description = resolveSkillShortDescription(skill, "暂无描述");
+          {entries.map((entry, index) => {
+            const displayName = resolveEntryDisplayName(entry);
+            const description = resolveEntryDescription(entry);
+            const enabled = resolveEntryEnabled(entry);
             return (
-              <div
-                key={skill.id}
-                className="skill-list-row skill-tile"
-                onClick={() => onSelectSkill(skill)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onSelectSkill(skill);
-                  }
-                }}
-                role="button"
-                tabIndex={0}
-              >
-                <SkillIcon accent={resolveAccent(accentOffset + index)} skill={skill} />
-                <div className="skill-tile-copy">
-                  <strong title={displayName}>{displayName}</strong>
-                  <p title={description}>
-                    {compactSkillDescription(description, "暂无描述")}
-                  </p>
-                </div>
-                <div className="skill-tile-status">
-                  <span className={clsx("skill-status-chip", skill.enabled ? "enabled" : "disabled")}>
-                    {skill.enabled ? "启用" : "停用"}
+              <div key={entry.id} className={clsx("skill-list-row skill-tile", entry.kind === "suite" && "suite")}>
+                <button className="skill-row-open" onClick={() => onSelectSkill(entry)} type="button">
+                  <SkillIcon accent={resolveAccent(accentOffset + index)} skill={resolveEntryIconSkill(entry)} />
+                  <span className="skill-tile-copy">
+                    <span className="skill-entry-title-line">
+                      <strong title={displayName}>{displayName}</strong>
+                      {entry.kind === "suite" ? <span className="skill-entry-title-badge">套件</span> : null}
+                    </span>
+                    <span className="skill-tile-description" title={description}>
+                      {compactSkillDescription(description, "暂无描述")}
+                    </span>
                   </span>
+                </button>
+                <div className="skill-tile-status">
+                  <button
+                    aria-checked={enabled}
+                    aria-label={`${enabled ? "停用" : "启用"} ${displayName}`}
+                    className={clsx("skill-enable-switch", enabled && "active")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onUpdateInstalledSkill(entry.id, { enabled: !enabled });
+                    }}
+                    onKeyDown={(event) => event.stopPropagation()}
+                    role="switch"
+                    title={`${enabled ? "停用" : "启用"} ${displayName}`}
+                    type="button"
+                  >
+                    <span aria-hidden="true" className="skill-enable-switch-track">
+                      <span className="skill-enable-switch-thumb" />
+                    </span>
+                  </button>
                 </div>
               </div>
             );
@@ -411,6 +455,87 @@ function SkillSection({ title, skills, emptyText, accentOffset, onSelectSkill }:
       )}
     </section>
   );
+}
+
+function buildSkillListEntries(skills: InstalledSkillView[]): SkillListEntry[] {
+  const entries: SkillListEntry[] = [];
+  const suiteEntries = new Map<string, Extract<SkillListEntry, { kind: "suite" }>>();
+
+  for (const skill of skills) {
+    if (!skill.suiteId) {
+      entries.push({ kind: "skill", id: skill.id, skill });
+      continue;
+    }
+
+    const existing = suiteEntries.get(skill.suiteId);
+    if (existing) {
+      existing.skills.push(skill);
+      existing.enabled = existing.skills.every((item) => item.enabled);
+      existing.items = resolveSuiteItems(existing.skills);
+      continue;
+    }
+
+    const suiteEntry: Extract<SkillListEntry, { kind: "suite" }> = {
+      kind: "suite",
+      id: skill.suiteId,
+      name: skill.suiteName || skill.suiteId,
+      displayName: skill.suiteDisplayName || skill.suiteName || skill.suiteId,
+      description: skill.suiteDescription || skill.description || "套件",
+      enabled: skill.enabled,
+      system: skill.system === true,
+      skills: [skill],
+      items: resolveSuiteItems([skill]),
+      representativeSkill: skill,
+    };
+    suiteEntries.set(skill.suiteId, suiteEntry);
+    entries.push(suiteEntry);
+  }
+
+  return entries;
+}
+
+function resolveSuiteItems(skills: InstalledSkillView[]): SkillSuiteElementView[] {
+  const metadataItems = skills.find((skill) => skill.suiteItems?.length)?.suiteItems;
+  if (metadataItems?.length) {
+    return metadataItems.map((item) => ({
+      id: item.id,
+      name: item.name,
+      displayName: item.displayName || item.name,
+      description: item.shortDescription || item.description || "",
+      typeLabel: item.typeLabel || (item.type === "skill" ? "技能" : "元素"),
+    }));
+  }
+
+  return skills.map((skill) => ({
+    id: skill.id,
+    name: skill.name,
+    displayName: resolveSkillDisplayName(skill),
+    description: resolveSkillShortDescription(skill, ""),
+    typeLabel: "技能",
+  }));
+}
+
+function resolveEntryDisplayName(entry: SkillListEntry) {
+  return entry.kind === "suite" ? entry.displayName : resolveSkillDisplayName(entry.skill);
+}
+
+function resolveEntryDescription(entry: SkillListEntry) {
+  return entry.kind === "suite"
+    ? entry.description
+    : resolveSkillShortDescription(entry.skill, "暂无描述");
+}
+
+function resolveEntryEnabled(entry: SkillListEntry) {
+  return entry.kind === "suite" ? entry.enabled : entry.skill.enabled;
+}
+
+function resolveEntryScopeLabel(entry: SkillListEntry) {
+  const system = entry.kind === "suite" ? entry.system : entry.skill.system === true;
+  return system ? "内置" : "用户";
+}
+
+function resolveEntryIconSkill(entry: SkillListEntry) {
+  return entry.kind === "suite" ? entry.representativeSkill : entry.skill;
 }
 
 function SkillIcon({ accent, large = false, skill }: { accent: SkillAccent; large?: boolean; skill: SkillConfig }) {
@@ -473,10 +598,14 @@ function appendSkillFilePath(sourcePath: string) {
 }
 
 function resolveSkillFolderPath(activeSkill: SkillModalState) {
-  return activeSkill.skill.sourcePath?.trim() || "";
+  return activeSkill.kind === "skill" ? activeSkill.skill.sourcePath?.trim() || "" : "";
 }
 
 async function resolveSkillMarkdown(activeSkill: SkillModalState) {
+  if (activeSkill.kind === "suite") {
+    return "";
+  }
+
   if (activeSkill.skill.sourcePath) {
     const preview = await workspaceClient.readPreview({
       path: appendSkillFilePath(activeSkill.skill.sourcePath),
@@ -510,6 +639,10 @@ async function resolveSkillMarkdown(activeSkill: SkillModalState) {
 }
 
 function fallbackMarkdown(activeSkill: SkillModalState) {
+  if (activeSkill.kind === "suite") {
+    return "";
+  }
+
   return [
     `# ${resolveSkillDisplayName(activeSkill.skill)}`,
     "",

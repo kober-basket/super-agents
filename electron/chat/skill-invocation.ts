@@ -69,12 +69,22 @@ export function parseSkillInvocation(content: string): ParsedSkillInvocation | n
 
 export function findEnabledSkill(config: AppConfig, name: string) {
   const target = normalizeSkillKey(name);
-  return config.skills.find((skill) => {
+  const directSkill = config.skills.find((skill) => {
     if (!skill.enabled || skill.kind !== "command") {
       return false;
     }
     return normalizeSkillKey(skill.id) === target || normalizeSkillKey(skill.name) === target;
-  }) ?? null;
+  });
+
+  if (directSkill) {
+    return directSkill;
+  }
+
+  const suite = getEnabledSkillSuites(config.skills).find((entry) =>
+    entry.keys.some((key) => normalizeSkillKey(key) === target),
+  );
+
+  return suite ? createSuiteSkillConfig(suite.skills) : null;
 }
 
 export function buildLoadedSkillContent(
@@ -110,6 +120,13 @@ export function buildSkillIndexPrompt(config: AppConfig) {
     return "";
   }
 
+  const suiteLines = getEnabledSkillSuites(enabledSkills).map((entry) => {
+    const firstSkill = entry.skills[0];
+    const suiteName = firstSkill.suiteName || firstSkill.suiteId || firstSkill.suiteDisplayName || "skill-suite";
+    const suiteDescription = firstSkill.suiteDescription || firstSkill.suiteDisplayName || "Skill suite";
+    const includes = entry.skills.map((skill) => skill.name).join(", ");
+    return `- ${suiteName} (suite): ${suiteDescription}\n  Includes: ${includes}`;
+  });
   const lines = enabledSkills.map((skill) => {
     const suffix = skill.sourcePath?.trim() ? `\n  Skill directory: ${skill.sourcePath.trim()}` : "";
     return `- ${skill.name}: ${skill.description || "No description"}${suffix}`;
@@ -121,6 +138,69 @@ export function buildSkillIndexPrompt(config: AppConfig) {
     "If the user mentions one or more skills with `$skill-name` or inline skill chips, that is an explicit request to use those skills.",
     "The list below is an index only; the full skill content is loaded on demand.",
     "",
+    ...suiteLines,
     ...lines,
   ].join("\n");
+}
+
+function getEnabledSkillSuites(skills: SkillConfig[]) {
+  const suites = new Map<string, SkillConfig[]>();
+
+  for (const skill of skills) {
+    if (!skill.enabled || skill.kind !== "command" || !skill.suiteId) {
+      continue;
+    }
+    const current = suites.get(skill.suiteId) ?? [];
+    current.push(skill);
+    suites.set(skill.suiteId, current);
+  }
+
+  return [...suites.entries()].map(([suiteId, suiteSkills]) => {
+    const firstSkill = suiteSkills[0];
+    return {
+      suiteId,
+      skills: suiteSkills,
+      keys: [
+        suiteId,
+        firstSkill?.suiteName,
+        firstSkill?.suiteDisplayName,
+      ].filter((value): value is string => Boolean(value)),
+    };
+  });
+}
+
+function createSuiteSkillConfig(skills: SkillConfig[]): SkillConfig {
+  const firstSkill = skills[0];
+  const suiteId = firstSkill?.suiteId || "skill-suite";
+  const suiteName = firstSkill?.suiteName || suiteId;
+  const suiteDisplayName = firstSkill?.suiteDisplayName;
+  const suiteDescription = firstSkill?.suiteDescription || suiteDisplayName || "Skill suite";
+  const command = skills.map((skill) => [
+    `# Skill: ${skill.name}`,
+    skill.description ? `Description: ${skill.description}` : "",
+    skill.sourcePath?.trim() ? `Base directory for this skill: ${skill.sourcePath.trim()}` : "",
+    skill.sourcePath?.trim()
+      ? "Relative paths in this skill are resolved from the base directory above."
+      : "",
+    "<skill_content>",
+    skill.command.trim(),
+    "</skill_content>",
+  ].filter(Boolean).join("\n\n")).join("\n\n---\n\n");
+
+  return {
+    id: suiteId,
+    name: suiteName,
+    description: suiteDescription,
+    displayName: suiteDisplayName,
+    shortDescription: suiteDescription,
+    kind: "command",
+    command,
+    enabled: true,
+    system: firstSkill?.system,
+    suiteId,
+    suiteName,
+    suiteDisplayName,
+    suiteDescription,
+    suiteItems: firstSkill?.suiteItems,
+  };
 }

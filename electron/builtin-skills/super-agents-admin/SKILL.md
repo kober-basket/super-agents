@@ -83,9 +83,10 @@ Add another model to an existing provider:
 super-agents --json model add --provider openrouter --id "anthropic/claude-sonnet-4.5" --label "Claude Sonnet 4.5"
 ```
 
-Enable or disable full filesystem access:
+Set the global permission mode:
 
 ```bash
+super-agents --json permission mode smart-review
 super-agents --json permission full-access on
 super-agents --json permission full-access off
 ```

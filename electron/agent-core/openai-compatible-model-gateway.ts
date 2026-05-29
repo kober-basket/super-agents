@@ -241,7 +241,7 @@ function createImageContentParts(text: string, images: ModelImageAttachment[]) {
 }
 
 function appendImagesToLatestUserMessage(
-  messages: ReturnType<typeof mapAgentMessageToOpenAIMessage>[],
+  messages: Array<Record<string, unknown>>,
   images: ModelImageAttachment[],
 ) {
   if (images.length === 0) {
@@ -263,7 +263,7 @@ function appendImagesToLatestUserMessage(
 }
 
 function appendImageRecognitionContext(
-  messages: ReturnType<typeof mapAgentMessageToOpenAIMessage>[],
+  messages: Array<Record<string, unknown>>,
   recognitionText: string,
 ) {
   const next = messages.map((message) => ({ ...message })) as Array<Record<string, unknown>>;
@@ -276,7 +276,7 @@ function appendImageRecognitionContext(
     message.content = [
       content,
       "",
-      "图片识别结果（由设置里的智能识图模型生成，仅用于补充图片内容；当前任务仍由当前会话模型处理）：",
+      "图片解析结果（由设置里的图片解析模型生成，仅用于补充图片内容；当前任务仍由当前会话模型处理）：",
       recognitionText.trim(),
     ].join("\n");
     return next;
@@ -287,11 +287,15 @@ function appendImageRecognitionContext(
     {
       role: "user",
       content: [
-        "图片识别结果（由设置里的智能识图模型生成，仅用于补充图片内容；当前任务仍由当前会话模型处理）：",
+        "图片解析结果（由设置里的图片解析模型生成，仅用于补充图片内容；当前任务仍由当前会话模型处理）：",
         recognitionText.trim(),
       ].join("\n"),
     },
   ];
+}
+
+function modelSupportsImageInput(model: RuntimeModel) {
+  return model.capabilities?.vision === true;
 }
 
 function shouldUseImageRecognitionFallback(status: number, errorText: string) {
@@ -1050,12 +1054,12 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
 
     const fallbackModelId = config.imageRecognition?.fallbackModelId?.trim();
     if (!fallbackModelId) {
-      throw new Error("当前模型不支持识图，请在设置 > 智能识图中选择一个模型。");
+      throw new Error("当前模型不支持图片输入，且图片解析模型未启用，无法使用兜底解析图片。");
     }
 
     const fallbackModel = this.resolveModel(config, fallbackModelId);
     if (!fallbackModel || fallbackModel.enabled === false) {
-      throw new Error("智能识图模型不可用，请在设置 > 智能识图中重新选择一个已启用模型。");
+      throw new Error("图片解析模型不可用，请在设置 > 模型中重新选择一个已启用模型。");
     }
 
     const fallbackProvider = this.resolveProvider(config, fallbackModel);
@@ -1066,7 +1070,7 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
       messages: [
         {
           role: "system",
-          content: "你是智能识图模块。只识别图片内容并输出客观中文描述，不要直接完成用户任务。",
+          content: "你是图片解析模块。只识别图片内容并输出客观中文描述，不要直接完成用户任务。",
         },
         {
           role: "user",
@@ -1083,7 +1087,7 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
 
     const { response, errorText } = await this.requestWithCompatibilityRetries(fallbackProvider!, body);
     if (!response.ok || !response.body) {
-      throw new Error(`智能识图模型请求失败（${response.status}）：${errorText || response.statusText}`);
+      throw new Error(`图片解析模型请求失败（${response.status}）：${errorText || response.statusText}`);
     }
 
     const reader = response.body.getReader();
@@ -1117,7 +1121,7 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
 
     const trimmed = text.trim();
     if (!trimmed) {
-      throw new Error("智能识图模型没有返回可用的图片识别结果。");
+      throw new Error("图片解析模型没有返回可用的图片解析结果。");
     }
     this.imageRecognitionCache.set(cacheKey, trimmed);
     return { text: trimmed, usages };
@@ -1132,10 +1136,20 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
 
     const provider = this.resolveProvider(config, activeModel);
     this.assertProviderReady(provider, activeModel);
-    const mappedMessages = input.messages.map(mapAgentMessageToOpenAIMessage);
-    const messages = hasImageAttachments(input)
-      ? appendImagesToLatestUserMessage(mappedMessages, input.imageAttachments ?? [])
-      : mappedMessages;
+    const mappedMessages = input.messages.map(mapAgentMessageToOpenAIMessage) as Array<Record<string, unknown>>;
+    const hasImages = hasImageAttachments(input);
+    const activeModelSupportsImages = modelSupportsImageInput(activeModel);
+    let messages = mappedMessages;
+
+    if (hasImages && !activeModelSupportsImages) {
+      const recognition = await this.recognizeImages(config, input);
+      for (const usage of recognition.usages) {
+        yield usage;
+      }
+      messages = appendImageRecognitionContext(mappedMessages, recognition.text);
+    } else if (hasImages) {
+      messages = appendImagesToLatestUserMessage(mappedMessages, input.imageAttachments ?? []);
+    }
 
     const body: Record<string, unknown> = {
       model: activeModel.modelId || input.model,
@@ -1165,7 +1179,7 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
       await this.requestWithCompatibilityRetries(provider!, requestBody);
     requestBody = sentRequestBody;
 
-    if (!response.ok && hasImageAttachments(input) && shouldUseImageRecognitionFallback(response.status, errorText)) {
+    if (!response.ok && hasImages && activeModelSupportsImages && shouldUseImageRecognitionFallback(response.status, errorText)) {
       const recognition = await this.recognizeImages(config, input);
       for (const usage of recognition.usages) {
         yield usage;

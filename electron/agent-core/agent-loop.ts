@@ -15,6 +15,7 @@ import type {
   ToolApprovalRequest,
   ToolOutputDelta,
   ToolResult,
+  RuntimePermissionMode,
 } from "./types";
 
 const MAX_TOOL_RESULT_CHARS = 30_000;
@@ -38,6 +39,7 @@ type SendTurnInput = {
   workspacePrompt?: string;
   workspaceRoot?: string;
   fullFileSystemAccess?: boolean;
+  runtimePermissionMode?: RuntimePermissionMode;
   imageAttachments?: ModelImageAttachment[];
 };
 
@@ -817,6 +819,7 @@ export class AgentCore {
           toolCall,
           toolCallsThisTurn: toolCallsThisStep,
           fullFileSystemAccess: input.fullFileSystemAccess === true,
+          runtimePermissionMode: input.runtimePermissionMode,
         });
 
         if (decision.type === "deny") {

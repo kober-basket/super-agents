@@ -41,7 +41,8 @@ const EMPTY_CONFIG: AppConfig = {
     chunkOverlap: 160,
   },
   security: {
-    fullFileSystemAccess: true,
+    permissionMode: "smart-review",
+    fullFileSystemAccess: false,
   },
   remoteControl: {
     dingtalk: {

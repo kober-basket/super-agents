@@ -11,7 +11,7 @@ function readRepoFile(relativePath: string) {
 }
 
 test("scheduled config edits update local controlled inputs before deferred persistence", () => {
-  const source = readRepoFile("src/features/workspace/useWorkspaceController.ts");
+  const source = readRepoFile("src/features/workspace/useWorkspaceController.ts").replace(/\r\n/g, "\n");
   const match = source.match(
     /function scheduleConfigPersist\(nextConfig: AppConfig\) \{([\s\S]*?)\n  \}\n\n  function updateConfigField/,
   );

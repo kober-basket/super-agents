@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "id": "superpowers",
+  "name": "superpowers",
+  "displayName": "Superpowers",
+  "description": "系统化规划、调试、测试、评审与交付流程技能集合",
+  "skills": [
+    {
+      "path": "skills/brainstorming",
+      "name": "brainstorming",
+      "displayName": "Superpowers：需求与方案澄清",
+      "description": "在实现前澄清目标、约束和设计方案",
+      "shortDescription": "在实现前澄清目标、约束和设计方案",
+      "defaultPrompt": "Use $brainstorming to explore intent, requirements, and design before implementation.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/dispatching-parallel-agents",
+      "name": "dispatching-parallel-agents",
+      "displayName": "Superpowers：并行代理调度",
+      "description": "把独立任务分派给多个代理并汇总结果",
+      "shortDescription": "把独立任务分派给多个代理并汇总结果",
+      "defaultPrompt": "Use $dispatching-parallel-agents when independent tasks can be delegated in parallel.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/executing-plans",
+      "name": "executing-plans",
+      "displayName": "Superpowers：执行计划",
+      "description": "按已批准计划推进实现并保留检查点",
+      "shortDescription": "按已批准计划推进实现并保留检查点",
+      "defaultPrompt": "Use $executing-plans to execute a written implementation plan.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/finishing-a-development-branch",
+      "name": "finishing-a-development-branch",
+      "displayName": "Superpowers：完成开发分支",
+      "description": "在验证通过后整理合并、PR 或收尾选项",
+      "shortDescription": "在验证通过后整理合并、PR 或收尾选项",
+      "defaultPrompt": "Use $finishing-a-development-branch when implementation is verified and ready to integrate.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/receiving-code-review",
+      "name": "receiving-code-review",
+      "displayName": "Superpowers：处理代码评审",
+      "description": "严谨核实评审意见并实现必要修改",
+      "shortDescription": "严谨核实评审意见并实现必要修改",
+      "defaultPrompt": "Use $receiving-code-review when responding to code review feedback.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/requesting-code-review",
+      "name": "requesting-code-review",
+      "displayName": "Superpowers：请求代码评审",
+      "description": "在重要实现完成后组织代码评审",
+      "shortDescription": "在重要实现完成后组织代码评审",
+      "defaultPrompt": "Use $requesting-code-review when implementation is complete and needs review.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/subagent-driven-development",
+      "name": "subagent-driven-development",
+      "displayName": "Superpowers：子代理开发",
+      "description": "用子代理并行推进实现、检查和质量评审",
+      "shortDescription": "用子代理并行推进实现、检查和质量评审",
+      "defaultPrompt": "Use $subagent-driven-development to execute plans with independent subagent work.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/systematic-debugging",
+      "name": "systematic-debugging",
+      "displayName": "Superpowers：系统化调试",
+      "description": "先定位根因，再以最小改动修复问题",
+      "shortDescription": "先定位根因，再以最小改动修复问题",
+      "defaultPrompt": "Use $systematic-debugging when a bug, test failure, or unexpected behavior appears.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/test-driven-development",
+      "name": "test-driven-development",
+      "displayName": "Superpowers：测试驱动开发",
+      "description": "用先失败再实现的测试驱动功能和修复",
+      "shortDescription": "用先失败再实现的测试驱动功能和修复",
+      "defaultPrompt": "Use $test-driven-development when implementing a feature or bug fix.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/using-git-worktrees",
+      "name": "using-git-worktrees",
+      "displayName": "Superpowers：Git Worktree 隔离",
+      "description": "为功能工作创建隔离工作区",
+      "shortDescription": "为功能工作创建隔离工作区",
+      "defaultPrompt": "Use $using-git-worktrees when starting feature work that needs isolation.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/using-superpowers",
+      "name": "using-superpowers",
+      "displayName": "Superpowers：技能使用规则",
+      "description": "判断何时以及如何使用 Superpowers 技能",
+      "shortDescription": "判断何时以及如何使用 Superpowers 技能",
+      "defaultPrompt": "Use $using-superpowers to establish how and when to use Superpowers skills.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/verification-before-completion",
+      "name": "verification-before-completion",
+      "displayName": "Superpowers：完成前验证",
+      "description": "在声明完成前运行 fresh verification",
+      "shortDescription": "在声明完成前运行 fresh verification",
+      "defaultPrompt": "Use $verification-before-completion before claiming work is complete or passing.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/writing-plans",
+      "name": "writing-plans",
+      "displayName": "Superpowers：编写实施计划",
+      "description": "把已批准方案拆成可执行实施计划",
+      "shortDescription": "把已批准方案拆成可执行实施计划",
+      "defaultPrompt": "Use $writing-plans to create an implementation plan from approved requirements.",
+      "allowImplicitInvocation": true
+    },
+    {
+      "path": "skills/writing-skills",
+      "name": "writing-skills",
+      "displayName": "Superpowers：编写技能",
+      "description": "创建、测试和发布高质量技能",
+      "shortDescription": "创建、测试和发布高质量技能",
+      "defaultPrompt": "Use $writing-skills when creating or editing skills.",
+      "allowImplicitInvocation": true
+    }
+  ]
+}

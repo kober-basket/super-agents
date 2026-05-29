@@ -6,6 +6,8 @@ export interface SurfaceSelectOption {
   value: string;
   label: string;
   description?: string;
+  badgeLabel?: string;
+  badgeTone?: "builtin" | "custom" | "neutral";
   disabled?: boolean;
 }
 
@@ -20,8 +22,10 @@ interface SurfaceSelectProps {
   className?: string;
   triggerClassName?: string;
   panelClassName?: string;
+  panelTitle?: string;
   listClassName?: string;
   optionClassName?: string;
+  showCheck?: boolean;
   align?: "left" | "right";
   fullWidth?: boolean;
 }
@@ -37,8 +41,10 @@ export function SurfaceSelect({
   className,
   triggerClassName,
   panelClassName,
+  panelTitle,
   listClassName,
   optionClassName,
+  showCheck = true,
   align = "left",
   fullWidth = false,
 }: SurfaceSelectProps) {
@@ -109,6 +115,11 @@ export function SurfaceSelect({
 
       {open ? (
         <div className={clsx("surface-select-panel", align === "right" && "align-right", panelClassName)}>
+          {panelTitle ? (
+            <div className="surface-select-panel-head">
+              <strong>{panelTitle}</strong>
+            </div>
+          ) : null}
           <div aria-label={ariaLabel} className={clsx("surface-select-list", listClassName)} id={listboxId} role="listbox">
             {options.map((option) => {
               const selected = option.value === selectedOption?.value;
@@ -135,8 +146,17 @@ export function SurfaceSelect({
                     <strong title={option.label}>{option.label}</strong>
                     {option.description ? <span>{option.description}</span> : null}
                   </span>
-                  <span className={clsx("surface-select-check", selected && "selected")}>
-                    <Check size={13} />
+                  <span className="surface-select-option-aside">
+                    {option.badgeLabel ? (
+                      <span className={clsx("surface-select-option-badge", option.badgeTone ?? "neutral")}>
+                        {option.badgeLabel}
+                      </span>
+                    ) : null}
+                    {showCheck ? (
+                      <span className={clsx("surface-select-check", selected && "selected")}>
+                        <Check size={13} />
+                      </span>
+                    ) : null}
                   </span>
                 </button>
               );

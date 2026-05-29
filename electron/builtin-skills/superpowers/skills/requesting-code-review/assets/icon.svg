@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Superpowers">
+  <defs>
+    <linearGradient id="bg" x1="10" y1="8" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C3AED"/>
+      <stop offset="0.58" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="20" y1="16" x2="44" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#C7F9FF"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="17" fill="url(#bg)"/>
+  <path d="M33.5 10.5 38 25.4l15.5 4.9L38 35.2 33.5 50 29 35.2l-15.5-4.9L29 25.4l4.5-14.9Z" fill="url(#spark)"/>
+  <path d="M47.5 10.5 49.9 18l7.6 2.5-7.6 2.4-2.4 7.6-2.4-7.6-7.6-2.4 7.6-2.5 2.4-7.5Z" fill="#D9FFF8" opacity=".92"/>
+  <path d="M17 42.5 19 49l6.5 2-6.5 2-2 6.5-2-6.5-6.5-2 6.5-2 2-6.5Z" fill="#FFFFFF" opacity=".88"/>
+</svg>

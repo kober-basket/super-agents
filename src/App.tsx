@@ -37,6 +37,11 @@ import type {
 } from "./types";
 import { workspaceClient } from "./services/workspace-client";
 import { PrimarySidebar } from "./features/navigation/PrimarySidebar";
+import {
+  isConversationTurnActive,
+  resolveSidebarConversationRunStatus,
+  shouldApplyStartedConversationAsActive,
+} from "./features/navigation/conversation-status";
 import { AppTitleBar } from "./features/navigation/AppTitleBar";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
@@ -118,10 +123,6 @@ const loadAssistantSettings = async () => {
   const module = await import("./features/settings/AssistantSettings");
   return { default: module.AssistantSettings };
 };
-const loadImageRecognitionSettings = async () => {
-  const module = await import("./features/settings/ImageRecognitionSettings");
-  return { default: module.ImageRecognitionSettings };
-};
 const loadAppearanceSettings = async () => {
   const module = await import("./features/settings/AppearanceSettings");
   return { default: module.AppearanceSettings };
@@ -129,10 +130,6 @@ const loadAppearanceSettings = async () => {
 const loadRemoteControlSettings = async () => {
   const module = await import("./features/settings/RemoteControlSettings");
   return { default: module.RemoteControlSettings };
-};
-const loadPermissionsSettings = async () => {
-  const module = await import("./features/settings/PermissionsSettings");
-  return { default: module.PermissionsSettings };
 };
 const loadMailSettings = async () => {
   const module = await import("./features/settings/MailSettings");
@@ -145,10 +142,8 @@ const ToolsView = lazy(loadToolsView);
 const MemoryView = lazy(loadMemoryView);
 const KnowledgeView = lazy(loadKnowledgeView);
 const AssistantSettings = lazy(loadAssistantSettings);
-const ImageRecognitionSettings = lazy(loadImageRecognitionSettings);
 const AppearanceSettings = lazy(loadAppearanceSettings);
 const RemoteControlSettings = lazy(loadRemoteControlSettings);
-const PermissionsSettings = lazy(loadPermissionsSettings);
 const MailSettings = lazy(loadMailSettings);
 
 function preloadLazyViews() {
@@ -158,10 +153,8 @@ function preloadLazyViews() {
   void loadMemoryView();
   void loadKnowledgeView();
   void loadAssistantSettings();
-  void loadImageRecognitionSettings();
   void loadAppearanceSettings();
   void loadRemoteControlSettings();
-  void loadPermissionsSettings();
   void loadMailSettings();
 }
 
@@ -316,10 +309,6 @@ function createConversationRuntimeState(
   return createEmptyConversationRuntimeState(status);
 }
 
-function isConversationTurnActive(status?: ChatConversationRuntimeState["status"]) {
-  return status === "running" || status === "cancelling";
-}
-
 function preserveActiveTurnStatus(status?: ChatConversationRuntimeState["status"]) {
   return status === "cancelling" ? "cancelling" : "running";
 }
@@ -429,6 +418,7 @@ export default function App() {
   const [conversationRuntimeStates, setConversationRuntimeStates] = useState<
     Record<string, ChatConversationRuntimeState>
   >({});
+  const activeConversationIdRef = useRef<string | null>(null);
   const streamingPreviewByMessageRef = useRef<Record<string, string>>({});
   const [startingChatTurn, setStartingChatTurn] = useState(false);
   const chatTurnStartInFlightRef = useRef(false);
@@ -537,6 +527,16 @@ export default function App() {
           skill.description,
           skill.displayName,
           skill.shortDescription,
+          skill.suiteName,
+          skill.suiteDisplayName,
+          skill.suiteDescription,
+          ...(skill.suiteItems ?? []).flatMap((item) => [
+            item.name,
+            item.displayName,
+            item.description,
+            item.shortDescription,
+            item.typeLabel,
+          ]),
           skill.location,
         ]),
       ),
@@ -649,6 +649,10 @@ export default function App() {
       String(clamp(previewPaneWidth, PREVIEW_PANE_MIN_WIDTH, PREVIEW_PANE_MAX_WIDTH)),
     );
   }, [previewPaneWidth]);
+
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
 
   useEffect(() => {
     const browserTab = rightTabs.find(
@@ -831,6 +835,7 @@ export default function App() {
       selectedKnowledgeBaseIds: conversation.selectedKnowledgeBaseIds,
       agentCore: conversation.agentCore,
       agentSessionId: conversation.agentSessionId,
+      completedTurnId: conversation.completedTurnId,
     };
   }
 
@@ -847,9 +852,25 @@ export default function App() {
     conversation: ChatConversation,
     options?: UpsertConversationSummaryOptions,
   ) {
+    activeConversationIdRef.current = conversation.id;
     setActiveConversation(conversation);
     setActiveConversationId(conversation.id);
     upsertConversationSummary(toConversationSummary(conversation), options);
+  }
+
+  function clearConversationCompletion(conversationId: string) {
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId
+          ? { ...conversation, completedTurnId: undefined }
+          : conversation,
+      ),
+    );
+    setActiveConversation((current) =>
+      current?.id === conversationId
+        ? { ...current, completedTurnId: undefined }
+        : current,
+    );
   }
 
   useEffect(() => {
@@ -947,7 +968,6 @@ export default function App() {
             ...current,
             messages: nextMessages,
             updatedAt: now,
-            lastMessageAt: now,
             preview: preview || current.preview,
           };
         });
@@ -960,11 +980,9 @@ export default function App() {
                     ...conversation,
                     preview: preview || conversation.preview,
                     updatedAt: now,
-                    lastMessageAt: now,
                   }
                 : conversation,
-            )
-            .sort((left, right) => right.lastMessageAt - left.lastMessageAt || right.createdAt - left.createdAt),
+            ),
         );
 
         return;
@@ -995,7 +1013,6 @@ export default function App() {
             ...current,
             messages: nextMessages,
             updatedAt: now,
-            lastMessageAt: now,
             preview: nextMessages[nextMessages.length - 1]?.content ?? current.preview,
           };
         });
@@ -1008,11 +1025,9 @@ export default function App() {
                     ...conversation,
                     preview: streamingPreview,
                     updatedAt: now,
-                    lastMessageAt: now,
                   }
                 : conversation,
-            )
-            .sort((left, right) => right.lastMessageAt - left.lastMessageAt || right.createdAt - left.createdAt),
+            ),
         );
 
         setConversationRuntimeStates((current) => {
@@ -1236,6 +1251,10 @@ export default function App() {
       }
 
       if (event.type === "turn_finished") {
+        const normalizedStopReason = normalizeTurnStopReason(
+          event.stopReason,
+          conversationRuntimeStates[event.conversationId]?.status,
+        );
         setConversationRuntimeStates((current) => {
           const previous = current[event.conversationId] ?? createConversationRuntimeState();
           return {
@@ -1248,6 +1267,40 @@ export default function App() {
             },
           };
         });
+        if (normalizedStopReason !== "cancelled") {
+          if (activeConversationIdRef.current === event.conversationId) {
+            clearConversationCompletion(event.conversationId);
+            void workspaceClient
+              .markConversationViewed(event.conversationId)
+              .catch(() => undefined);
+            return;
+          }
+
+          const completedConversation = event.conversation;
+          if (completedConversation) {
+            upsertConversationSummary(toConversationSummary(completedConversation));
+            setActiveConversation((current) =>
+              current?.id === completedConversation.id ? completedConversation : current,
+            );
+          } else {
+            setConversations((current) =>
+              current.map((conversation) =>
+                conversation.id === event.conversationId
+                  ? { ...conversation, completedTurnId: event.turnId }
+                  : conversation,
+              ),
+            );
+            void workspaceClient
+              .getConversation(event.conversationId)
+              .then((conversation) => {
+                upsertConversationSummary(toConversationSummary(conversation));
+                setActiveConversation((current) =>
+                  current?.id === conversation.id ? conversation : current,
+                );
+              })
+              .catch(() => undefined);
+          }
+        }
         return;
       }
 
@@ -1303,7 +1356,9 @@ export default function App() {
   }
 
   function updateInstalledSkill(skillId: string, patch: Partial<SkillConfig>) {
-    const skills = config.skills.map((item) => (item.id === skillId ? { ...item, ...patch } : item));
+    const skills = config.skills.map((item) =>
+      item.id === skillId || item.suiteId === skillId ? { ...item, ...patch } : item,
+    );
     void commitConfig({ ...cloneConfig(config), skills });
   }
 
@@ -2192,6 +2247,7 @@ export default function App() {
 
   function createDraftConversation() {
     setView("chat");
+    activeConversationIdRef.current = null;
     setActiveConversation(null);
     setActiveConversationId(null);
     setDraftMessage("");
@@ -2202,6 +2258,7 @@ export default function App() {
 
   async function openConversation(conversationId: string) {
     setView("chat");
+    activeConversationIdRef.current = conversationId;
     setActiveConversationId(conversationId);
     setDraftMessage("");
     setDraftConversationWorkspaceRoot("");
@@ -2209,7 +2266,7 @@ export default function App() {
     setActiveConversation(null);
 
     try {
-      const conversation = await workspaceClient.getConversation(conversationId);
+      const conversation = await workspaceClient.markConversationViewed(conversationId);
       syncConversationState(conversation);
     } catch (error) {
       if (isConversationNotFoundError(error)) {
@@ -2224,6 +2281,7 @@ export default function App() {
       } else {
         setToast(error instanceof Error ? error.message : "加载会话失败");
       }
+      activeConversationIdRef.current = null;
       setActiveConversationId(null);
     }
   }
@@ -2248,6 +2306,7 @@ export default function App() {
       });
 
       if (activeConversationId === conversationId) {
+        activeConversationIdRef.current = null;
         setActiveConversation(null);
         setActiveConversationId(null);
         setDraftMessage("");
@@ -2361,7 +2420,7 @@ export default function App() {
           ...activeConversation,
           messages: [...activeConversation.messages, optimisticUserMessage, optimisticAssistantMessage],
           updatedAt: now + 1,
-          lastMessageAt: now + 1,
+          lastMessageAt: now,
           messageCount: activeConversation.messageCount + 2,
           preview: optimisticPreview || activeConversation.preview,
           selectedKnowledgeBaseIds,
@@ -2371,7 +2430,7 @@ export default function App() {
           title: optimisticPreview || pendingAttachments[0]?.name || "新对话",
           createdAt: now,
           updatedAt: now + 1,
-          lastMessageAt: now + 1,
+          lastMessageAt: now,
           preview: optimisticPreview,
           messageCount: 2,
           workspaceRoot: draftConversationWorkspaceRoot || config.workspaceRoot,
@@ -2397,23 +2456,28 @@ export default function App() {
         workspaceRoot: activeConversationId ? undefined : draftConversationWorkspaceRoot.trim() || undefined,
       });
 
-      syncConversationState(result.conversation, {
-        replaceConversationId: nextConversationId.startsWith("temp-") ? nextConversationId : null,
-      });
+      const replaceConversationId = nextConversationId.startsWith("temp-") ? nextConversationId : null;
+      if (shouldApplyStartedConversationAsActive(activeConversationIdRef.current, nextConversationId)) {
+        syncConversationState(result.conversation, { replaceConversationId });
+      } else {
+        upsertConversationSummary(toConversationSummary(result.conversation), { replaceConversationId });
+      }
       setDraftConversationWorkspaceRoot("");
       setConversationRuntimeStates((current) =>
         mergeStartedConversationRuntimeState(current, {
           conversationId: result.conversation.id,
-          replaceConversationId: nextConversationId.startsWith("temp-") ? nextConversationId : null,
+          replaceConversationId,
         }),
       );
     } catch (error) {
       const alreadyRunning = isConversationAlreadyRunningError(error);
       if (previousConversation) {
+        activeConversationIdRef.current = previousConversationId;
         setActiveConversation(previousConversation);
         setActiveConversationId(previousConversationId);
         upsertConversationSummary(toConversationSummary(previousConversation));
       } else {
+        activeConversationIdRef.current = null;
         setActiveConversation(null);
         setActiveConversationId(null);
         setConversations(previousConversations);
@@ -2865,12 +2929,19 @@ export default function App() {
           <AssistantSettings
             activeModel={activeModel}
             composerModelId={composerModelId}
+            fallbackModelId={config.imageRecognition.fallbackModelId}
             modelProviders={config.modelProviders}
             providerRefreshError={providerRefreshErrors[selectedModelProviderId] ?? null}
             providerRefreshingId={providerRefreshingId}
             selectedModelProviderId={selectedModelProviderId}
             selectableModels={selectableModels}
             onAddModelProvider={addModelProvider}
+            onFallbackModelChange={(value) =>
+              updateConfigField("imageRecognition", {
+                ...config.imageRecognition,
+                fallbackModelId: value,
+              })
+            }
             onModelChange={(value) => updateConfigField("activeModelId", value)}
             onReorderModelProviders={reorderModelProviders}
             onRefreshProviderModels={refreshProviderModels}
@@ -2880,39 +2951,6 @@ export default function App() {
             onSetDefaultProviderModel={setDefaultProviderModel}
             onToggleProviderModel={toggleProviderModel}
             onUpdateModelProvider={updateModelProvider}
-          />
-        </Suspense>
-      );
-    }
-
-    if (settingsSection === "image-recognition") {
-      return (
-        <Suspense fallback={<LazyViewFallback />}>
-          <ImageRecognitionSettings
-            fallbackModelId={config.imageRecognition.fallbackModelId}
-            selectableModels={selectableModels}
-            onFallbackModelChange={(value) =>
-              updateConfigField("imageRecognition", {
-                ...config.imageRecognition,
-                fallbackModelId: value,
-              })
-            }
-          />
-        </Suspense>
-      );
-    }
-
-    if (settingsSection === "permissions") {
-      return (
-        <Suspense fallback={<LazyViewFallback />}>
-          <PermissionsSettings
-            security={config.security}
-            onToggleFullFileSystemAccess={(enabled) =>
-              updateConfigField("security", {
-                ...config.security,
-                fullFileSystemAccess: enabled,
-              })
-            }
           />
         </Suspense>
       );
@@ -2962,11 +3000,19 @@ export default function App() {
           knowledgeBases={knowledgeBases}
           knowledgeEnabled={activeKnowledgeBaseIds.length > 0}
           knowledgeRefreshing={knowledgeRefreshing}
+          permissionMode={config.security.permissionMode}
           onDraftMessageChange={setDraftMessage}
           onClearKnowledgeBases={clearKnowledgeBaseSelection}
           onManageKnowledgeBases={() => setView("knowledge")}
           onAddAttachments={(files) => void appendAttachments(files)}
           onModelChange={(value) => updateConfigField("activeModelId", value)}
+          onPermissionModeChange={(value) =>
+            updateConfigField("security", {
+              ...config.security,
+              permissionMode: value,
+              fullFileSystemAccess: value === "full-access",
+            })
+          }
           onOpenAttachment={openPreview}
           onOpenPreviewLink={openPreviewLink}
           onPickFiles={() => void pickFiles()}
@@ -3128,10 +3174,23 @@ export default function App() {
         ) : (
           <PrimarySidebar
             activeConversationId={activeConversationId}
-            conversations={conversations.map((conversation) => ({
-              ...conversation,
-              isGenerating: isConversationTurnActive(conversationRuntimeStates[conversation.id]?.status),
-            }))}
+            conversations={conversations.map((conversation) => {
+              const runtimeState = conversationRuntimeStates[conversation.id];
+              const hasPendingApproval = Boolean(
+                conversation.agentSessionId &&
+                  approvalRequests.some((request) => request.sessionId === conversation.agentSessionId),
+              );
+              const hasCompletion = conversation.id !== activeConversationId && Boolean(conversation.completedTurnId);
+
+              return {
+                ...conversation,
+                runStatus: resolveSidebarConversationRunStatus(
+                  runtimeState,
+                  hasPendingApproval,
+                  hasCompletion,
+                ),
+              };
+            })}
             onCreateConversation={createDraftConversation}
             onDeleteConversation={(conversationId) => void deleteConversation(conversationId)}
             onOpenConversation={(conversationId) => void openConversation(conversationId)}
