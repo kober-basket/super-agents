@@ -12,6 +12,7 @@ function createConfig(): AppConfig {
     environment: "local",
     defaultAgentMode: "general",
     activeModelId: "",
+    imageRecognition: { fallbackModelId: "" },
     contextTier: "medium",
     appearance: { theme: "porcelain" },
     proxy: { http: "", https: "", bypass: "" },

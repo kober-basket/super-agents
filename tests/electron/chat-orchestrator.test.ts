@@ -17,6 +17,7 @@ function createConfig(workspaceRoot: string): AppConfig {
     environment: "local",
     defaultAgentMode: "general",
     activeModelId: "",
+    imageRecognition: { fallbackModelId: "" },
     contextTier: "medium",
     appearance: { theme: "porcelain" },
     proxy: { http: "", https: "", bypass: "" },
@@ -122,6 +123,70 @@ test("chat orchestrator forwards agent thoughts into runtime trace and thought e
       ["turn_started", "thought_delta", "message_delta", "turn_finished"],
     );
     assert.equal(assistantMessage?.runtimeTrace?.events[1]?.text, "Planning. ");
+  } finally {
+    await conversationService.shutdown();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("chat orchestrator forwards image attachments to the native agent core", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-orchestrator-"));
+  const conversationService = new ConversationService(path.join(tempDir, "data", "app.db"));
+  await conversationService.initialize();
+
+  try {
+    const workspaceService = {
+      async getConfigSnapshot() {
+        return createConfig(tempDir);
+      },
+      async getEnabledSkillPromptContext() {
+        return "";
+      },
+      async searchKnowledgeBases() {
+        return { query: "", total: 0, results: [], searchedBases: [], warnings: [] };
+      },
+    } as unknown as WorkspaceService;
+
+    const orchestrator = new ChatOrchestrator(conversationService, workspaceService, () => undefined);
+    let capturedInput: { imageAttachments?: Array<{ name: string; mimeType: string; dataUrl: string }> } | null = null;
+
+    (orchestrator as unknown as {
+      nativeCore: {
+        sendTurn(input: unknown): AsyncIterable<AgentEvent>;
+      };
+    }).nativeCore = {
+      async *sendTurn(input) {
+        capturedInput = input as typeof capturedInput;
+        yield { type: "message_delta", sessionId: "s", agentId: "a", text: "Image received." };
+        yield { type: "turn_finished", sessionId: "s", agentId: "a", stopReason: "end_turn" };
+      },
+    };
+
+    const execution = await orchestrator.startTurnWithCompletion({
+      content: "看图",
+      attachments: [
+        {
+          id: "image-1",
+          name: "screen.png",
+          path: "screen.png",
+          size: 3,
+          mimeType: "image/png",
+          kind: "image",
+          dataUrl: "data:image/png;base64,abc",
+        },
+      ],
+    });
+    await execution.completion;
+
+    const nativeCoreInput = capturedInput as { imageAttachments?: Array<{ name: string; mimeType: string; dataUrl: string }> } | null;
+    assert.ok(nativeCoreInput);
+    assert.deepEqual(nativeCoreInput.imageAttachments, [
+      {
+        name: "screen.png",
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,abc",
+      },
+    ]);
   } finally {
     await conversationService.shutdown();
     await rm(tempDir, { recursive: true, force: true });

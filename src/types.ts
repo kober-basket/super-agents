@@ -460,6 +460,10 @@ export interface SecurityConfig {
   fullFileSystemAccess: boolean;
 }
 
+export interface ImageRecognitionConfig {
+  fallbackModelId: string;
+}
+
 export type MailAuthType = "oauth" | "password";
 export type MailOAuthProvider = "google" | "microsoft";
 export type MailAccountStatus = "needs_auth" | "connected" | "error";
@@ -638,6 +642,7 @@ export interface AppConfig {
   environment: EnvironmentMode;
   defaultAgentMode: DefaultAgentMode;
   activeModelId: string;
+  imageRecognition: ImageRecognitionConfig;
   contextTier: ContextTier;
   appearance: AppearanceConfig;
   proxy: ProxyConfig;

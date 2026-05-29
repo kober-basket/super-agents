@@ -7,6 +7,7 @@ import { ToolPermissionDeniedError } from "./types";
 import type {
   AgentEvent,
   AgentMessage,
+  ModelImageAttachment,
   ModelGateway,
   ToolCall,
   ToolDefinition,
@@ -37,6 +38,7 @@ type SendTurnInput = {
   workspacePrompt?: string;
   workspaceRoot?: string;
   fullFileSystemAccess?: boolean;
+  imageAttachments?: ModelImageAttachment[];
 };
 
 interface PreparedToolExecution {
@@ -264,6 +266,37 @@ function materializeStreamedToolCallDrafts(drafts: Map<string, StreamedToolCallD
       name: draft.name,
       input: parseStreamedToolCallInput(draft.inputJson),
     }));
+}
+
+function repairToolCallInputFromStreamedDraft(
+  toolCall: ToolCall,
+  tool: ToolDefinition | undefined,
+  drafts: Map<string, StreamedToolCallDraft>,
+): ToolCall {
+  if (!tool) {
+    return toolCall;
+  }
+
+  const finalInputError = validateToolInput(tool, toolCall.input);
+  if (!finalInputError) {
+    return toolCall;
+  }
+
+  const draft = drafts.get(toolCall.id);
+  if (!draft) {
+    return toolCall;
+  }
+
+  const streamedInput = parseStreamedToolCallInput(draft.inputJson);
+  const streamedInputError = validateToolInput(tool, streamedInput);
+  if (streamedInputError) {
+    return toolCall;
+  }
+
+  return {
+    ...toolCall,
+    input: streamedInput,
+  };
 }
 
 function isExplicitToolSelfTestRequest(value: string) {
@@ -710,6 +743,7 @@ export class AgentCore {
         calledTool = true;
         let tool = agentCore.options.tools.get(toolCall.name);
         toolCall = repairToolSelfTestToolCall(toolCall, tool, input.content);
+        toolCall = repairToolCallInputFromStreamedDraft(toolCall, tool, streamedToolCallDrafts);
         toolCall = createUniqueToolCallId(toolCall, toolCallIdsThisTurn, () => {
           toolCallIdCollisionSequence += 1;
           return toolCallIdCollisionSequence;
@@ -721,12 +755,22 @@ export class AgentCore {
         const toolCallSignature = createToolCallSignature(toolCall);
         const previousResult = completedToolResults.get(toolCallSignature);
         if (previousResult) {
-          toolMessageSlots[toolMessageSlotIndex] = {
-            role: "tool",
-            name: toolCall.name,
-            toolCallId: toolCall.id,
+          const result: ToolResult = {
             content: createDuplicateToolResultMessage(toolCall, previousResult),
+            metadata: {
+              duplicateToolCall: true,
+            },
           };
+          toolMessageSlots[toolMessageSlotIndex] = createToolMessage(toolCall, result);
+          if (streamedToolCallDrafts.has(toolCall.id)) {
+            yield {
+              type: "tool_call_finished",
+              sessionId: input.sessionId,
+              agentId: agent.id,
+              toolCall,
+              result,
+            };
+          }
           return;
         }
         if (preparedToolCalls.some((prepared) => prepared.signature === toolCallSignature)) {
@@ -754,8 +798,16 @@ export class AgentCore {
                 },
           };
           toolCallsThisStep += 1;
-          completedToolResults.set(toolCallSignature, result);
           toolMessageSlots[toolMessageSlotIndex] = createToolMessage(toolCall, result);
+          if (streamedToolCallDrafts.has(toolCall.id)) {
+            yield {
+              type: "tool_call_finished",
+              sessionId: input.sessionId,
+              agentId: agent.id,
+              toolCall,
+              result,
+            };
+          }
           return;
         }
 
@@ -843,6 +895,7 @@ export class AgentCore {
         messages: [...session.messages],
         tools: modelTools,
         toolChoice: "auto",
+        imageAttachments: input.imageAttachments,
       })) {
         if (event.type === "reasoning_delta") {
           if (event.reasoningContent !== undefined) {
@@ -913,7 +966,7 @@ export class AgentCore {
         stopReason = event.stopReason;
       }
 
-      if (stopReason === "tool_calls" && streamedToolCallDrafts.size > 0) {
+      if (streamedToolCallDrafts.size > 0) {
         const preparedToolCallIds = new Set(assistantToolCalls.map((toolCall) => toolCall.id));
         const streamedToolCalls = materializeStreamedToolCallDrafts(streamedToolCallDrafts).filter(
           (toolCall) => !preparedToolCallIds.has(toolCall.id),
@@ -955,6 +1008,15 @@ export class AgentCore {
               },
             };
         toolMessageSlots[duplicate.slotIndex] = createToolMessage(duplicate.toolCall, result);
+        if (streamedToolCallDrafts.has(duplicate.toolCall.id)) {
+          yield {
+            type: "tool_call_finished",
+            sessionId: input.sessionId,
+            agentId: agent.id,
+            toolCall: duplicate.toolCall,
+            result,
+          };
+        }
       }
 
       const pendingToolMessages = toolMessageSlots.filter((message): message is AgentMessage => Boolean(message));

@@ -1,8 +1,16 @@
 import type { AppConfig } from "../../src/types";
-import { getActiveModelOption } from "../../src/lib/model-config";
+import { flattenModelProviders, getActiveModelOption } from "../../src/lib/model-config";
 import { mapAgentMessageToOpenAIMessage } from "./openai/message-mapper";
 import { parseOpenAISseEvents } from "./openai/sse";
-import type { AgentMessage, ModelEvent, ModelGateway, ModelRequest, ModelToolSchema, ToolCall } from "./types";
+import type {
+  AgentMessage,
+  ModelEvent,
+  ModelGateway,
+  ModelImageAttachment,
+  ModelRequest,
+  ModelToolSchema,
+  ToolCall,
+} from "./types";
 
 interface ChatCompletionChunk {
   choices?: Array<{
@@ -59,6 +67,8 @@ interface ParsedPseudoToolCall {
   name: string;
   input: unknown;
 }
+
+type RuntimeModel = NonNullable<ReturnType<typeof getActiveModelOption>>;
 
 function joinUrl(baseUrl: string, path: string) {
   return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
@@ -198,6 +208,105 @@ function omitRequestBodyField(body: Record<string, unknown>, field: string) {
   const next = { ...body };
   delete next[field];
   return next;
+}
+
+function imageRecognitionCacheKey(messages: AgentMessage[], images: ModelImageAttachment[]) {
+  return JSON.stringify({
+    messages: messages
+      .filter((message) => message.role === "user")
+      .map((message) => message.content)
+      .slice(-1),
+    images: images.map((image) => ({
+      name: image.name,
+      mimeType: image.mimeType,
+      dataUrl: image.dataUrl,
+    })),
+  });
+}
+
+function hasImageAttachments(input: ModelRequest) {
+  return (input.imageAttachments ?? []).some((image) => image.dataUrl.trim());
+}
+
+function createImageContentParts(text: string, images: ModelImageAttachment[]) {
+  return [
+    { type: "text", text },
+    ...images
+      .filter((image) => image.dataUrl.trim())
+      .map((image) => ({
+        type: "image_url",
+        image_url: { url: image.dataUrl },
+      })),
+  ];
+}
+
+function appendImagesToLatestUserMessage(
+  messages: ReturnType<typeof mapAgentMessageToOpenAIMessage>[],
+  images: ModelImageAttachment[],
+) {
+  if (images.length === 0) {
+    return messages;
+  }
+
+  const next = messages.map((message) => ({ ...message })) as Array<Record<string, unknown>>;
+  for (let index = next.length - 1; index >= 0; index -= 1) {
+    const message = next[index];
+    if (message?.role !== "user") {
+      continue;
+    }
+    const content = typeof message.content === "string" ? message.content : "";
+    message.content = createImageContentParts(content, images);
+    return next;
+  }
+
+  return next;
+}
+
+function appendImageRecognitionContext(
+  messages: ReturnType<typeof mapAgentMessageToOpenAIMessage>[],
+  recognitionText: string,
+) {
+  const next = messages.map((message) => ({ ...message })) as Array<Record<string, unknown>>;
+  for (let index = next.length - 1; index >= 0; index -= 1) {
+    const message = next[index];
+    if (message?.role !== "user") {
+      continue;
+    }
+    const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
+    message.content = [
+      content,
+      "",
+      "图片识别结果（由设置里的智能识图模型生成，仅用于补充图片内容；当前任务仍由当前会话模型处理）：",
+      recognitionText.trim(),
+    ].join("\n");
+    return next;
+  }
+
+  return [
+    ...next,
+    {
+      role: "user",
+      content: [
+        "图片识别结果（由设置里的智能识图模型生成，仅用于补充图片内容；当前任务仍由当前会话模型处理）：",
+        recognitionText.trim(),
+      ].join("\n"),
+    },
+  ];
+}
+
+function shouldUseImageRecognitionFallback(status: number, errorText: string) {
+  if (status !== 400 && status !== 422) {
+    return false;
+  }
+
+  const imageSignal =
+    /\b(?:image|images|image_url|input_image|vision|visual|multimodal|multi-modal|content\s*part)\b/i.test(errorText) ||
+    /(?:图片|图像|视觉|多模态)/.test(errorText);
+  const unsupportedSignal =
+    /\b(?:unsupported|not\s+support(?:ed)?|does\s+not\s+support|cannot\s+process|can't\s+process|invalid|unrecognized|text-only|only\s+supports\s+text)\b/i.test(errorText) ||
+    /(?:不支持|无法处理|不能处理|仅支持文本|只支持文本|无效)/.test(errorText);
+
+  return imageSignal && unsupportedSignal;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -843,6 +952,7 @@ function getLatestPendingTool(pendingTools: Map<string, PendingToolCall>) {
 export class OpenAICompatibleModelGateway implements ModelGateway {
   private fallbackToolCallSequence = 0;
   private anonymousToolCallSequence = 0;
+  private readonly imageRecognitionCache = new Map<string, string>();
 
   constructor(private readonly getConfig: () => Promise<AppConfig>) {}
 
@@ -856,16 +966,17 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
     return `anonymous-${this.anonymousToolCallSequence}`;
   }
 
-  async *stream(input: ModelRequest): AsyncIterable<ModelEvent> {
-    const config = await this.getConfig();
-    const activeModel = getActiveModelOption(config.modelProviders, config.activeModelId);
-    if (!activeModel) {
-      throw new Error("No active model is configured.");
-    }
+  private resolveModel(config: AppConfig, runtimeModelId: string) {
+    return flattenModelProviders(config.modelProviders).find((model) => model.id === runtimeModelId) ?? null;
+  }
 
-    const provider = config.modelProviders.find((item) => item.id === activeModel.providerId);
+  private resolveProvider(config: AppConfig, model: RuntimeModel) {
+    return config.modelProviders.find((item) => item.id === model.providerId) ?? null;
+  }
+
+  private assertProviderReady(provider: AppConfig["modelProviders"][number] | null, model: RuntimeModel) {
     if (!provider || provider.enabled === false) {
-      throw new Error("Active model provider is disabled or missing.");
+      throw new Error(`模型提供商 "${model.providerName}" 已停用或不存在。`);
     }
     if (!provider.apiKey.trim()) {
       throw new Error(`Provider "${provider.name}" is missing an API key.`);
@@ -873,13 +984,165 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
     if (!provider.baseUrl.trim()) {
       throw new Error(`Provider "${provider.name}" is missing a base URL.`);
     }
+  }
+
+  private requestChatCompletion(
+    provider: AppConfig["modelProviders"][number],
+    requestBody: Record<string, unknown>,
+  ) {
+    return fetch(joinUrl(provider.baseUrl, "/chat/completions"), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${provider.apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
+  }
+
+  private async requestWithCompatibilityRetries(
+    provider: AppConfig["modelProviders"][number],
+    body: Record<string, unknown>,
+  ) {
+    let requestBody: Record<string, unknown> = {
+      ...body,
+      stream_options: { include_usage: true },
+    };
+    let response = await this.requestChatCompletion(provider, requestBody);
+
+    while (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      if (shouldRetryWithoutStreamingUsage(response.status, errorText) && "stream_options" in requestBody) {
+        requestBody = omitRequestBodyField(requestBody, "stream_options");
+        response = await this.requestChatCompletion(provider, requestBody);
+        continue;
+      }
+      if (shouldRetryWithoutThinkingToggle(response.status, errorText) && "enable_thinking" in requestBody) {
+        requestBody = omitRequestBodyField(requestBody, "enable_thinking");
+        response = await this.requestChatCompletion(provider, requestBody);
+        continue;
+      }
+
+      return {
+        response,
+        requestBody,
+        errorText,
+      };
+    }
+
+    return {
+      response,
+      requestBody,
+      errorText: "",
+    };
+  }
+
+  private async recognizeImages(
+    config: AppConfig,
+    input: ModelRequest,
+  ) {
+    const images = (input.imageAttachments ?? []).filter((image) => image.dataUrl.trim());
+    const cacheKey = imageRecognitionCacheKey(input.messages, images);
+    const cached = this.imageRecognitionCache.get(cacheKey);
+    if (cached) {
+      return { text: cached, usages: [] as ModelEvent[] };
+    }
+
+    const fallbackModelId = config.imageRecognition?.fallbackModelId?.trim();
+    if (!fallbackModelId) {
+      throw new Error("当前模型不支持识图，请在设置 > 智能识图中选择一个模型。");
+    }
+
+    const fallbackModel = this.resolveModel(config, fallbackModelId);
+    if (!fallbackModel || fallbackModel.enabled === false) {
+      throw new Error("智能识图模型不可用，请在设置 > 智能识图中重新选择一个已启用模型。");
+    }
+
+    const fallbackProvider = this.resolveProvider(config, fallbackModel);
+    this.assertProviderReady(fallbackProvider, fallbackModel);
+
+    const body: Record<string, unknown> = {
+      model: fallbackModel.modelId,
+      messages: [
+        {
+          role: "system",
+          content: "你是智能识图模块。只识别图片内容并输出客观中文描述，不要直接完成用户任务。",
+        },
+        {
+          role: "user",
+          content: createImageContentParts(
+            "请只识别图片内容，输出可供另一个模型继续完成用户任务的客观中文描述。不要直接回答用户任务。",
+            images,
+          ),
+        },
+      ],
+      stream: true,
+      temperature: fallbackProvider!.temperature,
+      max_tokens: fallbackProvider!.maxTokens,
+    };
+
+    const { response, errorText } = await this.requestWithCompatibilityRetries(fallbackProvider!, body);
+    if (!response.ok || !response.body) {
+      throw new Error(`智能识图模型请求失败（${response.status}）：${errorText || response.statusText}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    const usages: ModelEvent[] = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      const parsed = parseOpenAISseEvents(buffer);
+      buffer = parsed.rest;
+
+      for (const eventData of parsed.events) {
+        if (eventData === "[DONE]") {
+          continue;
+        }
+        const chunk = JSON.parse(eventData) as ChatCompletionChunk;
+        const usage = normalizeCompletionUsage(chunk.usage, fallbackModel, fallbackProvider!);
+        if (usage) {
+          usages.push({ type: "usage", usage });
+        }
+        for (const choice of chunk.choices ?? []) {
+          text += choice.delta?.content ?? "";
+        }
+      }
+    }
+
+    const trimmed = text.trim();
+    if (!trimmed) {
+      throw new Error("智能识图模型没有返回可用的图片识别结果。");
+    }
+    this.imageRecognitionCache.set(cacheKey, trimmed);
+    return { text: trimmed, usages };
+  }
+
+  async *stream(input: ModelRequest): AsyncIterable<ModelEvent> {
+    const config = await this.getConfig();
+    const activeModel = getActiveModelOption(config.modelProviders, config.activeModelId);
+    if (!activeModel) {
+      throw new Error("No active model is configured.");
+    }
+
+    const provider = this.resolveProvider(config, activeModel);
+    this.assertProviderReady(provider, activeModel);
+    const mappedMessages = input.messages.map(mapAgentMessageToOpenAIMessage);
+    const messages = hasImageAttachments(input)
+      ? appendImagesToLatestUserMessage(mappedMessages, input.imageAttachments ?? [])
+      : mappedMessages;
 
     const body: Record<string, unknown> = {
       model: activeModel.modelId || input.model,
-      messages: [{ role: "system", content: input.system }, ...input.messages.map(mapAgentMessageToOpenAIMessage)],
+      messages: [{ role: "system", content: input.system }, ...messages],
       stream: true,
-      temperature: provider.temperature,
-      max_tokens: provider.maxTokens,
+      temperature: provider!.temperature,
+      max_tokens: provider!.maxTokens,
       tools:
         input.tools.length > 0
           ? input.tools.map((tool) => ({
@@ -893,37 +1156,34 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
           : undefined,
       tool_choice: input.tools.length > 0 ? (input.toolChoice ?? "auto") : undefined,
     };
-    if (shouldDisableQwenThinkingForTools(provider, activeModel, input)) {
+    if (shouldDisableQwenThinkingForTools(provider!, activeModel, input)) {
       body.enable_thinking = false;
     }
 
-    const requestChatCompletion = (requestBody: Record<string, unknown>) =>
-      fetch(joinUrl(provider.baseUrl, "/chat/completions"), {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${provider.apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
+    let requestBody = body;
+    let { response, requestBody: sentRequestBody, errorText } =
+      await this.requestWithCompatibilityRetries(provider!, requestBody);
+    requestBody = sentRequestBody;
 
-    let requestBody: Record<string, unknown> = {
-      ...body,
-      stream_options: { include_usage: true },
-    };
-    let response = await requestChatCompletion(requestBody);
-    while (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      if (shouldRetryWithoutStreamingUsage(response.status, errorText) && "stream_options" in requestBody) {
-        requestBody = omitRequestBodyField(requestBody, "stream_options");
-        response = await requestChatCompletion(requestBody);
-        continue;
+    if (!response.ok && hasImageAttachments(input) && shouldUseImageRecognitionFallback(response.status, errorText)) {
+      const recognition = await this.recognizeImages(config, input);
+      for (const usage of recognition.usages) {
+        yield usage;
       }
-      if (shouldRetryWithoutThinkingToggle(response.status, errorText) && "enable_thinking" in requestBody) {
-        requestBody = omitRequestBodyField(requestBody, "enable_thinking");
-        response = await requestChatCompletion(requestBody);
-        continue;
-      }
+      requestBody = {
+        ...body,
+        messages: [
+          { role: "system", content: input.system },
+          ...appendImageRecognitionContext(mappedMessages, recognition.text),
+        ],
+      };
+      const retry = await this.requestWithCompatibilityRetries(provider!, requestBody);
+      response = retry.response;
+      requestBody = retry.requestBody;
+      errorText = retry.errorText;
+    }
+
+    if (!response.ok) {
       throw new Error(`Model request failed (${response.status}): ${errorText || response.statusText}`);
     }
 
@@ -956,7 +1216,7 @@ export class OpenAICompatibleModelGateway implements ModelGateway {
         }
 
         const chunk = JSON.parse(eventData) as ChatCompletionChunk;
-        const usage = normalizeCompletionUsage(chunk.usage, activeModel, provider);
+        const usage = normalizeCompletionUsage(chunk.usage, activeModel, provider!);
         if (usage) {
           yield { type: "usage", usage };
         }

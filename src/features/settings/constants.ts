@@ -1,4 +1,4 @@
-import { Mail, MessageSquareShare, Palette, ShieldCheck, Sparkles, type LucideIcon } from "lucide-react";
+import { Eye, Mail, MessageSquareShare, Palette, ShieldCheck, Sparkles, type LucideIcon } from "lucide-react";
 
 import type { AppConfig, McpTransport } from "../../types";
 import type { SettingsSection } from "./types";
@@ -19,6 +19,7 @@ export const SETTINGS_SECTIONS: Array<{
 }> = [
   { id: "appearance", label: "外观", icon: Palette },
   { id: "assistant", label: "模型", icon: Sparkles },
+  { id: "image-recognition", label: "智能识图", icon: Eye },
   { id: "permissions", label: "权限", icon: ShieldCheck },
   { id: "mail", label: "邮件", icon: Mail },
   { id: "remote-control", label: "远程控制", icon: MessageSquareShare },

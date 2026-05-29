@@ -112,6 +112,13 @@ export interface ModelRequest {
   messages: AgentMessage[];
   tools: ModelToolSchema[];
   toolChoice?: "auto" | "required" | "none";
+  imageAttachments?: ModelImageAttachment[];
+}
+
+export interface ModelImageAttachment {
+  name: string;
+  mimeType: string;
+  dataUrl: string;
 }
 
 export type ModelEvent =

@@ -3544,7 +3544,8 @@ textarea {
 }
 
 .runtime-trace-group {
-  width: min(100%, 820px);
+  width: 100%;
+  max-width: 100%;
   color: var(--muted-strong);
 }
 
@@ -3755,7 +3756,9 @@ textarea {
 }
 
 .message-text {
-  width: min(100%, 760px);
+  width: 100%;
+  max-width: 760px;
+  min-width: 0;
   color: var(--text);
   font-size: var(--chat-content-font-size);
   line-height: var(--chat-content-line-height);

@@ -56,6 +56,13 @@ test("thread composer input width matches the conversation content width", () =>
   assert.match(css, /@media\s*\(max-width:\s*1080px\)\s*{[^}]*--chat-thread-content-gutter:\s*22px/s);
 });
 
+test("assistant message blocks stay inside the padded transcript content column", () => {
+  const css = readStyles();
+
+  assert.match(css, /\.message-text\s*{[^}]*width:\s*100%[^}]*max-width:\s*760px/s);
+  assert.match(css, /\.runtime-trace-group\s*{[^}]*width:\s*100%[^}]*max-width:\s*100%/s);
+});
+
 test("home composer input uses the same width rhythm as thread conversations", () => {
   const css = readStyles();
 

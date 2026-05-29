@@ -64,6 +64,9 @@ const EMPTY_CONFIG: AppConfig = {
   environment: "local",
   defaultAgentMode: "general",
   activeModelId: "",
+  imageRecognition: {
+    fallbackModelId: "",
+  },
   contextTier: "high",
   appearance: {
     theme: "linen",

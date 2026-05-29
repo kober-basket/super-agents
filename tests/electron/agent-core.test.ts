@@ -400,6 +400,335 @@ test("native agent core executes streamed tool deltas when the provider omits fi
   assert.equal(events.at(-1)?.type, "turn_finished");
 });
 
+test("native agent core executes streamed tool deltas when the provider ends without a tool_calls stop reason", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      { type: "tool_call_delta", toolCallId: "lookup-end-turn", name: "lookup", inputJsonDelta: "" },
+      { type: "tool_call_delta", toolCallId: "lookup-end-turn", inputJsonDelta: '{"key":"alpha"}' },
+      { type: "done", stopReason: "end_turn" },
+    ],
+    [
+      { type: "text_delta", text: "查到了。" },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createCore(gateway);
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "streamed-delta-end-turn-session",
+    agentId: "neutral",
+    content: "lookup alpha",
+  })) {
+    events.push(event);
+  }
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "tool_call_started").map((event) => event.toolCall),
+    [{ id: "lookup-end-turn", name: "lookup", input: { key: "alpha" } }],
+  );
+  assert.deepEqual(
+    events.filter((event) => event.type === "tool_call_finished").map((event) => event.result.content),
+    ["value:alpha"],
+  );
+  assert.equal(gateway.requests.length, 2);
+});
+
+test("native agent core uses streamed tool arguments when the final provider tool call is empty", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call_delta",
+        toolCallId: "write-from-stream",
+        name: "writer",
+        inputJsonDelta: '{"path":"note.md",',
+      },
+      {
+        type: "tool_call_delta",
+        toolCallId: "write-from-stream",
+        name: "writer",
+        inputJsonDelta: '"content":"hello"}',
+      },
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "write-from-stream",
+          name: "writer",
+          input: {},
+        },
+      },
+      { type: "done", stopReason: "tool_calls" },
+    ],
+    [
+      { type: "text_delta", text: "Streamed args handled." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const executedInputs: unknown[] = [];
+  const core = createSingleToolCore(gateway, {
+    name: "writer",
+    description: "Write text",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        content: { type: "string" },
+      },
+      required: ["path", "content"],
+    },
+    risk: "write",
+    async execute(input) {
+      executedInputs.push(input);
+      return { content: "written" };
+    },
+  });
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "streamed-args-final-empty-session",
+    agentId: "tool-agent",
+    content: "write a file",
+  })) {
+    events.push(event);
+  }
+
+  assert.deepEqual(executedInputs, [{ path: "note.md", content: "hello" }]);
+  assert.deepEqual(
+    events.filter((event) => event.type === "tool_call_started").map((event) => event.toolCall.input),
+    [{ path: "note.md", content: "hello" }],
+  );
+  assert.deepEqual(
+    events.filter((event) => event.type === "tool_call_finished").map((event) => event.result.content),
+    ["written"],
+  );
+});
+
+test("native agent core finishes streamed invalid tool calls so live traces do not stay in progress", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      { type: "tool_call_delta", toolCallId: "write-missing-path", name: "writer", inputJsonDelta: '{"content":"hello"}' },
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "write-missing-path",
+          name: "writer",
+          input: {},
+        },
+      },
+      { type: "done", stopReason: "tool_calls" },
+    ],
+    [
+      { type: "text_delta", text: "Invalid call handled." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createSingleToolCore(gateway, {
+    name: "writer",
+    description: "Write text",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        content: { type: "string" },
+      },
+      required: ["path", "content"],
+    },
+    risk: "write",
+    async execute() {
+      return { content: "should not run" };
+    },
+  });
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "streamed-invalid-tool-session",
+    agentId: "tool-agent",
+    content: "write a file",
+  })) {
+    events.push(event);
+  }
+
+  const finished = events.find((event) => event.type === "tool_call_finished");
+  assert.equal(finished?.type, "tool_call_finished");
+  assert.equal(finished.toolCall.id, "write-missing-path");
+  assert.match(finished.result.content, /Invalid tool input: path is required/);
+  assert.equal(finished.result.metadata?.isError, true);
+});
+
+test("native agent core finishes streamed invalid tool calls when the provider ends without a final tool call", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      { type: "tool_call_delta", toolCallId: "write-delta-invalid", name: "writer", inputJsonDelta: '{"content":"hello"}' },
+      { type: "done", stopReason: "end_turn" },
+    ],
+    [
+      { type: "text_delta", text: "Invalid call handled." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createSingleToolCore(gateway, {
+    name: "writer",
+    description: "Write text",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        content: { type: "string" },
+      },
+      required: ["path", "content"],
+    },
+    risk: "write",
+    async execute() {
+      return { content: "should not run" };
+    },
+  });
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "streamed-invalid-end-turn-session",
+    agentId: "tool-agent",
+    content: "write a file",
+  })) {
+    events.push(event);
+  }
+
+  const started = events.find((event) => event.type === "tool_call_started");
+  const finished = events.find((event) => event.type === "tool_call_finished");
+  assert.equal(started, undefined);
+  assert.equal(finished?.type, "tool_call_finished");
+  assert.equal(finished.toolCall.id, "write-delta-invalid");
+  assert.match(finished.result.content, /Invalid tool input: path is required/);
+  assert.equal(finished.result.metadata?.isError, true);
+});
+
+test("native agent core does not reuse invalid tool inputs as completed duplicates", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call_delta",
+        toolCallId: "write-invalid-one",
+        name: "writer",
+        inputJsonDelta: '{"content":"hello"}',
+      },
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "write-invalid-one",
+          name: "writer",
+          input: {},
+        },
+      },
+      {
+        type: "tool_call_delta",
+        toolCallId: "write-invalid-two",
+        name: "writer",
+        inputJsonDelta: '{"content":"again"}',
+      },
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "write-invalid-two",
+          name: "writer",
+          input: {},
+        },
+      },
+      { type: "done", stopReason: "tool_calls" },
+    ],
+    [
+      { type: "text_delta", text: "Invalid calls handled." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createSingleToolCore(gateway, {
+    name: "writer",
+    description: "Write text",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        content: { type: "string" },
+      },
+      required: ["path", "content"],
+    },
+    risk: "write",
+    async execute() {
+      return { content: "should not run" };
+    },
+  });
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "invalid-inputs-are-not-duplicates-session",
+    agentId: "tool-agent",
+    content: "write a file twice",
+  })) {
+    events.push(event);
+  }
+
+  const finished = events.filter((event) => event.type === "tool_call_finished");
+  assert.equal(finished.length, 2);
+  assert.deepEqual(finished.map((event) => event.toolCall.id), ["write-invalid-one", "write-invalid-two"]);
+  assert.deepEqual(
+    finished.map((event) => event.result.metadata),
+    [
+      { isError: true, invalidInput: true },
+      { isError: true, invalidInput: true },
+    ],
+  );
+});
+
+test("native agent core finishes streamed duplicate tool calls so live traces do not stay in progress", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "lookup-original",
+          name: "lookup",
+          input: { key: "alpha" },
+        },
+      },
+      { type: "done", stopReason: "tool_calls" },
+    ],
+    [
+      { type: "tool_call_delta", toolCallId: "lookup-duplicate", name: "lookup", inputJsonDelta: '{"key":"alpha"}' },
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "lookup-duplicate",
+          name: "lookup",
+          input: { key: "alpha" },
+        },
+      },
+      { type: "done", stopReason: "tool_calls" },
+    ],
+    [
+      { type: "text_delta", text: "Duplicate call handled." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  const core = createCore(gateway);
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "streamed-duplicate-tool-session",
+    agentId: "neutral",
+    content: "look this up twice",
+  })) {
+    events.push(event);
+  }
+
+  const finishedIds = events
+    .filter((event) => event.type === "tool_call_finished")
+    .map((event) => event.toolCall.id);
+  assert.deepEqual(finishedIds, ["lookup-original", "lookup-duplicate"]);
+  const duplicateFinished = events.find(
+    (event) => event.type === "tool_call_finished" && event.toolCall.id === "lookup-duplicate",
+  );
+  assert.equal(duplicateFinished?.type, "tool_call_finished");
+  assert.equal(duplicateFinished.result.metadata?.duplicateToolCall, true);
+});
+
 test("native agent core preserves reasoning content on assistant tool-call messages", async () => {
   const gateway = new ScriptedModelGateway([
     [
@@ -4879,4 +5208,244 @@ test("agent core truncates oversized successful tool results before the next mod
   assert.equal(toolMessage?.role, "tool");
   assert.match(toolMessage?.content ?? "", /\[truncated/);
   assert.equal((toolMessage?.content.length ?? 0) < 31_000, true);
+});
+
+test("openai-compatible gateway sends image attachments to the active model first", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    return new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "Saw it." } }] })}\n\ndata: [DONE]\n\n`,
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "main::text-model",
+      imageRecognition: {
+        fallbackModelId: "vision::vision-model",
+      },
+      modelProviders: [
+        {
+          id: "main",
+          name: "Main Provider",
+          kind: "openai-compatible",
+          baseUrl: "https://main.example.test/v1",
+          apiKey: "main-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [{ id: "text-model", label: "Text Model", enabled: true }],
+        },
+        {
+          id: "vision",
+          name: "Vision Provider",
+          kind: "openai-compatible",
+          baseUrl: "https://vision.example.test/v1",
+          apiKey: "vision-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [{ id: "vision-model", label: "Vision Model", enabled: true }],
+        },
+      ],
+    }) as AppConfig);
+
+    const events = [];
+    for await (const event of gateway.stream({
+      model: "text-model",
+      system: "system",
+      messages: [{ role: "user", content: "这张图里有什么？" }],
+      tools: [],
+      imageAttachments: [
+        {
+          name: "screen.png",
+          mimeType: "image/png",
+          dataUrl: "data:image/png;base64,abc",
+        },
+      ],
+    })) {
+      events.push(event);
+    }
+
+    assert.equal(requestBodies.length, 1);
+    assert.equal(requestBodies[0]?.model, "text-model");
+    const messages = requestBodies[0]?.messages as Array<{ role: string; content: unknown }>;
+    const userMessage = messages.find((message) => message.role === "user");
+    assert.deepEqual(userMessage?.content, [
+      { type: "text", text: "这张图里有什么？" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+    ]);
+    assert.deepEqual(
+      events.filter((event) => event.type === "text_delta").map((event) => event.text),
+      ["Saw it."],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openai-compatible gateway uses image recognition fallback only after active model rejects images", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    requestBodies.push(body);
+
+    if (requestBodies.length === 1) {
+      return new Response(JSON.stringify({ error: { message: "This model does not support image input." } }), {
+        status: 400,
+        statusText: "Bad Request",
+      });
+    }
+
+    if (body.model === "vision-model") {
+      return new Response(
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "图片识别：仪表盘截图，包含错误提示。" } }] })}\n\ndata: [DONE]\n\n`,
+        { status: 200 },
+      );
+    }
+
+    return new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "主模型基于识图结果回答。" } }] })}\n\ndata: [DONE]\n\n`,
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "main::text-model",
+      imageRecognition: {
+        fallbackModelId: "vision::vision-model",
+      },
+      modelProviders: [
+        {
+          id: "main",
+          name: "Main Provider",
+          kind: "openai-compatible",
+          baseUrl: "https://main.example.test/v1",
+          apiKey: "main-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [{ id: "text-model", label: "Text Model", enabled: true }],
+        },
+        {
+          id: "vision",
+          name: "Vision Provider",
+          kind: "openai-compatible",
+          baseUrl: "https://vision.example.test/v1",
+          apiKey: "vision-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [{ id: "vision-model", label: "Vision Model", enabled: true }],
+        },
+      ],
+    }) as AppConfig);
+
+    const events = [];
+    for await (const event of gateway.stream({
+      model: "text-model",
+      system: "system",
+      messages: [{ role: "user", content: "帮我分析这张图的问题" }],
+      tools: [],
+      imageAttachments: [
+        {
+          name: "screen.png",
+          mimeType: "image/png",
+          dataUrl: "data:image/png;base64,abc",
+        },
+      ],
+    })) {
+      events.push(event);
+    }
+
+    assert.equal(requestBodies.length, 3);
+    assert.equal(requestBodies[0]?.model, "text-model");
+    assert.equal(requestBodies[1]?.model, "vision-model");
+    assert.equal(requestBodies[2]?.model, "text-model");
+
+    const fallbackMessages = requestBodies[1]?.messages as Array<{ role: string; content: unknown }>;
+    assert.equal(fallbackMessages.at(-1)?.role, "user");
+    assert.deepEqual(fallbackMessages.at(-1)?.content, [
+      {
+        type: "text",
+        text: "请只识别图片内容，输出可供另一个模型继续完成用户任务的客观中文描述。不要直接回答用户任务。",
+      },
+      { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+    ]);
+
+    const retryMessages = requestBodies[2]?.messages as Array<{ role: string; content: unknown }>;
+    const retryUser = retryMessages.find((message) => message.role === "user");
+    assert.equal(typeof retryUser?.content, "string");
+    assert.match(String(retryUser?.content), /图片识别结果/);
+    assert.match(String(retryUser?.content), /仪表盘截图/);
+    assert.doesNotMatch(JSON.stringify(retryMessages), /image_url/);
+    assert.deepEqual(
+      events.filter((event) => event.type === "text_delta").map((event) => event.text),
+      ["主模型基于识图结果回答。"],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openai-compatible gateway reports missing image recognition fallback when active model rejects images", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ error: { message: "This model does not support image input." } }), {
+      status: 400,
+      statusText: "Bad Request",
+    })) as typeof fetch;
+
+  try {
+    const gateway = new OpenAICompatibleModelGateway(async () => ({
+      activeModelId: "main::text-model",
+      imageRecognition: {
+        fallbackModelId: "",
+      },
+      modelProviders: [
+        {
+          id: "main",
+          name: "Main Provider",
+          kind: "openai-compatible",
+          baseUrl: "https://main.example.test/v1",
+          apiKey: "main-key",
+          temperature: 0,
+          maxTokens: 256,
+          enabled: true,
+          models: [{ id: "text-model", label: "Text Model", enabled: true }],
+        },
+      ],
+    }) as AppConfig);
+
+    await assert.rejects(
+      async () => {
+        for await (const _event of gateway.stream({
+          model: "text-model",
+          system: "system",
+          messages: [{ role: "user", content: "看图" }],
+          tools: [],
+          imageAttachments: [
+            {
+              name: "screen.png",
+              mimeType: "image/png",
+              dataUrl: "data:image/png;base64,abc",
+            },
+          ],
+        })) {
+          // Drain the stream.
+        }
+      },
+      /请在设置 > 智能识图中选择一个模型/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

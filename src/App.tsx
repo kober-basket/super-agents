@@ -118,6 +118,10 @@ const loadAssistantSettings = async () => {
   const module = await import("./features/settings/AssistantSettings");
   return { default: module.AssistantSettings };
 };
+const loadImageRecognitionSettings = async () => {
+  const module = await import("./features/settings/ImageRecognitionSettings");
+  return { default: module.ImageRecognitionSettings };
+};
 const loadAppearanceSettings = async () => {
   const module = await import("./features/settings/AppearanceSettings");
   return { default: module.AppearanceSettings };
@@ -141,6 +145,7 @@ const ToolsView = lazy(loadToolsView);
 const MemoryView = lazy(loadMemoryView);
 const KnowledgeView = lazy(loadKnowledgeView);
 const AssistantSettings = lazy(loadAssistantSettings);
+const ImageRecognitionSettings = lazy(loadImageRecognitionSettings);
 const AppearanceSettings = lazy(loadAppearanceSettings);
 const RemoteControlSettings = lazy(loadRemoteControlSettings);
 const PermissionsSettings = lazy(loadPermissionsSettings);
@@ -153,6 +158,7 @@ function preloadLazyViews() {
   void loadMemoryView();
   void loadKnowledgeView();
   void loadAssistantSettings();
+  void loadImageRecognitionSettings();
   void loadAppearanceSettings();
   void loadRemoteControlSettings();
   void loadPermissionsSettings();
@@ -2874,6 +2880,23 @@ export default function App() {
             onSetDefaultProviderModel={setDefaultProviderModel}
             onToggleProviderModel={toggleProviderModel}
             onUpdateModelProvider={updateModelProvider}
+          />
+        </Suspense>
+      );
+    }
+
+    if (settingsSection === "image-recognition") {
+      return (
+        <Suspense fallback={<LazyViewFallback />}>
+          <ImageRecognitionSettings
+            fallbackModelId={config.imageRecognition.fallbackModelId}
+            selectableModels={selectableModels}
+            onFallbackModelChange={(value) =>
+              updateConfigField("imageRecognition", {
+                ...config.imageRecognition,
+                fallbackModelId: value,
+              })
+            }
           />
         </Suspense>
       );

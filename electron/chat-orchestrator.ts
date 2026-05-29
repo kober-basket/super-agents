@@ -22,6 +22,7 @@ import {
   createBuiltinToolDefinitions,
   createDefaultAgentRegistry,
   type AgentEvent,
+  type ModelImageAttachment,
   type ToolApprovalDecision,
   type ToolApprovalRequest,
 } from "./agent-core";
@@ -163,6 +164,28 @@ function isToolBoundaryEvent(
   );
 }
 
+function extractImageAttachments(input: ChatSendInput): ModelImageAttachment[] {
+  const images: ModelImageAttachment[] = [];
+  for (const attachment of input.attachments ?? []) {
+    const mimeType = attachment.mimeType.toLowerCase();
+    if (attachment.kind !== "image" && !mimeType.startsWith("image/")) {
+      continue;
+    }
+
+    const dataUrl = attachment.dataUrl || (attachment.content?.startsWith("data:image/") ? attachment.content : "");
+    if (!dataUrl?.trim()) {
+      continue;
+    }
+
+    images.push({
+      name: attachment.name,
+      mimeType: attachment.mimeType || "image/png",
+      dataUrl,
+    });
+  }
+  return images;
+}
+
 export class ChatOrchestrator {
   private readonly activeTurns = new Map<string, ActiveTurn>();
   private readonly startingConversationIds = new Set<string>();
@@ -244,6 +267,7 @@ export class ChatOrchestrator {
     void completion.promise.catch(() => undefined);
 
     try {
+      const imageAttachments = extractImageAttachments(input);
       const prepared = await this.preparePrompt(
         input,
         started.conversation.selectedKnowledgeBaseIds,
@@ -296,7 +320,7 @@ export class ChatOrchestrator {
       }
 
       queueMicrotask(() => {
-        void this.runPrompt(activeTurn, prepared);
+        void this.runPrompt(activeTurn, prepared, imageAttachments);
       });
 
       return {
@@ -389,7 +413,11 @@ export class ChatOrchestrator {
     });
   }
 
-  private async runPrompt(activeTurn: ActiveTurn, prepared: PreparedPrompt) {
+  private async runPrompt(
+    activeTurn: ActiveTurn,
+    prepared: PreparedPrompt,
+    imageAttachments: ModelImageAttachment[],
+  ) {
     try {
       let stopReason = "end_turn";
       for await (const event of this.nativeCore.sendTurn({
@@ -400,6 +428,7 @@ export class ChatOrchestrator {
         workspacePrompt: prepared.workspacePrompt,
         workspaceRoot: prepared.workspaceRoot,
         fullFileSystemAccess: prepared.fullFileSystemAccess,
+        imageAttachments,
       })) {
         if (activeTurn.closed) {
           return;

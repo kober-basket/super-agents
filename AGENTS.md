@@ -100,6 +100,8 @@ npm run preview
 - Agent、tool、skill、permission、model gateway 是独立边界，可以单测。
 - Runtime prompt 只描述稳定约束；具体 persona 和任务规则放到 agent profile 或 skill。
 - 工具调用输入必须被 schema 校验；错误结果要可读、可截断、不能污染后续 prompt。
+- 流式工具参数只作为 live trace 草稿；执行前必须以最终结构化 tool call 为主，并在最终输入缺失/不合法而同一 tool id 的流式草稿可解析且通过 schema 校验时，用草稿修复输入。只要模型流中出现结构化 tool delta，即使 provider 最终 stop reason 不是 `tool_calls`，runtime 也必须 materialize 尚未处理的草稿并执行或失败收口。被判定为无效、重复或复用结果的流式工具卡片也必须发出完成事件，不能停留在执行中。
+- 图片附件应先随当前会话模型按多模态请求发送；只有 provider 明确返回图片/多模态不支持错误时，才调用设置里的智能识图兜底模型生成图片文字上下文，并把任务交回原会话模型继续，不能把兜底模型当作任务模型静默切换。
 - 长期记忆要保持短、结构化、可删除；写入前拒绝疑似密钥内容，prompt 注入时不能让记忆覆盖 runtime/system/developer/直接用户指令。
 - 工具结果过长时截断并写入 metadata，而不是让模型上下文失控。
 - 工具调用前或工具间的模型可见文本可以先流式显示为 provisional assistant text；一旦确认后续发生工具/权限事件，orchestrator 必须把这段文本清空并折回 runtime trace。工具完成后的正式回答优先通过内部 `finish_task` 进入 final-only 阶段并流式输出，避免完整总结同时出现在过程和最终回答中。

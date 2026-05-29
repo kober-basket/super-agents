@@ -148,6 +148,9 @@ const DEFAULT_CONFIG: AppConfig = {
   environment: "local",
   defaultAgentMode: "general",
   activeModelId: createRuntimeModelId(DEFAULT_ACTIVE_PROVIDER_ID, DEFAULT_ACTIVE_MODEL_ID),
+  imageRecognition: {
+    fallbackModelId: "",
+  },
   contextTier: "high",
   appearance: { theme: "linen" },
   proxy: { http: "", https: "", bypass: "localhost,127.0.0.1" },
@@ -306,6 +309,14 @@ function normalizeState(state: Partial<PersistedWorkspaceState> | null | undefin
       workspaceRoot:
         typeof workspaceRoot === "string" && workspaceRoot.trim() ? workspaceRoot.trim() : DEFAULT_CONFIG.workspaceRoot,
       activeModelId: ensureActiveModelId(modelProviders, preferredActiveModelId),
+      imageRecognition: {
+        ...DEFAULT_CONFIG.imageRecognition,
+        ...(rawConfig.imageRecognition ?? {}),
+        fallbackModelId:
+          typeof rawConfig.imageRecognition?.fallbackModelId === "string"
+            ? rawConfig.imageRecognition.fallbackModelId.trim()
+            : DEFAULT_CONFIG.imageRecognition.fallbackModelId,
+      },
       appearance: {
         ...DEFAULT_CONFIG.appearance,
         ...(rawConfig.appearance ?? {}),
