@@ -43,7 +43,11 @@ jobs:
           node scripts/install-runtime.mjs --platform win32 --arch arm64
 
       - name: Build installers
-        run: npm run package:runtime:win
+        run: |
+          npm run runtime:check:win
+          npm run build
+          npx electron-builder --win --x64 --publish never
+          npx electron-builder --win --arm64 --publish never
 
       - name: Collect Windows assets
         shell: pwsh
