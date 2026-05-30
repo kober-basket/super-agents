@@ -1,6 +1,7 @@
 ﻿import {
   ArrowUp,
   BookOpen,
+  Bot,
   Box,
   Check,
   CircleCheckBig,
@@ -11,13 +12,15 @@
   LoaderCircle,
   MoreHorizontal,
   Mic,
+  OctagonAlert,
   Plus,
   RefreshCw,
-  ShieldCheck,
   Square,
   TerminalSquare,
+  UserCheck,
   Wrench,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import {
   useEffect,
@@ -90,10 +93,12 @@ import {
   shouldAutoScrollToolContent,
   shouldReleaseAutoScrollOnWheel,
 } from "../../lib/chat-scroll";
+import { filterApprovalRequestsForConversation } from "../../lib/approval-requests";
 import { copyTextToClipboard } from "./clipboard";
 import { createComposerAttachmentsFromFiles } from "./attachment-files";
 import { buildConversationCopyMarkdown } from "./conversation-markdown";
 import { ComposerRichInput, type ComposerRichInputHandle } from "./ComposerRichInput";
+import { ExternalDirectoryRequestCard } from "./ExternalDirectoryRequestCard";
 import { MailAuthRequestCard } from "./MailAuthRequestCard";
 import { QuestionRequestCard } from "./QuestionRequestCard";
 import { RichMarkdown } from "../shared/RichMarkdown";
@@ -106,6 +111,7 @@ import type {
   ChatToolCall,
   DesktopApprovalRequest,
   DesktopApprovalResponse,
+  ExternalDirectoryDesktopApprovalRequest,
   FileDropEntry,
   KnowledgeBaseSummary,
   MailAuthDesktopApprovalRequest,
@@ -164,6 +170,12 @@ function isMailAuthApprovalRequest(request: DesktopApprovalRequest): request is 
 
 function isQuestionApprovalRequest(request: DesktopApprovalRequest): request is QuestionDesktopApprovalRequest {
   return request.kind === "question";
+}
+
+function isExternalDirectoryApprovalRequest(
+  request: DesktopApprovalRequest,
+): request is ExternalDirectoryDesktopApprovalRequest {
+  return request.kind === "external_directory";
 }
 
 function scrollMetricsForElement(element: HTMLElement) {
@@ -724,6 +736,7 @@ export function ChatWorkspace({
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const knowledgePickerRef = useRef<HTMLDivElement | null>(null);
   const modelPickerRef = useRef<HTMLDivElement | null>(null);
+  const permissionModeRef = useRef<HTMLDivElement | null>(null);
   const threadActionMenuRef = useRef<HTMLDivElement | null>(null);
   const autoScrollManuallyDetachedRef = useRef(false);
   const autoScrollPinnedToBottomRef = useRef(true);
@@ -740,6 +753,8 @@ export function ChatWorkspace({
   });
   const [knowledgePickerOpen, setKnowledgePickerOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [permissionModeOpen, setPermissionModeOpen] = useState(false);
+  const [displayPermissionMode, setDisplayPermissionMode] = useState(permissionMode);
   const [threadActionMenuOpen, setThreadActionMenuOpen] = useState(false);
   const [runtimeTodoCollapsed, setRuntimeTodoCollapsed] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -792,6 +807,10 @@ export function ChatWorkspace({
     slashSuggestions.length > 0 && slashTriggerKey !== dismissedSlashTriggerKey && !skillSuggestionsOpen;
 
   useEffect(() => {
+    setDisplayPermissionMode(permissionMode);
+  }, [permissionMode]);
+
+  useEffect(() => {
     setActiveSkillSuggestionIndex(0);
   }, [composerSkillTrigger?.query, skillSuggestions.length]);
 
@@ -801,7 +820,7 @@ export function ChatWorkspace({
   }, [slashTriggerKey, slashSuggestions.length]);
 
   useEffect(() => {
-    if (!knowledgePickerOpen && !modelPickerOpen && !threadActionMenuOpen) return undefined;
+    if (!knowledgePickerOpen && !modelPickerOpen && !permissionModeOpen && !threadActionMenuOpen) return undefined;
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -814,6 +833,10 @@ export function ChatWorkspace({
         setModelPickerOpen(false);
       }
 
+      if (permissionModeRef.current && !permissionModeRef.current.contains(target)) {
+        setPermissionModeOpen(false);
+      }
+
       if (threadActionMenuRef.current && !threadActionMenuRef.current.contains(target)) {
         setThreadActionMenuOpen(false);
       }
@@ -823,6 +846,7 @@ export function ChatWorkspace({
       if (event.key === "Escape") {
         setKnowledgePickerOpen(false);
         setModelPickerOpen(false);
+        setPermissionModeOpen(false);
         setThreadActionMenuOpen(false);
       }
     };
@@ -833,7 +857,7 @@ export function ChatWorkspace({
       window.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleWindowKeyDown);
     };
-  }, [knowledgePickerOpen, modelPickerOpen, threadActionMenuOpen]);
+  }, [knowledgePickerOpen, modelPickerOpen, permissionModeOpen, threadActionMenuOpen]);
 
   const isHome = activeConversation === null;
   const canSend = !busy && (draftMessage.trim().length > 0 || attachments.length > 0);
@@ -849,6 +873,7 @@ export function ChatWorkspace({
   const activeModelLabel = formatCompactModelLabel(activeModelOption?.modelLabel ?? "");
   const selectedKnowledgeBases = knowledgeBases.filter((base) => selectedKnowledgeBaseIds.includes(base.id));
   const selectedKnowledgeCount = knowledgeEnabled ? selectedKnowledgeBaseIds.length : 0;
+  const scopedApprovalRequests = filterApprovalRequestsForConversation(approvalRequests, activeConversation);
   const runtimeInProgress = isTurnActiveStatus(runtimeState?.status);
 
   useEffect(() => {
@@ -1347,6 +1372,7 @@ export function ChatWorkspace({
           onClick={() => {
             setKnowledgePickerOpen((current) => !current);
             setModelPickerOpen(false);
+            setPermissionModeOpen(false);
           }}
           title={selectedKnowledgeCount > 0 ? knowledgeLabel : "选择知识库"}
           type="button"
@@ -1442,26 +1468,87 @@ export function ChatWorkspace({
   }
 
   function renderPermissionModeControl() {
-    const labels: Record<RuntimePermissionMode, string> = {
-      default: "默认权限",
-      "smart-review": "智能审查",
-      "full-access": "完全访问",
-    };
+    const permissionModeOptions: Array<{
+      value: RuntimePermissionMode;
+      label: string;
+      detail: string;
+      icon: LucideIcon;
+    }> = [
+      {
+        value: "default",
+        label: "默认权限",
+        detail: "人工审批：高风险工具和越界访问会停下来等你确认。",
+        icon: UserCheck,
+      },
+      {
+        value: "smart-review",
+        label: "智能审查",
+        detail: "Agent 审批：可判断的请求交给审查 Agent，敏感输入仍问你。",
+        icon: Bot,
+      },
+      {
+        value: "full-access",
+        label: "完全访问",
+        detail: "直接放行：跳过大多数审批，允许访问本机文件和高风险工具。",
+        icon: OctagonAlert,
+      },
+    ];
+    const activeOption =
+      permissionModeOptions.find((option) => option.value === displayPermissionMode) ?? permissionModeOptions[0];
+    const ActivePermissionIcon = activeOption.icon;
 
     return (
-      <label className="chat-permission-mode" title="全局权限模式，切换后立即影响后续工具调用">
-        <ShieldCheck size={15} />
-        <span className="chat-permission-mode-label">{labels[permissionMode]}</span>
-        <select
-          aria-label="权限模式"
-          value={permissionMode}
-          onChange={(event) => onPermissionModeChange(event.target.value as RuntimePermissionMode)}
+      <div ref={permissionModeRef} className="chat-permission-mode">
+        <button
+          aria-expanded={permissionModeOpen}
+          aria-haspopup="menu"
+          aria-label={`权限模式：${activeOption.label}`}
+          className={`chat-permission-mode-trigger permission-${activeOption.value} ${permissionModeOpen ? "open" : ""}`}
+          onClick={() => {
+            setPermissionModeOpen((current) => !current);
+            setKnowledgePickerOpen(false);
+            setModelPickerOpen(false);
+            setThreadActionMenuOpen(false);
+          }}
+          title={activeOption.detail}
+          type="button"
         >
-          <option value="default">默认权限</option>
-          <option value="smart-review">智能审查</option>
-          <option value="full-access">完全访问</option>
-        </select>
-      </label>
+          <ActivePermissionIcon size={14} />
+          <span className="chat-permission-mode-label">{activeOption.label}</span>
+          <ChevronDown size={13} />
+        </button>
+
+        {permissionModeOpen ? (
+          <div className="chat-permission-mode-panel" role="menu">
+            {permissionModeOptions.map((option) => {
+              const selected = option.value === displayPermissionMode;
+              const PermissionIcon = option.icon;
+
+              return (
+                <button
+                  key={option.value}
+                  aria-current={selected ? "true" : undefined}
+                  className={`chat-permission-mode-option permission-${option.value} ${selected ? "selected" : ""}`}
+                  onClick={() => {
+                    setDisplayPermissionMode(option.value);
+                    setPermissionModeOpen(false);
+                    onPermissionModeChange(option.value);
+                  }}
+                  role="menuitem"
+                  title={option.detail}
+                  type="button"
+                >
+                  <PermissionIcon size={14} />
+                  <span className="chat-permission-mode-copy">
+                    <strong>{option.label}</strong>
+                    <span className="chat-permission-mode-detail">{option.detail}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
     );
   }
 
@@ -1479,6 +1566,7 @@ export function ChatWorkspace({
             if (disabled) return;
             setModelPickerOpen((current) => !current);
             setKnowledgePickerOpen(false);
+            setPermissionModeOpen(false);
           }}
           title={activeModelFullLabel || "选择模型"}
           type="button"
@@ -1666,8 +1754,10 @@ export function ChatWorkspace({
       );
     }
 
+    const hasImageAttachments = files.some((file) => attachmentCardMeta(file).kind === "image");
+
     return (
-      <div className="chat-attachment-card-list">
+      <div className={`chat-attachment-card-list ${hasImageAttachments ? "chat-image-attachment-grid" : ""}`}>
         {files.map((file) => {
           const meta = attachmentCardMeta(file);
           const imageSource = meta.kind === "image" ? file.dataUrl || file.url : "";
@@ -1676,18 +1766,12 @@ export function ChatWorkspace({
             return (
               <button
                 key={file.id}
+                aria-label={`打开图片附件 ${file.name}`}
                 className="chat-image-attachment-card"
                 onClick={() => onOpenAttachment(file)}
                 type="button"
               >
-                <img className="chat-image-attachment-thumb" src={imageSource} alt={`图片附件 ${file.name}`} />
-                <div className="chat-image-attachment-meta">
-                  <div className="chat-image-attachment-copy">
-                    <strong title={file.name}>{file.name}</strong>
-                    <span>{formatBytes(file.size)}</span>
-                  </div>
-                  <span className="chat-image-attachment-tag">{meta.extensionLabel}</span>
-                </div>
+                <img className="chat-image-attachment-thumb" src={imageSource} alt="" />
               </button>
             );
           }
@@ -2469,7 +2553,7 @@ export function ChatWorkspace({
       <div className="chat-composer-frame">
         {renderSlashCommandSuggestions()}
         {renderSkillSuggestions()}
-        {approvalRequests
+        {scopedApprovalRequests
           .filter(isQuestionApprovalRequest)
           .map((request) => (
             <QuestionRequestCard
@@ -2478,7 +2562,16 @@ export function ChatWorkspace({
               onResolve={onResolveApproval}
             />
           ))}
-        {approvalRequests
+        {scopedApprovalRequests
+          .filter(isExternalDirectoryApprovalRequest)
+          .map((request) => (
+            <ExternalDirectoryRequestCard
+              key={request.approvalId}
+              request={request}
+              onResolve={onResolveApproval}
+            />
+          ))}
+        {scopedApprovalRequests
           .filter(isMailAuthApprovalRequest)
           .map((request) => (
             <MailAuthRequestCard
@@ -2508,10 +2601,10 @@ export function ChatWorkspace({
                 <Plus size={17} />
               </button>
               {renderKnowledgePicker()}
+              {renderPermissionModeControl()}
             </div>
 
             <div className="chat-composer-right">
-              {renderPermissionModeControl()}
               {renderModelPicker()}
 
               <button

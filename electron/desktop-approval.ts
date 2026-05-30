@@ -1,6 +1,7 @@
 import type { ToolApprovalDecision } from "./agent-core";
 import type {
   DesktopApprovalRequest,
+  ExternalDirectoryApprovalMetadata,
   MailAuthApprovalMetadata,
   MailOAuthProvider,
   MailAuthType,
@@ -100,7 +101,9 @@ export function sanitizeQuestionApprovalRequestMetadata(metadata: unknown): Ques
       ? rawQuestion.options
           .map(sanitizeQuestionOption)
           .filter((option): option is { label: string; description: string } => Boolean(option))
+          .slice(0, 4)
       : [];
+    if (options.length < 2) return [];
 
     return [
       {
@@ -114,6 +117,17 @@ export function sanitizeQuestionApprovalRequestMetadata(metadata: unknown): Ques
   });
 
   return { questions };
+}
+
+export function sanitizeExternalDirectoryApprovalRequestMetadata(metadata: unknown): ExternalDirectoryApprovalMetadata {
+  if (!isRecord(metadata)) {
+    return { directory: "" };
+  }
+  return {
+    directory: stringField(metadata.directory) ?? "",
+    targetPath: stringField(metadata.targetPath),
+    workspaceRoot: stringField(metadata.workspaceRoot),
+  };
 }
 
 export function sanitizeMailAuthDecision(
@@ -172,12 +186,35 @@ export function sanitizeQuestionApprovalDecision(
   return { type: "allow", metadata: { answers } };
 }
 
+export function sanitizeExternalDirectoryApprovalDecision(decision: unknown): ToolApprovalDecision {
+  if (!isRecord(decision)) {
+    return { type: "deny", reason: "Invalid approval response." };
+  }
+  if (decision.type === "deny") {
+    return { type: "deny", reason: stringField(decision.reason) ?? "User denied external directory access." };
+  }
+  if (decision.type !== "allow") {
+    return { type: "deny", reason: "Invalid approval response." };
+  }
+
+  const metadata = isRecord(decision.metadata) ? decision.metadata : {};
+  return {
+    type: "allow",
+    metadata: {
+      rememberDirectory: metadata.rememberDirectory === true,
+    },
+  };
+}
+
 export function sanitizeDesktopApprovalDecision(
   kind: DesktopApprovalKind,
   decision: unknown,
 ): ToolApprovalDecision {
   if (kind === "question") {
     return sanitizeQuestionApprovalDecision(decision);
+  }
+  if (kind === "external_directory") {
+    return sanitizeExternalDirectoryApprovalDecision(decision);
   }
   return sanitizeMailAuthDecision(decision);
 }

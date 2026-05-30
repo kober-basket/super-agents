@@ -90,6 +90,8 @@ test("assistant settings expose image parsing as a simple model selector", () =>
   assert.match(html, /<h1>模型<\/h1>/);
   assert.match(html, /图片解析模型/);
   assert.match(html, /aria-label="图片解析模型"/);
+  assert.match(html, /assistant-image-model-control/);
+  assert.match(html, /用于非视觉模型处理图片前的内容识别/);
   assert.match(html, /Vision Model/);
   assert.doesNotMatch(html, /Vision \/ Vision Model/);
   assert.match(html, /surface-select-trigger/);
@@ -130,10 +132,13 @@ test("assistant settings use a styled model selector and source badges", () => {
   assert.match(html, /provider-source-badge custom/);
 
   const source = readSource("src/features/settings/AssistantSettings.tsx");
-  assert.match(source, /panelTitle="选择模型"/);
+  assert.match(source, /align="left"/);
+  assert.match(source, /panelTitle="选择图片解析模型"/);
   assert.match(source, /showCheck=\{false\}/);
 
   const styles = readSource("src/styles.css");
+  assert.match(styles, /\.assistant-image-model-control/);
+  assert.match(styles, /\.assistant-title-model-hint/);
   assert.match(styles, /\.assistant-image-model-select-panel/);
-  assert.match(styles, /max-height: min\(360px, 56vh\)/);
+  assert.match(styles, /max-height: min\(330px, 52vh\)/);
 });

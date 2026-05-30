@@ -70,12 +70,19 @@ test("sent image attachments render inline thumbnails", () => {
   const css = readRepoFile("src/styles.css");
 
   assert.match(source, /const imageSource = meta\.kind === "image" \? file\.dataUrl \|\| file\.url : ""/);
+  assert.match(source, /const hasImageAttachments = files\.some/);
+  assert.match(source, /className=\{`chat-attachment-card-list \$\{hasImageAttachments \? "chat-image-attachment-grid" : ""\}`\}/);
   assert.match(source, /className="chat-image-attachment-card"/);
   assert.match(source, /className="chat-image-attachment-thumb"/);
-  assert.match(source, /alt=\{`图片附件 \$\{file\.name\}`\}/);
-  assert.match(css, /\.chat-image-attachment-card\s*{[^}]*width:\s*min\(294px,\s*100%\)[^}]*overflow:\s*hidden/s);
-  assert.match(css, /\.chat-image-attachment-thumb\s*{[^}]*aspect-ratio:\s*16\s*\/\s*10[^}]*object-fit:\s*cover/s);
-  assert.match(css, /\.chat-image-attachment-meta\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s);
+  assert.match(source, /aria-label=\{`打开图片附件 \$\{file\.name\}`\}/);
+  assert.match(source, /alt=""/);
+  assert.doesNotMatch(source, /chat-image-attachment-meta/);
+  assert.doesNotMatch(source, /chat-image-attachment-copy/);
+  assert.doesNotMatch(source, /chat-image-attachment-tag/);
+  assert.match(css, /\.chat-image-attachment-grid\s*{[^}]*width:\s*min\(100%,\s*520px\)[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s);
+  assert.match(css, /\.chat-image-attachment-card\s*{[^}]*width:\s*72px[^}]*height:\s*72px[^}]*overflow:\s*hidden/s);
+  assert.match(css, /\.chat-image-attachment-thumb\s*{[^}]*height:\s*100%[^}]*object-fit:\s*cover/s);
+  assert.doesNotMatch(css, /\.chat-image-attachment-meta\s*{/);
 });
 
 test("clipboard image files become composer image attachments", async () => {

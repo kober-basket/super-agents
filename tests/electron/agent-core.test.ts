@@ -19,6 +19,7 @@ import {
   type ModelEvent,
   type ModelGateway,
   type ModelRequest,
+  type PermissionPolicy,
   type ToolApprovalDecision,
   type ToolApprovalRequest,
   type ToolDefinition,
@@ -120,6 +121,7 @@ function createSingleToolCore(
   modelGateway: ModelGateway,
   tool: ToolDefinition,
   approvalHandler?: (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>,
+  permissionPolicy?: PermissionPolicy,
 ) {
   const agents = new AgentRegistry();
   const skills = new SkillRegistry();
@@ -134,7 +136,7 @@ function createSingleToolCore(
     prompt: "Use tools when needed.",
     model: "test-model",
     tools: [tool.name],
-    permissionPolicy: {
+    permissionPolicy: permissionPolicy ?? {
       allowedTools: [tool.name],
       allowRisk: [tool.risk],
     },
@@ -4571,6 +4573,7 @@ test("permission manager supports runtime permission presets", () => {
     permissionPolicy: {
       allowedTools: ["read_note", "write_note", "run_shell"],
       allowRisk: ["read" as const, "network" as const],
+      requireApprovalForRisk: ["write" as const],
     },
   };
   const createTool = (name: string, risk: ToolDefinition["risk"]): ToolDefinition => ({
@@ -4602,7 +4605,7 @@ test("permission manager supports runtime permission presets", () => {
       toolCallsThisTurn: 0,
       runtimePermissionMode: "smart-review",
     }),
-    { type: "ask", reason: 'Tool "write_note" requires smart review before write access.' },
+    { type: "ask", reason: 'Tool risk "write" requires approval.' },
   );
 
   assert.deepEqual(
@@ -4612,6 +4615,23 @@ test("permission manager supports runtime permission presets", () => {
       toolCall: { id: "call-write", name: "write_note", input: {} },
       toolCallsThisTurn: 0,
       runtimePermissionMode: "default",
+    }),
+    { type: "ask", reason: 'Tool risk "write" requires approval.' },
+  );
+
+  assert.deepEqual(
+    manager.check({
+      agent: {
+        ...baseAgent,
+        permissionPolicy: {
+          allowedTools: ["write_note"],
+          allowRisk: ["read" as const, "network" as const],
+        },
+      },
+      tool: createTool("write_note", "write"),
+      toolCall: { id: "call-write", name: "write_note", input: {} },
+      toolCallsThisTurn: 0,
+      runtimePermissionMode: "smart-review",
     }),
     { type: "deny", reason: 'Tool risk "write" is not allowed for agent "agent".' },
   );
@@ -4640,6 +4660,8 @@ test("default prompt asks before ambiguous creative builds and plans before broa
 
   assert.match(prompt, /question tool/i);
   assert.match(prompt, /creative, product, game, or UI/i);
+  assert.match(prompt, /2-4/);
+  assert.match(prompt, /Other/i);
   assert.match(prompt, /explore first, then state a short plan/i);
 });
 
@@ -4725,6 +4747,285 @@ test("native agent core skips approval gates when full filesystem access is enab
     events.filter((event) => event.type === "status_delta").map((event) => event.text),
     [],
   );
+});
+
+test("native agent core skips eligible tool-internal approvals in full access mode", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "internal-full-access-1",
+          name: "memory_like_write",
+          input: {},
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "internal approval skipped" },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  let approvalRequestCount = 0;
+  let approvalResult: ToolApprovalDecision | undefined;
+  const core = createSingleToolCore(
+    gateway,
+    {
+      name: "memory_like_write",
+      description: "Tool with an internal eligible approval",
+      inputSchema: { type: "object" },
+      risk: "write",
+      async execute(_input, context) {
+        approvalResult = await context.requestApproval?.({
+          sessionId: context.sessionId,
+          agentId: context.agentId,
+          toolCall: context.toolCall ?? { id: "internal-full-access-1", name: "memory_like_write", input: {} },
+          kind: "tool",
+          reason: "Internal write approval.",
+        });
+        return { content: approvalResult?.type ?? "missing" };
+      },
+    },
+    async () => {
+      approvalRequestCount += 1;
+      return { type: "deny", reason: "should not ask" };
+    },
+  );
+
+  for await (const _event of core.sendTurn({
+    sessionId: "full-access-internal-approval-session",
+    agentId: "tool-agent",
+    content: "run internal approval",
+    runtimePermissionMode: "full-access",
+  })) {
+    // Drain the turn.
+  }
+
+  assert.equal(approvalRequestCount, 0);
+  assert.equal(approvalResult?.type, "allow");
+  assert.equal(approvalResult?.metadata?.fullAccess, true);
+});
+
+test("smart-review routes eligible tool approvals to an auto-reviewer agent", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "write-review-1",
+          name: "write_note",
+          input: { content: "safe workspace note" },
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      {
+        type: "text_delta",
+        text: JSON.stringify({
+          decision: "allow",
+          rationale: "The write is scoped to the current workspace and does not expose secrets.",
+        }),
+      },
+      { type: "done", stopReason: "end_turn" },
+    ],
+    [
+      { type: "text_delta", text: "wrote note" },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  let approvalRequestCount = 0;
+  let executeCount = 0;
+  const core = createSingleToolCore(
+    gateway,
+    {
+      name: "write_note",
+      description: "Write a workspace note",
+      inputSchema: {
+        type: "object",
+        properties: { content: { type: "string" } },
+        required: ["content"],
+      },
+      risk: "write",
+      async execute() {
+        executeCount += 1;
+        return { content: "note written" };
+      },
+    },
+    async () => {
+      approvalRequestCount += 1;
+      return { type: "deny", reason: "should not ask the user in smart-review" };
+    },
+    {
+      allowedTools: ["write_note"],
+      requireApprovalFor: ["write_note"],
+      allowRisk: ["write"],
+    },
+  );
+
+  const events = [];
+  for await (const event of core.sendTurn({
+    sessionId: "smart-review-allow-session",
+    agentId: "tool-agent",
+    content: "write the note",
+    runtimePermissionMode: "smart-review",
+  })) {
+    events.push(event);
+  }
+
+  assert.equal(approvalRequestCount, 0);
+  assert.equal(executeCount, 1);
+  assert.equal(gateway.requests.length, 3);
+  assert.match(gateway.requests[1]?.system ?? "", /approval reviewer/i);
+  assert.match(gateway.requests[1]?.messages.at(-1)?.content ?? "", /write_note/);
+  assert.match(gateway.requests[1]?.messages.at(-1)?.content ?? "", /safe workspace note/);
+  assert.deepEqual(
+    events.filter((event) => event.type === "tool_call_finished").map((event) => event.result.content),
+    ["note written"],
+  );
+  assert.deepEqual(
+    events.filter((event) => event.type === "message_delta").map((event) => event.text),
+    ["wrote note"],
+  );
+});
+
+test("smart-review denial blocks the action and tells the main agent not to work around it", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "shell-review-1",
+          name: "shell_probe",
+          input: { command: "cat ~/.ssh/id_rsa" },
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      {
+        type: "text_delta",
+        text: JSON.stringify({
+          decision: "deny",
+          rationale: "The command probes for private key material.",
+        }),
+      },
+      { type: "done", stopReason: "end_turn" },
+    ],
+    [
+      { type: "text_delta", text: "I will ask for a safer path." },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  let executeCount = 0;
+  const core = createSingleToolCore(
+    gateway,
+    {
+      name: "shell_probe",
+      description: "Run a shell probe",
+      inputSchema: {
+        type: "object",
+        properties: { command: { type: "string" } },
+        required: ["command"],
+      },
+      risk: "shell",
+      async execute() {
+        executeCount += 1;
+        return { content: "should not run" };
+      },
+    },
+    undefined,
+    {
+      allowedTools: ["shell_probe"],
+      requireApprovalFor: ["shell_probe"],
+      allowRisk: ["shell"],
+    },
+  );
+
+  for await (const _event of core.sendTurn({
+    sessionId: "smart-review-deny-session",
+    agentId: "tool-agent",
+    content: "read the private key",
+    runtimePermissionMode: "smart-review",
+  })) {
+    // Drain the turn.
+  }
+
+  assert.equal(executeCount, 0);
+  assert.equal(gateway.requests.length, 3);
+  const toolMessage = gateway.requests[2]?.messages.at(-1);
+  assert.equal(toolMessage?.role, "tool");
+  assert.match(toolMessage?.content ?? "", /Auto-review denied/);
+  assert.match(toolMessage?.content ?? "", /private key material/);
+  assert.match(toolMessage?.content ?? "", /Do not pursue the same outcome via workaround/i);
+});
+
+test("smart-review keeps user-input approvals routed to the user", async () => {
+  const gateway = new ScriptedModelGateway([
+    [
+      {
+        type: "tool_call",
+        toolCall: {
+          id: "ask-user-1",
+          name: "ask_user",
+          input: {},
+        },
+      },
+      { type: "done", stopReason: "tool_use" },
+    ],
+    [
+      { type: "text_delta", text: "answer received" },
+      { type: "done", stopReason: "end_turn" },
+    ],
+  ]);
+  let approvalRequestCount = 0;
+  const core = createSingleToolCore(
+    gateway,
+    {
+      name: "ask_user",
+      description: "Ask the user",
+      inputSchema: { type: "object" },
+      risk: "read",
+      async execute(_input, context) {
+        const approval = await context.requestApproval?.({
+          sessionId: context.sessionId,
+          agentId: context.agentId,
+          toolCall: context.toolCall ?? { id: "ask-user-1", name: "ask_user", input: {} },
+          kind: "question",
+          reason: "Need user input.",
+          metadata: {
+            questions: [
+              {
+                id: "one",
+                question: "Choose?",
+                options: [{ label: "A" }, { label: "B" }],
+              },
+            ],
+          },
+        });
+        return { content: approval?.type === "allow" ? "user allowed" : "user denied" };
+      },
+    },
+    async (request) => {
+      approvalRequestCount += 1;
+      assert.equal(request.kind, "question");
+      return { type: "allow" };
+    },
+  );
+
+  for await (const _event of core.sendTurn({
+    sessionId: "smart-review-question-session",
+    agentId: "tool-agent",
+    content: "ask the user",
+    runtimePermissionMode: "smart-review",
+  })) {
+    // Drain the turn.
+  }
+
+  assert.equal(approvalRequestCount, 1);
+  assert.equal(gateway.requests.length, 2);
+  assert.doesNotMatch(gateway.requests[1]?.system ?? "", /approval reviewer/i);
 });
 
 test("native agent core rejects invalid required tool inputs before approval or execution", async () => {

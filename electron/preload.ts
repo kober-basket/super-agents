@@ -67,8 +67,6 @@ const desktopAgent = {
     ipcRenderer.invoke("desktop:list-conversations") as Promise<ChatConversationListPayload>,
   getConversation: (conversationId: string) =>
     ipcRenderer.invoke("desktop:get-conversation", conversationId) as Promise<ChatConversation>,
-  markConversationViewed: (conversationId: string) =>
-    ipcRenderer.invoke("desktop:mark-conversation-viewed", conversationId) as Promise<ChatConversation>,
   startChatTurn: (payload: ChatSendInput) =>
     ipcRenderer.invoke("desktop:start-chat-turn", payload) as Promise<ChatTurnStartResult>,
   cancelChatTurn: (conversationId: string) =>

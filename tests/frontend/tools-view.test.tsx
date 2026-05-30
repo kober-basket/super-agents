@@ -101,12 +101,12 @@ test("tools list icons reuse the skills premium icon implementation", () => {
   ]);
 
   assert.match(html, /class="skill-icon-shell skill-icon-premium skill-accent-sky"/);
-  assert.match(html, /class="skill-icon-orbit"/);
+  assert.doesNotMatch(html, /class="skill-icon-orbit"/);
   assert.doesNotMatch(html, /tool-icon-shell/);
   assert.doesNotMatch(html, /tool-icon-spark/);
 });
 
-test("tools list icons use a flat low-depth treatment instead of beveled layers", () => {
+test("tools list icons use the saturated app-icon treatment from skills", () => {
   const css = readSource("src/styles.css");
   const block = extractCssBlock(
     css,
@@ -118,19 +118,21 @@ test("tools list icons use a flat low-depth treatment instead of beveled layers"
   );
 
   assert.match(block, /border-radius:\s*12px;/);
-  assert.match(block, /background:\s*color-mix\(in srgb,\s*var\(--icon-start\)\s+26%,\s*#ffffff\);/);
-  assert.match(block, /border-color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+24%,\s*#ffffff\);/);
-  assert.match(block, /color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+98%,\s*#1f2937\);/);
-  assert.match(block, /box-shadow:\s*none;/);
-  assert.doesNotMatch(block, /linear-gradient|inset/);
-  assert.doesNotMatch(hoverBlock, /linear-gradient|inset/);
-  assert.match(hoverBlock, /border-color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+30%,\s*#ffffff\);/);
-  assert.match(hoverBlock, /background:\s*color-mix\(in srgb,\s*var\(--icon-start\)\s+30%,\s*#ffffff\);/);
-  assert.match(hoverBlock, /box-shadow:\s*0\s+4px\s+10px\s+color-mix\(in srgb,\s*var\(--icon-shadow\)\s+8%,\s*transparent\);/);
+  assert.match(block, /linear-gradient\(/);
+  assert.match(block, /color-mix\(in srgb,\s*var\(--icon-start\)\s+76%,\s*#ffffff\)\s+0%/);
+  assert.match(block, /color-mix\(in srgb,\s*var\(--icon-end\)\s+86%,\s*#0f172a\)\s+100%/);
+  assert.match(block, /border-color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+42%,\s*#ffffff\);/);
+  assert.match(block, /color:\s*#ffffff;/);
+  assert.match(block, /box-shadow:\s*0\s+8px\s+18px\s+color-mix\(in srgb,\s*var\(--icon-shadow\)\s+16%,\s*transparent\);/);
+  assert.doesNotMatch(block, /background:\s*color-mix\(in srgb,\s*var\(--icon-start\)\s+26%/);
+  assert.doesNotMatch(block, /inset/);
+  assert.match(hoverBlock, /linear-gradient\(/);
+  assert.doesNotMatch(hoverBlock, /inset/);
+  assert.match(hoverBlock, /border-color:\s*color-mix\(in srgb,\s*var\(--icon-end\)\s+52%,\s*#ffffff\);/);
+  assert.match(hoverBlock, /box-shadow:\s*0\s+10px\s+20px\s+color-mix\(in srgb,\s*var\(--icon-shadow\)\s+18%,\s*transparent\);/);
   assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium::before/s);
   assert.match(css, /\.tools-page\s+\.tool-list\s+\.skill-icon-shell\.skill-icon-premium::before\s*{[^}]*display:\s*none;/s);
-  assert.doesNotMatch(block, /#111827/);
-  assert.doesNotMatch(block, /rgba\(255,\s*255,\s*255,\s*0\.94\)/);
+  assert.doesNotMatch(block, /#1f2937/);
 });
 
 test("built-in tool icons use purpose-specific browser and mail symbols", () => {

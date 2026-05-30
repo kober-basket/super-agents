@@ -377,10 +377,6 @@ export class ChatOrchestrator {
     });
     activeTurn.runtimeTrace.events = activeTurn.eventLog.snapshot();
     await this.persistRuntimeTrace(activeTurn);
-    await this.conversationService.markConversationTurnCompleted(activeTurn.conversationId, {
-      turnId: activeTurn.turnId,
-      stopReason: "cancelled",
-    });
     activeTurn.completion.resolve({
       conversation: await this.conversationService.getConversation(activeTurn.conversationId),
       assistantMessage: {
@@ -424,6 +420,21 @@ export class ChatOrchestrator {
   ) {
     try {
       let stopReason = "end_turn";
+      let turnFinishedEmitted = false;
+      const emitTurnFinished = (nextStopReason: string) => {
+        if (turnFinishedEmitted) {
+          return;
+        }
+
+        turnFinishedEmitted = true;
+        this.emitEvent({
+          type: "turn_finished",
+          conversationId: activeTurn.conversationId,
+          turnId: activeTurn.turnId,
+          stopReason: nextStopReason,
+        });
+      };
+
       for await (const event of this.nativeCore.sendTurn({
         sessionId: activeTurn.sessionId,
         agentId: this.defaultAgentId,
@@ -444,8 +455,11 @@ export class ChatOrchestrator {
         await this.handleAgentEvent(activeTurn, event);
         if (event.type === "turn_finished") {
           stopReason = event.stopReason;
+          emitTurnFinished(stopReason);
         }
       }
+
+      emitTurnFinished(stopReason);
 
       await activeTurn.messagePersister.flush();
       this.commitAssistantTextLayout(activeTurn);
@@ -471,11 +485,6 @@ export class ChatOrchestrator {
           updatedAt: Date.now(),
         } satisfies ChatMessage);
 
-      const completedConversation = await this.conversationService.markConversationTurnCompleted(activeTurn.conversationId, {
-        turnId: activeTurn.turnId,
-        stopReason,
-      });
-
       activeTurn.completion.resolve({
         conversation,
         assistantMessage,
@@ -486,13 +495,6 @@ export class ChatOrchestrator {
         void this.generateTitleForCompletedTurn(activeTurn, assistantMessage.content);
       }
 
-      this.emitEvent({
-        type: "turn_finished",
-        conversationId: activeTurn.conversationId,
-        turnId: activeTurn.turnId,
-        stopReason,
-        conversation: completedConversation,
-      });
     } catch (error) {
       await activeTurn.messagePersister.flush();
       const failure = formatAgentTurnFailure(error);

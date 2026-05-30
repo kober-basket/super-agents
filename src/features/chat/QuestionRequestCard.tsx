@@ -1,4 +1,4 @@
-import { Check, Circle, LoaderCircle, Square, X } from "lucide-react";
+import { Check, Circle, LoaderCircle, MessageCircleQuestion, Square, X } from "lucide-react";
 import { useState } from "react";
 
 import type {
@@ -86,8 +86,12 @@ function questionHasSelection(
   return (selections[question.id] ?? []).length > 0 || Boolean((drafts[question.id] ?? "").trim());
 }
 
+function hasQuestionOptions(question: QuestionApprovalQuestion) {
+  return question.options.length >= 2;
+}
+
 function pageLabel(activeQuestionIndex: number, total: number) {
-  return total > 1 ? `问题 ${activeQuestionIndex + 1} / ${total}` : "问题";
+  return total > 1 ? `待确认 ${activeQuestionIndex + 1} / ${total}` : "待确认";
 }
 
 interface QuestionRequestCardProps {
@@ -135,6 +139,7 @@ export function QuestionRequestCard({ request, onResolve }: QuestionRequestCardP
     <article className="question-card" data-approval-id={request.approvalId}>
       <header className="question-card-head">
         <div className="question-card-title">
+          <MessageCircleQuestion size={15} />
           <strong>{currentPageLabel}</strong>
         </div>
         {hasMultipleQuestions ? (
@@ -162,60 +167,73 @@ export function QuestionRequestCard({ request, onResolve }: QuestionRequestCardP
       <div className="question-card-body">
         {visibleQuestions.map((question, visibleIndex) => {
           const questionNumber = range.start + visibleIndex + 1;
+          const hasOptions = hasQuestionOptions(question);
           return (
             <section className="question-block" key={question.id}>
               <div className="question-block-copy">
-                {question.header ? <span className="question-topic">{question.header}</span> : null}
                 <div className="question-line">
                   {hasMultipleQuestions ? <span className="question-number">{questionNumber}</span> : null}
                   <p>{question.question}</p>
                 </div>
               </div>
-              {question.options.length > 0 ? (
-                <div className="question-option-list">
-                  {question.options.map((option) => {
-                    const selected = (selections[question.id] ?? []).includes(option.label);
-                    return (
-                      <button
-                        aria-pressed={selected}
-                        className={selected ? "question-option selected" : "question-option"}
-                        disabled={busy}
-                        key={option.label}
-                        onClick={() =>
-                          setSelections((current) => toggleQuestionSelection(question, current, option.label))
-                        }
-                        type="button"
-                      >
-                        {selected ? (
-                          <Check size={14} />
-                        ) : question.multiple ? (
-                          <Square size={14} />
-                        ) : (
-                          <Circle size={14} />
-                        )}
-                        <strong>{option.label}</strong>
-                        {option.description ? <span>{option.description}</span> : null}
-                      </button>
-                    );
-                  })}
+              {hasOptions ? (
+                <>
+                  <div className="question-option-list">
+                    {question.options.map((option) => {
+                      const selected = (selections[question.id] ?? []).includes(option.label);
+                      return (
+                        <button
+                          aria-pressed={selected}
+                          className={selected ? "question-option selected" : "question-option"}
+                          disabled={busy}
+                          key={option.label}
+                          onClick={() =>
+                            setSelections((current) => toggleQuestionSelection(question, current, option.label))
+                          }
+                          type="button"
+                        >
+                          {selected ? (
+                            <span className="question-option-mark">
+                              <Check size={14} strokeWidth={3} />
+                            </span>
+                          ) : question.multiple ? (
+                            <span className="question-option-mark">
+                              <Square size={13} />
+                            </span>
+                          ) : (
+                            <span className="question-option-mark">
+                              <Circle size={13} />
+                            </span>
+                          )}
+                          <span className="question-option-copy">
+                            <strong>{option.label}</strong>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="question-freeform">
+                    <textarea
+                      aria-label={`第 ${questionNumber} 题自定义答案`}
+                      className="question-freeform-input"
+                      disabled={busy}
+                      onChange={(event) =>
+                        setDrafts((current) => ({
+                          ...current,
+                          [question.id]: event.currentTarget.value,
+                        }))
+                      }
+                      placeholder="补充自己的答案"
+                      rows={1}
+                      value={drafts[question.id] ?? ""}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="question-option-error" role="alert">
+                  这个问题缺少选项，请取消后让助手重新生成。
                 </div>
-              ) : null}
-              <div className="question-freeform">
-                <textarea
-                  aria-label={`第 ${questionNumber} 题自定义答案`}
-                  className="question-freeform-input"
-                  disabled={busy}
-                  onChange={(event) =>
-                    setDrafts((current) => ({
-                      ...current,
-                      [question.id]: event.currentTarget.value,
-                    }))
-                  }
-                  placeholder={question.options.length > 0 ? "补充自己的答案" : "输入答案"}
-                  rows={1}
-                  value={drafts[question.id] ?? ""}
-                />
-              </div>
+              )}
             </section>
           );
         })}

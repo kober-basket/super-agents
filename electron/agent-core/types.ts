@@ -82,6 +82,7 @@ export interface PermissionPolicy {
   allowedTools?: string[];
   deniedTools?: string[];
   requireApprovalFor?: string[];
+  requireApprovalForRisk?: ToolRisk[];
   allowRisk?: ToolRisk[];
   maxToolCallsPerTurn?: number;
 }

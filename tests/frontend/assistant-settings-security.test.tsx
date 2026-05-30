@@ -109,7 +109,39 @@ test("assistant settings keeps custom provider deletion available", () => {
   );
 
   assert.match(html, /provider-detail-actions/);
-  assert.match(html, /删除提供商/);
+  assert.match(html, />删除<\/button>/);
+  assert.doesNotMatch(html, />删除提供商<\/button>/);
   assert.doesNotMatch(html, /<input disabled="" value="OpenAI"\/>/);
   assert.doesNotMatch(html, /<input disabled="" placeholder="https:\/\/api\.example\.com\/v1" value="https:\/\/api\.example\.com\/v1"\/>/);
+});
+
+test("assistant settings places image recognition model next to page title", () => {
+  const html = renderToStaticMarkup(
+    <AssistantSettings
+      activeModel={null}
+      composerModelId=""
+      fallbackModelId=""
+      modelProviders={[provider]}
+      providerRefreshingId={null}
+      selectedModelProviderId={provider.id}
+      selectableModels={[]}
+      onAddModelProvider={() => undefined}
+      onFallbackModelChange={() => undefined}
+      onModelChange={() => undefined}
+      onRefreshProviderModels={() => undefined}
+      onRemoveModelProvider={() => undefined}
+      onReorderModelProviders={() => undefined}
+      onSelectProvider={() => undefined}
+      onSetDefaultProviderModel={() => undefined}
+      onSetProviderModelsEnabled={() => undefined}
+      onToggleProviderModel={() => undefined}
+      onUpdateModelProvider={() => undefined}
+    />,
+  );
+
+  assert.match(
+    html,
+    /settings-stage-heading[\s\S]*<h1>模型<\/h1>[\s\S]*assistant-title-model-select[\s\S]*图片解析模型/,
+  );
+  assert.doesNotMatch(html, /assistant-settings-actions[\s\S]*assistant-title-model-select/);
 });

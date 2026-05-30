@@ -37,11 +37,6 @@ import type {
 } from "./types";
 import { workspaceClient } from "./services/workspace-client";
 import { PrimarySidebar } from "./features/navigation/PrimarySidebar";
-import {
-  isConversationTurnActive,
-  resolveSidebarConversationRunStatus,
-  shouldApplyStartedConversationAsActive,
-} from "./features/navigation/conversation-status";
 import { AppTitleBar } from "./features/navigation/AppTitleBar";
 import { SettingsSidebar } from "./features/settings/SettingsSidebar";
 import type { SettingsSection } from "./features/settings/types";
@@ -75,6 +70,7 @@ import {
   mergeStartedConversationRuntimeState,
   resetConversationRuntimeStateForTurn,
 } from "./lib/chat-runtime-state";
+import { resolveSidebarConversationReadState } from "./lib/sidebar-conversation-read-state";
 import { stripComposerSkillMentions } from "./lib/composer-skills";
 import { BROWSER_HOME_URL, buildBrowserPreview } from "./lib/browser-target";
 import {
@@ -309,6 +305,10 @@ function createConversationRuntimeState(
   return createEmptyConversationRuntimeState(status);
 }
 
+function isConversationTurnActive(status?: ChatConversationRuntimeState["status"]) {
+  return status === "running" || status === "cancelling";
+}
+
 function preserveActiveTurnStatus(status?: ChatConversationRuntimeState["status"]) {
   return status === "cancelling" ? "cancelling" : "running";
 }
@@ -418,6 +418,7 @@ export default function App() {
   const [conversationRuntimeStates, setConversationRuntimeStates] = useState<
     Record<string, ChatConversationRuntimeState>
   >({});
+  const [unreadConversationIds, setUnreadConversationIds] = useState<Set<string>>(() => new Set());
   const activeConversationIdRef = useRef<string | null>(null);
   const streamingPreviewByMessageRef = useRef<Record<string, string>>({});
   const [startingChatTurn, setStartingChatTurn] = useState(false);
@@ -835,7 +836,6 @@ export default function App() {
       selectedKnowledgeBaseIds: conversation.selectedKnowledgeBaseIds,
       agentCore: conversation.agentCore,
       agentSessionId: conversation.agentSessionId,
-      completedTurnId: conversation.completedTurnId,
     };
   }
 
@@ -848,6 +848,18 @@ export default function App() {
     );
   }
 
+  function markConversationRead(conversationId: string) {
+    setUnreadConversationIds((current) => {
+      if (!current.has(conversationId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.delete(conversationId);
+      return next;
+    });
+  }
+
   function syncConversationState(
     conversation: ChatConversation,
     options?: UpsertConversationSummaryOptions,
@@ -855,22 +867,8 @@ export default function App() {
     activeConversationIdRef.current = conversation.id;
     setActiveConversation(conversation);
     setActiveConversationId(conversation.id);
+    markConversationRead(conversation.id);
     upsertConversationSummary(toConversationSummary(conversation), options);
-  }
-
-  function clearConversationCompletion(conversationId: string) {
-    setConversations((current) =>
-      current.map((conversation) =>
-        conversation.id === conversationId
-          ? { ...conversation, completedTurnId: undefined }
-          : conversation,
-      ),
-    );
-    setActiveConversation((current) =>
-      current?.id === conversationId
-        ? { ...current, completedTurnId: undefined }
-        : current,
-    );
   }
 
   useEffect(() => {
@@ -1251,10 +1249,15 @@ export default function App() {
       }
 
       if (event.type === "turn_finished") {
-        const normalizedStopReason = normalizeTurnStopReason(
-          event.stopReason,
-          conversationRuntimeStates[event.conversationId]?.status,
-        );
+        setUnreadConversationIds((current) => {
+          const next = new Set(current);
+          if (activeConversationIdRef.current === event.conversationId) {
+            next.delete(event.conversationId);
+          } else {
+            next.add(event.conversationId);
+          }
+          return next;
+        });
         setConversationRuntimeStates((current) => {
           const previous = current[event.conversationId] ?? createConversationRuntimeState();
           return {
@@ -1267,40 +1270,6 @@ export default function App() {
             },
           };
         });
-        if (normalizedStopReason !== "cancelled") {
-          if (activeConversationIdRef.current === event.conversationId) {
-            clearConversationCompletion(event.conversationId);
-            void workspaceClient
-              .markConversationViewed(event.conversationId)
-              .catch(() => undefined);
-            return;
-          }
-
-          const completedConversation = event.conversation;
-          if (completedConversation) {
-            upsertConversationSummary(toConversationSummary(completedConversation));
-            setActiveConversation((current) =>
-              current?.id === completedConversation.id ? completedConversation : current,
-            );
-          } else {
-            setConversations((current) =>
-              current.map((conversation) =>
-                conversation.id === event.conversationId
-                  ? { ...conversation, completedTurnId: event.turnId }
-                  : conversation,
-              ),
-            );
-            void workspaceClient
-              .getConversation(event.conversationId)
-              .then((conversation) => {
-                upsertConversationSummary(toConversationSummary(conversation));
-                setActiveConversation((current) =>
-                  current?.id === conversation.id ? conversation : current,
-                );
-              })
-              .catch(() => undefined);
-          }
-        }
         return;
       }
 
@@ -1337,7 +1306,7 @@ export default function App() {
         ...current.filter((item) => item.approvalId !== request.approvalId),
         request,
       ]);
-      if (request.kind === "mail_auth" || request.kind === "question") {
+      if (request.kind === "mail_auth" || request.kind === "question" || request.kind === "external_directory") {
         setView("chat");
       }
     });
@@ -2266,7 +2235,7 @@ export default function App() {
     setActiveConversation(null);
 
     try {
-      const conversation = await workspaceClient.markConversationViewed(conversationId);
+      const conversation = await workspaceClient.getConversation(conversationId);
       syncConversationState(conversation);
     } catch (error) {
       if (isConversationNotFoundError(error)) {
@@ -2302,6 +2271,15 @@ export default function App() {
       setConversationRuntimeStates((current) => {
         const next = { ...current };
         delete next[conversationId];
+        return next;
+      });
+      setUnreadConversationIds((current) => {
+        if (!current.has(conversationId)) {
+          return current;
+        }
+
+        const next = new Set(current);
+        next.delete(conversationId);
         return next;
       });
 
@@ -2457,7 +2435,7 @@ export default function App() {
       });
 
       const replaceConversationId = nextConversationId.startsWith("temp-") ? nextConversationId : null;
-      if (shouldApplyStartedConversationAsActive(activeConversationIdRef.current, nextConversationId)) {
+      if (activeConversationIdRef.current === nextConversationId) {
         syncConversationState(result.conversation, { replaceConversationId });
       } else {
         upsertConversationSummary(toConversationSummary(result.conversation), { replaceConversationId });
@@ -2777,6 +2755,23 @@ export default function App() {
     );
   }
   const hasSkillResults = filteredInstalledSkills.length > 0;
+  const sidebarConversations = useMemo(
+    () =>
+      conversations.map((conversation) => ({
+        ...conversation,
+        readState: resolveSidebarConversationReadState({
+          conversationId: conversation.id,
+          activeConversationId,
+          runtimeStatus: conversationRuntimeStates[conversation.id]?.status,
+          hasPendingInteraction: Boolean(
+            conversation.agentSessionId &&
+              approvalRequests.some((request) => request.sessionId === conversation.agentSessionId),
+          ),
+          unreadConversationIds,
+        }),
+      })),
+    [activeConversationId, approvalRequests, conversations, conversationRuntimeStates, unreadConversationIds],
+  );
   const activeConversationRuntimeState =
     (activeConversationId ? conversationRuntimeStates[activeConversationId] : null) ?? null;
   const activeKnowledgeBaseIds = useMemo(
@@ -3174,23 +3169,7 @@ export default function App() {
         ) : (
           <PrimarySidebar
             activeConversationId={activeConversationId}
-            conversations={conversations.map((conversation) => {
-              const runtimeState = conversationRuntimeStates[conversation.id];
-              const hasPendingApproval = Boolean(
-                conversation.agentSessionId &&
-                  approvalRequests.some((request) => request.sessionId === conversation.agentSessionId),
-              );
-              const hasCompletion = conversation.id !== activeConversationId && Boolean(conversation.completedTurnId);
-
-              return {
-                ...conversation,
-                runStatus: resolveSidebarConversationRunStatus(
-                  runtimeState,
-                  hasPendingApproval,
-                  hasCompletion,
-                ),
-              };
-            })}
+            conversations={sidebarConversations}
             onCreateConversation={createDraftConversation}
             onDeleteConversation={(conversationId) => void deleteConversation(conversationId)}
             onOpenConversation={(conversationId) => void openConversation(conversationId)}

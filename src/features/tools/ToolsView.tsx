@@ -357,7 +357,6 @@ function ToolIcon({ icon: Icon, label, tone }: { icon: LucideIcon; label: string
   return (
     <div className={clsx("skill-icon-shell", "skill-icon-premium", tone)} title={label}>
       <Icon size={20} strokeWidth={2.1} />
-      <span aria-hidden="true" className="skill-icon-orbit" />
     </div>
   );
 }

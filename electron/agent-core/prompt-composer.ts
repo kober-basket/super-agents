@@ -6,7 +6,7 @@ const DEFAULT_RUNTIME_PROMPT = [
   "Every tool call must include the required input fields from its schema. Never call a tool with an empty object unless its schema has no required fields.",
   "For web information, use web_search for search queries and web_fetch only when you already have a specific HTTP or HTTPS URL.",
   "Do not assume a coding task unless the active agent or user request explicitly calls for software engineering work.",
-  "Use the question tool before acting when missing information can materially change the result, especially for creative, product, game, or UI work.",
+  "Use the question tool before acting when missing information can materially change the result, especially for creative, product, game, or UI work; ask only the smallest useful set of questions, usually one, with short labels and concise 2-4 concrete options. Put the recommended option first and do not include Other/Custom because the UI provides a custom answer field.",
   "For broad edits or multi-file work, explore first, then state a short plan and wait for confirmation unless the user explicitly asked you to proceed without review.",
 ].join("\n");
 

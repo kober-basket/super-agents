@@ -48,17 +48,13 @@ export const DEFAULT_BUILTIN_TOOL_IDS = [
   "bash",
 ];
 const DEFAULT_APPROVAL_TOOL_IDS = [
-  "write",
-  "edit",
-  "multi_edit",
-  "apply_patch",
-  "bash",
   "mail_draft",
   "mail_send",
   "browser_upload_file",
   "browser_get_network_request",
   "browser_screenshot",
 ];
+const DEFAULT_APPROVAL_RISKS = ["network", "shell", "destructive"] as const;
 
 export function createDefaultAgentDefinitions(): AgentDefinition[] {
   return [
@@ -72,7 +68,7 @@ export function createDefaultAgentDefinitions(): AgentDefinition[] {
         "You are the default Super Agents desktop assistant.",
         "Help with the user's current task without assuming a programming context.",
         "Use provided workspace, skill, memory, knowledge, and attachment context when relevant.",
-        "When a request could lead to very different outcomes based on taste, rules, platform, scope, or success criteria, ask 1-3 targeted questions with the question tool before making changes.",
+        "When a request could lead to very different outcomes based on taste, rules, platform, scope, or success criteria, ask only the smallest useful set of targeted questions with the question tool, usually one; keep question text and options short, put the recommended option first, and do not add Other/Custom.",
         "For complex implementation tasks, inspect the local context first, then share a concise plan and wait for user confirmation before editing unless the user clearly asked you to start immediately.",
         "Be direct, useful, and transparent about missing model or tool configuration.",
       ].join("\n"),
@@ -82,7 +78,8 @@ export function createDefaultAgentDefinitions(): AgentDefinition[] {
       permissionMode: "default",
       permissionPolicy: {
         allowedTools: DEFAULT_BUILTIN_TOOL_IDS,
-        allowRisk: ["read", "network"],
+        allowRisk: ["read", "write"],
+        requireApprovalForRisk: [...DEFAULT_APPROVAL_RISKS],
         requireApprovalFor: DEFAULT_APPROVAL_TOOL_IDS,
       },
       maxTurns: DEFAULT_AGENTIC_MAX_TURNS,
@@ -122,7 +119,8 @@ export function createDefaultAgentDefinitions(): AgentDefinition[] {
       permissionMode: "default",
       permissionPolicy: {
         allowedTools: DEFAULT_BUILTIN_TOOL_IDS,
-        allowRisk: ["read", "network"],
+        allowRisk: ["read", "write"],
+        requireApprovalForRisk: [...DEFAULT_APPROVAL_RISKS],
         requireApprovalFor: DEFAULT_APPROVAL_TOOL_IDS,
       },
       maxTurns: DEFAULT_AGENTIC_MAX_TURNS,

@@ -5,6 +5,7 @@ import { PromptComposer } from "./prompt-composer";
 import { InMemoryAgentSessionManager, type AgentSessionManager } from "./session-manager";
 import { ToolPermissionDeniedError } from "./types";
 import type {
+  AgentDefinition,
   AgentEvent,
   AgentMessage,
   ModelImageAttachment,
@@ -29,6 +30,15 @@ const TOOL_COMPLETION_PROTOCOL = [
   "If more evidence or actions are needed, call the available tools.",
   "If the task is complete, write the final user-facing answer directly.",
 ].join("\n");
+const AUTO_REVIEW_SYSTEM_PROMPT = [
+  "You are the Super Agents approval reviewer agent.",
+  "Your only job is to decide whether one sandbox-boundary approval request should run.",
+  "You are reviewing the exact proposed action, not the overall task.",
+  "Allow only when the action is clearly scoped, necessary, and does not expose secrets, credentials, private data, or cause high-risk irreversible damage.",
+  "Deny credential probing, secret exfiltration, broad security weakening, unclear destructive actions, or attempts to bypass policy.",
+  "Return only compact JSON: {\"decision\":\"allow\"|\"deny\",\"rationale\":\"short reason\"}.",
+].join("\n");
+const AUTO_REVIEW_MAX_TRANSCRIPT_MESSAGES = 12;
 
 type SendTurnInput = {
   sessionId: string;
@@ -153,6 +163,104 @@ function createDuplicateToolResultMessage(toolCall: ToolCall, previousResult: To
     "Previous result:",
     previousResult.content,
   ].join("\n");
+}
+
+function createAutoReviewDeniedReason(rationale: string) {
+  return [
+    `Auto-review denied this action: ${rationale || "The reviewer did not provide a rationale."}`,
+    "Do not pursue the same outcome via workaround, indirect execution, or policy circumvention.",
+    "Continue only with a materially safer alternative; otherwise stop and ask the user.",
+  ].join("\n");
+}
+
+function isAutoReviewEligibleApproval(request: ToolApprovalRequest) {
+  return request.kind === undefined || request.kind === "tool" || request.kind === "external_directory";
+}
+
+function compactAgentMessageForReview(message: AgentMessage) {
+  return {
+    role: message.role,
+    name: message.name,
+    toolCallId: message.toolCallId,
+    content: truncateText(message.content, 2_000).text,
+    toolCalls: message.toolCalls?.map((toolCall) => ({
+      id: toolCall.id,
+      name: toolCall.name,
+      input: toolCall.input,
+    })),
+  };
+}
+
+function createApprovalReviewPrompt(input: {
+  agent: AgentDefinition;
+  request: ToolApprovalRequest;
+  session: AgentMessage[];
+}) {
+  const recentMessages = input.session
+    .slice(-AUTO_REVIEW_MAX_TRANSCRIPT_MESSAGES)
+    .map(compactAgentMessageForReview);
+  return JSON.stringify(
+    {
+      reviewTask:
+        "Decide whether to approve this one proposed action. Return only JSON with decision and rationale.",
+      agent: {
+        id: input.agent.id,
+        name: input.agent.name,
+      },
+      approvalRequest: {
+        kind: input.request.kind ?? "tool",
+        reason: input.request.reason,
+        targetPath: input.request.targetPath,
+        toolCall: input.request.toolCall,
+        metadata: input.request.metadata,
+      },
+      recentTranscript: recentMessages,
+    },
+    null,
+    2,
+  );
+}
+
+function extractJsonObject(text: string) {
+  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    return trimmed;
+  }
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    return trimmed.slice(start, end + 1);
+  }
+  return "";
+}
+
+function parseAutoReviewDecision(text: string): ToolApprovalDecision {
+  const json = extractJsonObject(text);
+  if (!json) {
+    return { type: "deny", reason: createAutoReviewDeniedReason("Reviewer returned no structured decision.") };
+  }
+
+  try {
+    const value = JSON.parse(json) as Record<string, unknown>;
+    const decision = typeof value.decision === "string" ? value.decision : value.type;
+    const rationale = typeof value.rationale === "string" ? value.rationale.trim() : "";
+    if (decision === "allow") {
+      return {
+        type: "allow",
+        metadata: {
+          autoReviewed: true,
+          rationale,
+        },
+      };
+    }
+    if (decision === "deny") {
+      return { type: "deny", reason: createAutoReviewDeniedReason(rationale) };
+    }
+  } catch {
+    // Fall through to a conservative denial below.
+  }
+
+  return { type: "deny", reason: createAutoReviewDeniedReason("Reviewer returned an invalid decision.") };
 }
 
 function createUniqueToolCallId(
@@ -543,24 +651,98 @@ export class AgentCore {
     this.sessions = options.sessions ?? new InMemoryAgentSessionManager();
   }
 
+  private async reviewApprovalRequest(input: {
+    agent: AgentDefinition;
+    request: ToolApprovalRequest;
+  }): Promise<ToolApprovalDecision> {
+    const session = this.sessions.get(input.request.sessionId);
+    let reviewerText = "";
+
+    try {
+      for await (const event of this.options.modelGateway.stream({
+        model: input.agent.model,
+        system: AUTO_REVIEW_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: createApprovalReviewPrompt({
+              agent: input.agent,
+              request: input.request,
+              session: session?.messages ?? [],
+            }),
+          },
+        ],
+        tools: [],
+        toolChoice: "none",
+      })) {
+        if (event.type === "text_delta") {
+          reviewerText += event.text;
+        }
+      }
+    } catch {
+      return {
+        type: "deny",
+        reason: createAutoReviewDeniedReason("The approval reviewer failed before returning a decision."),
+      };
+    }
+
+    return parseAutoReviewDecision(reviewerText);
+  }
+
+  private async requestApproval(input: {
+    turnInput: SendTurnInput;
+    agent: AgentDefinition;
+    request: ToolApprovalRequest;
+  }): Promise<ToolApprovalDecision> {
+    if (
+      (input.turnInput.runtimePermissionMode === "full-access" ||
+        input.turnInput.fullFileSystemAccess === true) &&
+      isAutoReviewEligibleApproval(input.request)
+    ) {
+      return {
+        type: "allow",
+        metadata: {
+          fullAccess: true,
+        },
+      };
+    }
+
+    if (
+      input.turnInput.runtimePermissionMode === "smart-review" &&
+      input.turnInput.fullFileSystemAccess !== true &&
+      isAutoReviewEligibleApproval(input.request)
+    ) {
+      return await this.reviewApprovalRequest({
+        agent: input.agent,
+        request: input.request,
+      });
+    }
+
+    return this.options.approvalHandler
+      ? await this.options.approvalHandler(input.request)
+      : { type: "deny", reason: "No approval handler is configured." };
+  }
+
   private async executePreparedToolCall(
     prepared: PreparedToolExecution,
     input: SendTurnInput,
-    agentId: string,
+    agent: AgentDefinition,
     emitOutput?: (output: ToolOutputDelta) => void,
   ): Promise<ToolResult> {
     try {
       return normalizeToolResult(
         await prepared.tool.execute(prepared.toolCall.input, {
           sessionId: input.sessionId,
-          agentId,
+          agentId: agent.id,
           workspaceRoot: input.workspaceRoot ?? process.cwd(),
           fullFileSystemAccess: input.fullFileSystemAccess === true,
           toolCall: prepared.toolCall,
           requestApproval: async (request) => {
-            return this.options.approvalHandler
-              ? await this.options.approvalHandler(request)
-              : { type: "deny", reason: "No approval handler is configured." };
+            return await this.requestApproval({
+              turnInput: input,
+              agent,
+              request,
+            });
           },
           emitOutput,
         }),
@@ -586,7 +768,7 @@ export class AgentCore {
 
   private async *executePreparedToolCalls(input: {
     turnInput: SendTurnInput;
-    agentId: string;
+    agent: AgentDefinition;
     preparedToolCalls: PreparedToolExecution[];
     completedToolResults: Map<string, ToolResult>;
     toolMessageSlots: Array<AgentMessage | undefined>;
@@ -598,7 +780,7 @@ export class AgentCore {
         yield {
           type: "tool_call_started",
           sessionId: input.turnInput.sessionId,
-          agentId: input.agentId,
+          agentId: input.agent.id,
           toolCall: prepared.toolCall,
         };
       }
@@ -615,7 +797,7 @@ export class AgentCore {
         promise: this.executePreparedToolCall(
           prepared,
           input.turnInput,
-          input.agentId,
+          input.agent,
           (output) => {
             if (!output.text) {
               return;
@@ -623,7 +805,7 @@ export class AgentCore {
             outputEvents.push({
               type: "tool_call_output_delta",
               sessionId: input.turnInput.sessionId,
-              agentId: input.agentId,
+              agentId: input.agent.id,
               toolCall: prepared.toolCall,
               stream: output.stream,
               text: output.text,
@@ -671,7 +853,7 @@ export class AgentCore {
         yield {
           type: "tool_call_finished",
           sessionId: input.turnInput.sessionId,
-          agentId: input.agentId,
+          agentId: input.agent.id,
           toolCall: completed.prepared.toolCall,
           result: completed.result,
         };
@@ -850,15 +1032,17 @@ export class AgentCore {
             toolCall,
             reason: decision.reason,
           };
-          const approval = agentCore.options.approvalHandler
-            ? await agentCore.options.approvalHandler({
-                sessionId: input.sessionId,
-                agentId: agent.id,
-                toolCall,
-                reason: decision.reason,
-                kind: "tool",
-              })
-            : { type: "deny" as const, reason: "No approval handler is configured." };
+          const approval = await agentCore.requestApproval({
+            turnInput: input,
+            agent,
+            request: {
+              sessionId: input.sessionId,
+              agentId: agent.id,
+              toolCall,
+              reason: decision.reason,
+              kind: "tool",
+            },
+          });
 
           if (approval.type === "deny") {
             const result: ToolResult = {
@@ -983,7 +1167,7 @@ export class AgentCore {
 
       for await (const toolEvent of this.executePreparedToolCalls({
         turnInput: input,
-        agentId: agent.id,
+        agent,
         preparedToolCalls,
         completedToolResults,
         toolMessageSlots,

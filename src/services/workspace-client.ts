@@ -6,7 +6,6 @@ export const workspaceClient = {
   bootstrap: () => desktopAgent.bootstrap(),
   listConversations: () => desktopAgent.listConversations(),
   getConversation: (conversationId: string) => desktopAgent.getConversation(conversationId),
-  markConversationViewed: (conversationId: string) => desktopAgent.markConversationViewed(conversationId),
   startChatTurn: (payload: Parameters<typeof desktopAgent.startChatTurn>[0]) =>
     desktopAgent.startChatTurn(payload),
   cancelChatTurn: (conversationId: string) => desktopAgent.cancelChatTurn(conversationId),

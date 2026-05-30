@@ -46,10 +46,10 @@ test("question approval renders as an in-chat card", async () => {
     <QuestionRequestCard request={questionRequest()} onResolve={async () => undefined} />,
   );
 
-  assert.match(html, /<strong>问题<\/strong>/);
+  assert.match(html, /<strong>待确认<\/strong>/);
   assert.match(html, /Which approach should we use\?/);
   assert.match(html, /Focused/);
-  assert.match(html, /Implement the narrow path first\./);
+  assert.doesNotMatch(html, /Implement the narrow path first\./);
   assert.match(html, /提交/);
   assert.doesNotMatch(html, /跳过/);
 });
@@ -84,7 +84,7 @@ test("question approval shows one numbered question per page with direct jump co
     <QuestionRequestCard request={request} onResolve={async () => undefined} />,
   );
 
-  assert.match(html, /问题 1 \/ 3/);
+  assert.match(html, /待确认 1 \/ 3/);
   assert.match(html, /<span class="question-number">1<\/span>/);
   assert.match(html, /Which approach should we use\?/);
   assert.doesNotMatch(html, /请选择您使用过的RPA工具/);
@@ -109,15 +109,40 @@ test("question approval paging can jump to any question without requiring earlie
   assert.deepEqual(questionPageForIndex(2), { start: 2, active: 2 });
 });
 
+test("question approval card does not treat missing options as an open-ended prompt", async () => {
+  const { QuestionRequestCard } = await import("../../src/features/chat/QuestionRequestCard.js");
+  const request = questionRequest();
+  request.metadata.questions[0].options = [];
+
+  const html = renderToStaticMarkup(
+    <QuestionRequestCard request={request} onResolve={async () => undefined} />,
+  );
+
+  assert.match(html, /question-option-error/);
+  assert.doesNotMatch(html, /question-freeform-input/);
+  assert.doesNotMatch(html, /杈撳叆绛旀/);
+});
+
 test("question approval card uses roomy adaptive option tiles", () => {
   const styles = readSource("src/styles.css");
+  const source = readSource("src/features/chat/QuestionRequestCard.tsx");
 
   assert.match(styles, /\.question-card\s*{[^}]*grid-template-rows:\s*auto\s+auto\s+auto;/s);
+  assert.match(styles, /\.question-card\s*{[^}]*margin-bottom:\s*14px;/s);
+  assert.match(styles, /\.question-card\s*{[^}]*border-radius:\s*8px;/s);
+  assert.match(styles, /\.question-option-list\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*1fr;/s);
   assert.match(
     styles,
-    /\.question-option-list\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(min\(150px,\s*100%\),\s*1fr\)\);/s,
+    /@media \(min-width:\s*980px\)\s*{[\s\S]*?\.question-option-list\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,
   );
-  assert.match(styles, /\.question-option\s*{(?=[^}]*width:\s*100%;)(?=[^}]*min-height:\s*38px;)[^}]*}/s);
+  assert.match(styles, /\.question-option\s*{(?=[^}]*width:\s*100%;)(?=[^}]*min-height:\s*50px;)[^}]*}/s);
+  assert.match(styles, /\.question-option-mark\s*{(?=[^}]*width:\s*20px;)(?=[^}]*height:\s*20px;)[^}]*}/s);
+  assert.match(styles, /\.question-option\.selected\s+\.question-option-mark\s*{[^}]*background:\s*var\(--accent\);/s);
+  assert.match(styles, /\.question-option-copy\s*{(?=[^}]*min-width:\s*0;)(?=[^}]*display:\s*block;)[^}]*}/s);
+  assert.match(source, /className="question-option-copy"/);
+  assert.match(source, /className="question-option-mark"/);
+  assert.doesNotMatch(source, /option\.description/);
+  assert.doesNotMatch(styles, /minmax\(min\(150px,\s*100%\),\s*1fr\)/);
   assert.match(styles, /\.question-freeform-input\s*{[^}]*resize:\s*vertical;/s);
   assert.match(styles, /\.question-card-actions\s*{[^}]*display:\s*flex;[^}]*justify-content:\s*flex-end;/s);
   assert.match(
@@ -149,4 +174,17 @@ test("question approval response combines selected labels and custom answers", a
       },
     },
   });
+});
+
+test("approval requests are scoped to the active conversation session", async () => {
+  const { filterApprovalRequestsForConversation } = await import("../../src/lib/approval-requests.js");
+  const request = questionRequest();
+  const otherRequest = { ...questionRequest(), approvalId: "approval-question-2", sessionId: "session-2" };
+
+  assert.deepEqual(
+    filterApprovalRequestsForConversation([request, otherRequest], { agentSessionId: "session-1" }),
+    [request],
+  );
+  assert.deepEqual(filterApprovalRequestsForConversation([request], null), []);
+  assert.deepEqual(filterApprovalRequestsForConversation([request], { agentSessionId: undefined }), []);
 });

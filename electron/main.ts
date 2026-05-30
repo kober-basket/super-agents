@@ -16,6 +16,7 @@ import type { ToolApprovalDecision, ToolApprovalRequest } from "./agent-core";
 import { InteractiveTerminalManager } from "./interactive-terminal-manager";
 import { ConversationService } from "./conversation-service";
 import {
+  sanitizeExternalDirectoryApprovalRequestMetadata,
   sanitizeDesktopApprovalDecision,
   sanitizeMailAuthRequestMetadata,
   sanitizeQuestionApprovalRequestMetadata,
@@ -63,6 +64,7 @@ const pendingRendererApprovals = new Map<
   string,
   {
     kind: DesktopApprovalRequest["kind"];
+    directory?: string;
     resolve: (decision: ToolApprovalDecision) => void;
     timeout: ReturnType<typeof setTimeout>;
   }
@@ -121,51 +123,12 @@ function denyPendingRendererApprovals(reason: string) {
   }
 }
 
-async function requestExternalDirectoryApproval(
-  request: ToolApprovalRequest,
-): Promise<ToolApprovalDecision> {
-  const directory = externalDirectoryFromRequest(request);
-  if (!directory) {
-    return { type: "deny", reason: "External directory approval request did not include a directory." };
-  }
-
-  for (const approvedDirectory of approvedExternalDirectories) {
-    if (isInsideDirectory(directory, approvedDirectory)) {
-      return { type: "allow" };
-    }
-  }
-
-  const result = await showApprovalMessageBox({
-    type: "warning",
-    title: "授权访问外部目录",
-    message: "允许 agent 访问项目外目录吗？",
-    detail: [
-      `工具：${request.toolCall.name}`,
-      `目录：${directory}`,
-      request.targetPath && path.resolve(request.targetPath) !== directory
-        ? `目标：${path.resolve(request.targetPath)}`
-        : "",
-      request.reason,
-    ].filter(Boolean).join("\n"),
-    buttons: ["允许一次", "始终允许此目录", "拒绝"],
-    defaultId: 0,
-    cancelId: 2,
-    noLink: true,
-  });
-
-  if (result.response === 0) {
-    return { type: "allow" };
-  }
-  if (result.response === 1) {
-    approvedExternalDirectories.add(directory);
-    return { type: "allow" };
-  }
-  return { type: "deny", reason: "User denied external directory access." };
-}
-
 async function requestRendererApproval(request: ToolApprovalRequest): Promise<ToolApprovalDecision> {
   const approvalWindow = getApprovalWindow();
-  if (!approvalWindow || (request.kind !== "mail_auth" && request.kind !== "question")) {
+  if (
+    !approvalWindow ||
+    (request.kind !== "mail_auth" && request.kind !== "question" && request.kind !== "external_directory")
+  ) {
     return { type: "deny", reason: "Interactive approval is not available." };
   }
 
@@ -186,11 +149,21 @@ async function requestRendererApproval(request: ToolApprovalRequest): Promise<To
           kind: "question",
           metadata: sanitizeQuestionApprovalRequestMetadata(request.metadata),
         }
-      : {
-          ...basePayload,
-          kind: "mail_auth",
-          metadata: sanitizeMailAuthRequestMetadata(request.metadata),
-        };
+      : request.kind === "external_directory"
+        ? {
+            ...basePayload,
+            kind: "external_directory",
+            metadata: sanitizeExternalDirectoryApprovalRequestMetadata({
+              ...request.metadata,
+              directory: externalDirectoryFromRequest(request),
+              targetPath: request.targetPath,
+            }),
+          }
+        : {
+            ...basePayload,
+            kind: "mail_auth",
+            metadata: sanitizeMailAuthRequestMetadata(request.metadata),
+          };
 
   return await new Promise<ToolApprovalDecision>((resolve) => {
     const timeout = setTimeout(() => {
@@ -198,18 +171,31 @@ async function requestRendererApproval(request: ToolApprovalRequest): Promise<To
       resolve({ type: "deny", reason: "Interactive approval timed out." });
     }, APPROVAL_TIMEOUT_MS);
 
-    pendingRendererApprovals.set(approvalId, { kind: payload.kind, resolve, timeout });
+    pendingRendererApprovals.set(approvalId, {
+      kind: payload.kind,
+      directory: payload.kind === "external_directory" ? payload.metadata.directory : undefined,
+      resolve,
+      timeout,
+    });
     approvalWindow.webContents.send("desktop:approval-request", payload);
   });
 }
 
 async function requestToolApproval(request: ToolApprovalRequest): Promise<ToolApprovalDecision> {
-  if (request.kind === "mail_auth" || request.kind === "question") {
-    return await requestRendererApproval(request);
+  if (request.kind === "external_directory") {
+    const directory = externalDirectoryFromRequest(request);
+    if (!directory) {
+      return { type: "deny", reason: "External directory approval request did not include a directory." };
+    }
+    for (const approvedDirectory of approvedExternalDirectories) {
+      if (isInsideDirectory(directory, approvedDirectory)) {
+        return { type: "allow" };
+      }
+    }
   }
 
-  if (request.kind === "external_directory") {
-    return await requestExternalDirectoryApproval(request);
+  if (request.kind === "mail_auth" || request.kind === "question" || request.kind === "external_directory") {
+    return await requestRendererApproval(request);
   }
 
   const result = await showApprovalMessageBox({
@@ -466,10 +452,6 @@ app.whenReady().then(async () => {
     return await conversationService!.getConversation(conversationId);
   });
 
-  ipcMain.handle("desktop:mark-conversation-viewed", async (_event, conversationId: string) => {
-    return await conversationService!.markConversationViewed(conversationId);
-  });
-
   ipcMain.handle("desktop:start-chat-turn", async (_event, payload) => {
     return await chatOrchestrator!.startTurn(payload);
   });
@@ -490,7 +472,16 @@ app.whenReady().then(async () => {
 
     pendingRendererApprovals.delete(approvalId);
     clearTimeout(pending.timeout);
-    pending.resolve(sanitizeDesktopApprovalDecision(pending.kind, payload.decision));
+    const decision = sanitizeDesktopApprovalDecision(pending.kind, payload.decision);
+    if (
+      pending.kind === "external_directory" &&
+      decision.type === "allow" &&
+      decision.metadata?.rememberDirectory === true &&
+      pending.directory
+    ) {
+      approvedExternalDirectories.add(pending.directory);
+    }
+    pending.resolve(decision);
     return true;
   });
 

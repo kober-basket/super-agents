@@ -1,6 +1,7 @@
 import clsx from "clsx";
 import {
   Brain,
+  CircleAlert,
   Database,
   Layers3,
   MessageSquarePlus,
@@ -10,15 +11,14 @@ import {
 } from "lucide-react";
 
 import { formatRelativeTime } from "../../lib/format";
+import type { SidebarConversationReadState } from "../../lib/sidebar-conversation-read-state";
 import type { AppSection } from "../../types";
-import type { SidebarConversationRunStatus } from "./conversation-status";
 
 export interface SidebarConversationItem {
   id: string;
   title: string;
   createdAt: number;
-  runStatus?: SidebarConversationRunStatus;
-  isGenerating?: boolean;
+  readState?: SidebarConversationReadState;
 }
 
 interface PrimarySidebarProps {
@@ -31,18 +31,6 @@ interface PrimarySidebarProps {
   onSetView: (view: AppSection) => void;
 }
 
-function normalizeConversationRunStatus(conversation: SidebarConversationItem): SidebarConversationRunStatus {
-  return conversation.runStatus ?? (conversation.isGenerating ? "running" : "idle");
-}
-
-function conversationRunStatusLabel(status: SidebarConversationRunStatus) {
-  if (status === "running") return "执行中";
-  if (status === "completed") return "已完成";
-  if (status === "failed") return "执行出错";
-  if (status === "cancelled") return "已取消";
-  return "空闲";
-}
-
 export function PrimarySidebar({
   view,
   conversations,
@@ -53,6 +41,12 @@ export function PrimarySidebar({
   onSetView,
 }: PrimarySidebarProps) {
   const isChatHomeActive = view === "chat" && activeConversationId === null;
+  const readStateLabels: Record<SidebarConversationReadState, string> = {
+    idle: "默认",
+    running: "输出中",
+    unread: "未读",
+    attention: "需要处理",
+  };
 
   return (
     <aside className="sidebar">
@@ -110,17 +104,11 @@ export function PrimarySidebar({
               {conversations.length > 0
                 ? conversations.map((conversation) => {
                     const isActive = view === "chat" && activeConversationId === conversation.id;
-                    const runStatus = normalizeConversationRunStatus(conversation);
-                    const runStatusLabel = conversationRunStatusLabel(runStatus);
+                    const readState = conversation.readState ?? "idle";
                     return (
                       <div
                         key={conversation.id}
-                        className={clsx(
-                          "sidebar-conversation-item",
-                          isActive && "active",
-                          runStatus !== "idle" && `status-${runStatus}`,
-                          runStatus === "running" && "is-generating",
-                        )}
+                        className={clsx("sidebar-conversation-item", isActive && "active")}
                       >
                         <button
                           className="sidebar-conversation-trigger"
@@ -128,11 +116,11 @@ export function PrimarySidebar({
                           type="button"
                         >
                           <span
-                            aria-label={`会话状态：${runStatusLabel}`}
-                            className="sidebar-conversation-dot"
-                            role="img"
-                            title={runStatusLabel}
-                          />
+                            aria-label={`会话状态：${readStateLabels[readState]}`}
+                            className={clsx("sidebar-conversation-dot", `state-${readState}`)}
+                          >
+                            {readState === "attention" ? <CircleAlert aria-hidden size={12} strokeWidth={2} /> : null}
+                          </span>
                           <div className="sidebar-conversation-copy">
                             <strong title={conversation.title}>{conversation.title}</strong>
                           </div>

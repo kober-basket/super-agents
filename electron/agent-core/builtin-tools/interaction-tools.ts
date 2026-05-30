@@ -5,7 +5,8 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
   return [
     {
       name: "question",
-      description: "向用户提出 1-4 个结构化澄清问题，并等待回答后再继续。Use this before ambiguous game, UI, product, or high-impact implementation work.",
+      description:
+        "向用户提出 1-4 个结构化澄清问题，并等待回答后再继续。每个问题必须包含 2-4 个具体选项；界面会额外提供自定义答案，不要把 Other/Custom 当作选项。",
       risk: "read",
       inputSchema: {
         type: "object",
@@ -22,6 +23,10 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
                 question: { type: "string", description: "Question text shown to the user." },
                 options: {
                   type: "array",
+                  minItems: 2,
+                  maxItems: 4,
+                  description:
+                    "Two to four concrete choices. Put the recommended choice first. Do not include Other/Custom because the UI adds that separately.",
                   items: {
                     type: "object",
                     properties: {
@@ -34,7 +39,7 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
                 },
                 multiple: { type: "boolean", description: "Whether multiple options may be selected." },
               },
-              required: ["question"],
+              required: ["question", "options"],
               additionalProperties: false,
             },
           },
@@ -56,23 +61,22 @@ export function createInteractionToolDefinitions(): ToolDefinition[] {
           if (!text) {
             throw new Error(`questions[${index}].question is required.`);
           }
-          const options = Array.isArray(question.options)
-            ? question.options.map((option, optionIndex) => {
-                if (!isRecord(option)) {
-                  throw new Error(`questions[${index}].options[${optionIndex}] must be an object.`);
-                }
-                const label = typeof option.label === "string" ? option.label.trim() : "";
-                if (!label) {
-                  throw new Error(`questions[${index}].options[${optionIndex}].label is required.`);
-                }
-                return {
-                  label,
-                  description: typeof option.description === "string" ? option.description.trim() : "",
-                };
-              })
-            : [];
-          if (options.length > 6) {
-            throw new Error(`questions[${index}].options must contain at most 6 options.`);
+          const rawOptions = Array.isArray(question.options) ? question.options : [];
+          const options = rawOptions.map((option, optionIndex) => {
+            if (!isRecord(option)) {
+              throw new Error(`questions[${index}].options[${optionIndex}] must be an object.`);
+            }
+            const label = typeof option.label === "string" ? option.label.trim() : "";
+            if (!label) {
+              throw new Error(`questions[${index}].options[${optionIndex}].label is required.`);
+            }
+            return {
+              label,
+              description: typeof option.description === "string" ? option.description.trim() : "",
+            };
+          });
+          if (options.length < 2 || options.length > 4) {
+            throw new Error(`questions[${index}].options must contain 2 to 4 options.`);
           }
           return {
             id: sanitizeIdentifier(typeof question.id === "string" ? question.id : "", `question-${index + 1}`),

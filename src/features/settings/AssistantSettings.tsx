@@ -6,6 +6,7 @@ import {
   EyeOff,
   Globe,
   GripVertical,
+  Image as ImageIcon,
   Plus,
   Settings2,
   Sparkles,
@@ -102,7 +103,7 @@ export function AssistantSettings({
   );
   const fallbackModelOptions = useMemo<SurfaceSelectOption[]>(
     () => [
-      { value: "", label: "不启用" },
+      { value: "", label: "未启用" },
       ...selectableModels.map((model) => {
         const source = providerSourceById.get(model.providerId) ?? "custom";
         return {
@@ -168,27 +169,35 @@ export function AssistantSettings({
   return (
     <section className="settings-stage assistant-settings-stage">
       <header className="settings-stage-header">
-        <div className="settings-stage-heading">
-          <h1>模型</h1>
+        <div className="settings-stage-heading assistant-settings-heading">
+          <div className="assistant-title-row">
+            <h1>模型</h1>
+            <div className="assistant-title-model-select assistant-image-model-control">
+              <span className="assistant-image-model-copy">
+                <span className="assistant-title-model-label">
+                  <ImageIcon size={14} />
+                  图片解析模型
+                </span>
+                <span className="assistant-title-model-hint">
+                  用于非视觉模型处理图片前的内容识别
+                </span>
+              </span>
+              <SurfaceSelect
+                value={fallbackModelAvailable ? fallbackModelId : ""}
+                options={fallbackModelOptions}
+                onChange={onFallbackModelChange}
+                disabled={selectableModels.length === 0}
+                ariaLabel="图片解析模型"
+                className="assistant-image-model-select"
+                panelClassName="assistant-image-model-select-panel"
+                panelTitle="选择图片解析模型"
+                align="left"
+                showCheck={false}
+              />
+            </div>
+          </div>
         </div>
         <div className="assistant-settings-actions">
-          <label className="assistant-header-model-select">
-            <span>图片解析模型</span>
-            <SurfaceSelect
-              value={fallbackModelAvailable ? fallbackModelId : ""}
-              options={fallbackModelOptions}
-              onChange={onFallbackModelChange}
-              disabled={selectableModels.length === 0}
-              ariaLabel="图片解析模型"
-              className="assistant-image-model-select"
-              panelClassName="assistant-image-model-select-panel"
-              panelTitle="选择模型"
-              align="right"
-              fullWidth
-              showCheck={false}
-            />
-          </label>
-
           <button className="secondary-button" onClick={onAddModelProvider}>
             <Plus size={14} />
             添加提供商
@@ -313,11 +322,10 @@ export function AssistantSettings({
                       <button
                         className="secondary-button danger provider-delete-button"
                         onClick={() => onRemoveModelProvider(currentProvider.id)}
-                        title="删除提供商"
+                        title="删除"
                         type="button"
                       >
-                        <X size={14} />
-                        删除提供商
+                        删除
                       </button>
                     </div>
                   ) : null}

@@ -87,47 +87,66 @@ test("question asks for user input through approval handler and returns answers"
   }
 });
 
-test("question supports open-ended answers without predefined options", async () => {
+test("question requires two to four predefined options per question", async () => {
   const question = toolByName("question");
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-question-open-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "super-agents-question-options-"));
 
   try {
-    const result = await question.execute(
-      {
-        questions: [
+    await assert.rejects(
+      () =>
+        question.execute(
           {
-            id: "goal",
-            question: "What should we optimize for?",
+            questions: [
+              {
+                id: "goal",
+                question: "What should we optimize for?",
+              },
+            ],
           },
-        ],
-      },
-      {
-        ...createContext(tempDir, "question-open-session"),
-        requestApproval: async (request) => {
-          assert.equal(request.kind, "question");
-          assert.deepEqual(request.metadata?.questions, [
-            {
-              id: "goal",
-              header: "",
-              question: "What should we optimize for?",
-              options: [],
-              multiple: false,
-            },
-          ]);
-          return {
-            type: "allow",
-            metadata: {
-              answers: [{ id: "goal", question: "What should we optimize for?", answer: "Fast iteration" }],
-            },
-          };
-        },
-      },
+          createContext(tempDir, "question-missing-options-session"),
+        ),
+      /questions\[0\]\.options must contain 2 to 4 options\./,
     );
 
-    assert.match(result.content, /Fast iteration/);
-    assert.deepEqual(result.metadata?.answers, [
-      { id: "goal", question: "What should we optimize for?", answer: "Fast iteration" },
-    ]);
+    await assert.rejects(
+      () =>
+        question.execute(
+          {
+            questions: [
+              {
+                id: "goal",
+                question: "What should we optimize for?",
+                options: [{ label: "Fast iteration" }],
+              },
+            ],
+          },
+          createContext(tempDir, "question-one-option-session"),
+        ),
+      /questions\[0\]\.options must contain 2 to 4 options\./,
+    );
+
+    await assert.rejects(
+      () =>
+        question.execute(
+          {
+            questions: [
+              {
+                id: "goal",
+                question: "What should we optimize for?",
+                options: [
+                  { label: "Fast iteration" },
+                  { label: "Polish" },
+                  { label: "Scope" },
+                  { label: "Performance" },
+                  { label: "Accessibility" },
+                ],
+              },
+            ],
+          },
+          createContext(tempDir, "question-too-many-options-session"),
+        ),
+      /questions\[0\]\.options must contain 2 to 4 options\./,
+    );
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -144,7 +163,10 @@ test("question cancellation returns a cancelled tool result", async () => {
           {
             id: "next",
             question: "What should happen next?",
-            options: [{ label: "Ship it", description: "" }],
+            options: [
+              { label: "Ship it", description: "" },
+              { label: "Revise first", description: "" },
+            ],
           },
         ],
       },

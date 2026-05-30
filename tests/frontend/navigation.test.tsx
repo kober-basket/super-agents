@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { AppTitleBar } from "../../src/features/navigation/AppTitleBar";
 import { PrimarySidebar } from "../../src/features/navigation/PrimarySidebar";
+import { resolveSidebarConversationReadState } from "../../src/lib/sidebar-conversation-read-state";
 
 test("primary sidebar no longer renders report or emergency modules", () => {
   const html = renderToStaticMarkup(
@@ -44,11 +45,12 @@ test("conversation rows swap time for delete in the same action slot on hover", 
   );
 
   assert.match(html, /sidebar-conversation-action/);
-  assert.match(html, /<span class="sidebar-conversation-time">[\s\S]*?<\/span><button aria-label="删除会话 需求讨论"/);
+  assert.match(html, /<span class="sidebar-conversation-time">[\s\S]*?<\/span><button/);
   assert.match(html, /aria-label="删除会话 需求讨论"/);
 
   const css = readFileSync(path.resolve(process.cwd(), "..", "src/styles.css"), "utf8");
   assert.match(css, /\.sidebar-conversation-trigger\s*{[^}]*padding:\s*7px\s+76px\s+7px\s+10px/s);
+  assert.match(css, /\.sidebar-conversation-trigger\s*{[^}]*grid-template-columns:\s*8px\s+minmax\(0,\s*1fr\)/s);
   assert.match(css, /\.sidebar-conversation-action\s*{[^}]*position:\s*absolute/s);
   assert.match(css, /\.sidebar-conversation-action\s*{[^}]*width:\s*64px/s);
   assert.match(css, /\.sidebar-conversation-action\s*{[^}]*justify-items:\s*end/s);
@@ -68,36 +70,36 @@ test("conversation rows swap time for delete in the same action slot on hover", 
   );
 });
 
-test("conversation status dots use blue running green completed red failure and gray idle colors", () => {
+test("conversation sidebar renders weighted idle, running, unread, and attention indicators", () => {
   const html = renderToStaticMarkup(
     <PrimarySidebar
       view="chat"
       conversations={[
         {
-          id: "conversation-running",
-          title: "运行任务",
+          id: "conversation-1",
+          title: "普通会话",
           createdAt: Date.UTC(2026, 4, 17, 8, 0, 0),
-          runStatus: "running",
+          readState: "idle",
         },
         {
-          id: "conversation-completed",
-          title: "完成任务",
-          createdAt: Date.UTC(2026, 4, 17, 8, 1, 0),
-          runStatus: "completed",
+          id: "conversation-2",
+          title: "正在输出",
+          createdAt: Date.UTC(2026, 4, 17, 8, 0, 0),
+          readState: "running",
         },
         {
-          id: "conversation-read",
-          title: "已读任务",
-          createdAt: Date.UTC(2026, 4, 17, 8, 2, 0),
-          runStatus: "idle",
+          id: "conversation-3",
+          title: "未读输出",
+          createdAt: Date.UTC(2026, 4, 17, 8, 0, 0),
+          readState: "unread",
         },
         {
-          id: "conversation-failed",
-          title: "失败任务",
-          createdAt: Date.UTC(2026, 4, 17, 8, 3, 0),
-          runStatus: "failed",
+          id: "conversation-4",
+          title: "需要处理",
+          createdAt: Date.UTC(2026, 4, 17, 8, 0, 0),
+          readState: "attention",
         },
-      ] as any}
+      ]}
       activeConversationId={null}
       onCreateConversation={() => undefined}
       onDeleteConversation={() => undefined}
@@ -106,48 +108,95 @@ test("conversation status dots use blue running green completed red failure and 
     />,
   );
 
-  assert.match(html, /status-running/);
-  assert.match(html, /status-completed/);
-  assert.doesNotMatch(html, /status-needs_attention/);
-  assert.match(html, /status-failed/);
-  assert.match(html, /aria-label="会话状态：执行中"/);
-  assert.match(html, /aria-label="会话状态：已完成"/);
-  assert.match(html, /aria-label="会话状态：空闲"/);
-  assert.match(html, /aria-label="会话状态：执行出错"/);
+  assert.match(html, /sidebar-conversation-dot state-idle/);
+  assert.match(html, /sidebar-conversation-dot state-running/);
+  assert.match(html, /sidebar-conversation-dot state-unread/);
+  assert.match(html, /sidebar-conversation-dot state-attention/);
+  assert.match(html, /aria-label="会话状态：默认"/);
+  assert.match(html, /aria-label="会话状态：输出中"/);
+  assert.match(html, /aria-label="会话状态：未读"/);
+  assert.match(html, /aria-label="会话状态：需要处理"/);
 
   const css = readFileSync(path.resolve(process.cwd(), "..", "src/styles.css"), "utf8");
-  assert.match(css, /\.sidebar-conversation-item\.status-running\s+\.sidebar-conversation-dot\s*{[^}]*background:\s*#2563eb/s);
-  assert.match(css, /\.sidebar-conversation-item\.status-completed\s+\.sidebar-conversation-dot\s*{[^}]*background:\s*#12b76a/s);
-  assert.match(css, /\.sidebar-conversation-item\.status-failed\s+\.sidebar-conversation-dot\s*{[^}]*background:\s*#d92d20/s);
-  assert.doesNotMatch(css, /\.sidebar-conversation-item\.active\s+\.sidebar-conversation-dot\s*{[^}]*background:/s);
-  assert.doesNotMatch(css, /\.sidebar-conversation-item\.status-needs_attention/);
-  assert.doesNotMatch(css, /\.sidebar-conversation-item\.status-completed\s+\.sidebar-conversation-dot\s*{[^}]*animation:/s);
-  assert.doesNotMatch(css, /\.sidebar-conversation-item\.status-failed\s+\.sidebar-conversation-dot\s*{[^}]*animation:/s);
+  assert.match(css, /\.sidebar-conversation-dot\s*{[^}]*border-radius:\s*999px/s);
+  assert.match(css, /\.sidebar-conversation-dot\s*{[^}]*align-self:\s*center/s);
+  assert.match(css, /\.sidebar-conversation-copy\s*{(?=[^}]*display:\s*flex;)(?=[^}]*align-items:\s*center;)[^}]*}/s);
+  assert.match(css, /\.sidebar-conversation-dot\.state-idle\s*{(?=[^}]*width:\s*5px;)(?=[^}]*height:\s*5px;)(?=[^}]*background:\s*#d0d0cc;)[^}]*}/s);
+  assert.match(css, /\.sidebar-conversation-dot\.state-running\s*{(?=[^}]*width:\s*11px;)(?=[^}]*height:\s*11px;)(?=[^}]*background:\s*conic-gradient\()(?=[^}]*animation:\s*sidebar-conversation-spin\s+2s\s+linear\s+infinite;)[^}]*}/s);
+  assert.match(css, /\.sidebar-conversation-dot\.state-running::after\s*{(?=[^}]*inset:\s*2px;)(?=[^}]*background:\s*var\(--sidebar\);)[^}]*}/s);
+  assert.match(css, /\.sidebar-conversation-dot\.state-unread\s*{(?=[^}]*width:\s*8px;)(?=[^}]*height:\s*8px;)(?=[^}]*background:\s*#3b82f6;)[^}]*}/s);
+  assert.match(html, /lucide-circle-alert/);
+  assert.match(css, /\.sidebar-conversation-dot\.state-attention\s*{(?=[^}]*width:\s*12px;)(?=[^}]*height:\s*12px;)(?=[^}]*color:\s*#f97316;)(?=[^}]*background:\s*transparent;)[^}]*}/s);
+  assert.match(css, /\.sidebar-conversation-dot\.state-attention\s+svg\s*{(?=[^}]*width:\s*12px;)(?=[^}]*height:\s*12px;)[^}]*}/s);
+  assert.doesNotMatch(css, /\.sidebar-conversation-dot\.state-attention::before/);
+  assert.match(css, /@keyframes\s+sidebar-conversation-spin/);
+  assert.doesNotMatch(css, /@keyframes\s+sidebar-conversation-running-pulse/);
 });
 
-test("conversation A turns green after finishing while the user is reading conversation B", () => {
+test("sidebar conversation read state prioritizes attention before running and unread rules", () => {
+  assert.equal(
+    resolveSidebarConversationReadState({
+      conversationId: "conversation-1",
+      activeConversationId: "conversation-2",
+      runtimeStatus: "running",
+      hasPendingInteraction: true,
+      unreadConversationIds: new Set(),
+    }),
+    "attention",
+  );
+  assert.equal(
+    resolveSidebarConversationReadState({
+      conversationId: "conversation-1",
+      activeConversationId: "conversation-2",
+      runtimeStatus: "failed",
+      unreadConversationIds: new Set(),
+    }),
+    "attention",
+  );
+  assert.equal(
+    resolveSidebarConversationReadState({
+      conversationId: "conversation-1",
+      activeConversationId: "conversation-2",
+      runtimeStatus: "running",
+      unreadConversationIds: new Set(),
+    }),
+    "running",
+  );
+  assert.equal(
+    resolveSidebarConversationReadState({
+      conversationId: "conversation-1",
+      activeConversationId: "conversation-1",
+      runtimeStatus: "idle",
+      hasPendingInteraction: false,
+      unreadConversationIds: new Set(["conversation-1"]),
+    }),
+    "idle",
+  );
+  assert.equal(
+    resolveSidebarConversationReadState({
+      conversationId: "conversation-1",
+      activeConversationId: "conversation-2",
+      runtimeStatus: "idle",
+      unreadConversationIds: new Set(["conversation-1"]),
+    }),
+    "unread",
+  );
+});
+
+test("conversation completion state is kept as local sidebar read state", () => {
   const appSource = readFileSync(path.resolve(process.cwd(), "..", "src/App.tsx"), "utf8");
   const serviceSource = readFileSync(path.resolve(process.cwd(), "..", "electron/conversation-service.ts"), "utf8");
   const orchestratorSource = readFileSync(path.resolve(process.cwd(), "..", "electron/chat-orchestrator.ts"), "utf8");
+  const typesSource = readFileSync(path.resolve(process.cwd(), "..", "src/types.ts"), "utf8");
 
-  assert.match(serviceSource, /latest_completed_turn_id/);
-  assert.doesNotMatch(serviceSource, /viewed_completed_turn_id/);
-  assert.match(orchestratorSource, /markConversationTurnCompleted\(activeTurn\.conversationId/);
-  assert.match(orchestratorSource, /conversation:\s*completedConversation/);
-  assert.match(appSource, /workspaceClient\s*\.\s*markConversationViewed\(event\.conversationId\)/);
-  assert.match(appSource, /const\s+completedConversation\s*=\s*event\.conversation/);
-  assert.match(appSource, /workspaceClient\s*\.\s*getConversation\(event\.conversationId\)/);
-  assert.match(appSource, /workspaceClient\.markConversationViewed\(conversationId\)/);
-  assert.match(appSource, /const\s+hasCompletion\s*=\s*conversation\.id\s*!==\s*activeConversationId\s*&&\s*Boolean\(conversation\.completedTurnId\)/);
-  assert.match(appSource, /shouldApplyStartedConversationAsActive\(activeConversationIdRef\.current,\s*nextConversationId\)/);
-  assert.doesNotMatch(appSource, /UNREAD_COMPLETED_CONVERSATIONS_STORAGE_KEY/);
-  assert.doesNotMatch(appSource, /unreadCompletedConversations/);
-  assert.doesNotMatch(appSource, /localStorage\.setItem\([^)]*unread-completed-conversations/s);
-  assert.doesNotMatch(appSource, /activeConversation\?\.(?:id|lastMessageAt)/);
-  assert.match(
-    appSource,
-    /resolveSidebarConversationRunStatus\(\s*runtimeState,\s*hasPendingApproval,\s*hasCompletion,\s*\)/s,
-  );
+  assert.doesNotMatch(serviceSource, /latest_completed_turn_id|viewed_completed_turn_id/);
+  assert.doesNotMatch(serviceSource, /markConversationTurnCompleted|markConversationViewed/);
+  assert.doesNotMatch(orchestratorSource, /markConversationTurnCompleted|completedConversation/);
+  assert.doesNotMatch(appSource, /markConversationViewed|completedTurnId/);
+  assert.doesNotMatch(appSource, /resolveSidebarConversationRunStatus|conversation-status|runStatus|isGenerating/);
+  assert.match(appSource, /unreadConversationIds/);
+  assert.match(appSource, /resolveSidebarConversationReadState/);
+  assert.doesNotMatch(typesSource, /completedTurnId|conversation\?: ChatConversation/);
 });
 
 test("primary sidebar leaves browser out of the left navigation", () => {
@@ -164,7 +213,7 @@ test("primary sidebar leaves browser out of the left navigation", () => {
   );
 
   assert.doesNotMatch(html, /打开右侧浏览器/);
-  assert.doesNotMatch(html, />浏览器</);
+  assert.doesNotMatch(html, />浏览器/);
 });
 
 test("primary sidebar places memory between tools and knowledge", () => {

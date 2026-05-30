@@ -65,7 +65,6 @@ declare global {
       bootstrap: () => Promise<BootstrapPayload>;
       listConversations: () => Promise<ChatConversationListPayload>;
       getConversation: (conversationId: string) => Promise<ChatConversation>;
-      markConversationViewed: (conversationId: string) => Promise<ChatConversation>;
       startChatTurn: (payload: ChatSendInput) => Promise<ChatTurnStartResult>;
       cancelChatTurn: (conversationId: string) => Promise<void>;
       sendChatMessage: (payload: ChatSendInput) => Promise<ChatSendResult>;

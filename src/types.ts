@@ -615,6 +615,16 @@ export interface QuestionApprovalResultMetadata {
   answers: QuestionApprovalAnswer[];
 }
 
+export interface ExternalDirectoryApprovalMetadata {
+  directory: string;
+  targetPath?: string;
+  workspaceRoot?: string;
+}
+
+export interface ExternalDirectoryApprovalResultMetadata {
+  rememberDirectory?: boolean;
+}
+
 export interface DesktopApprovalRequestBase {
   approvalId: string;
   sessionId: string;
@@ -635,7 +645,15 @@ export interface QuestionDesktopApprovalRequest extends DesktopApprovalRequestBa
   metadata: QuestionApprovalMetadata;
 }
 
-export type DesktopApprovalRequest = MailAuthDesktopApprovalRequest | QuestionDesktopApprovalRequest;
+export interface ExternalDirectoryDesktopApprovalRequest extends DesktopApprovalRequestBase {
+  kind: "external_directory";
+  metadata: ExternalDirectoryApprovalMetadata;
+}
+
+export type DesktopApprovalRequest =
+  | MailAuthDesktopApprovalRequest
+  | QuestionDesktopApprovalRequest
+  | ExternalDirectoryDesktopApprovalRequest;
 
 export interface MailAuthDesktopApprovalResponse {
   approvalId: string;
@@ -651,7 +669,17 @@ export interface QuestionDesktopApprovalResponse {
     | { type: "deny"; reason: string };
 }
 
-export type DesktopApprovalResponse = MailAuthDesktopApprovalResponse | QuestionDesktopApprovalResponse;
+export interface ExternalDirectoryDesktopApprovalResponse {
+  approvalId: string;
+  decision:
+    | { type: "allow"; metadata?: ExternalDirectoryApprovalResultMetadata }
+    | { type: "deny"; reason: string };
+}
+
+export type DesktopApprovalResponse =
+  | MailAuthDesktopApprovalResponse
+  | QuestionDesktopApprovalResponse
+  | ExternalDirectoryDesktopApprovalResponse;
 
 export interface AppConfig {
   workspaceRoot: string;
@@ -1045,7 +1073,6 @@ export interface ChatConversationSummary {
   selectedKnowledgeBaseIds: string[];
   agentCore?: string;
   agentSessionId?: string;
-  completedTurnId?: string;
 }
 
 export interface ChatConversation extends ChatConversationSummary {
@@ -1164,7 +1191,6 @@ export type ChatEvent =
       conversationId: string;
       turnId: string;
       stopReason: string;
-      conversation?: ChatConversation;
     }
   | {
       type: "turn_failed";

@@ -73,7 +73,7 @@ npm run preview
 - Prompt composition：`PromptComposer` 负责组合 runtime prompt、active agent instructions、skills、memory、workspace 和 additional instructions。
 - Tool system：`ToolDefinition` 定义工具 schema、risk 和 `execute`；内置工具由 `electron/agent-core/builtin-tools.ts` 聚合，独立工具族放在 `electron/agent-core/builtin-tools/`，MCP 工具通过 adapter 进入工作区工具目录，工具目录负责给内置工具补充展示分类。
 - Memory：`MemoryService` 管理 app userData 下的结构化长期记忆，`prepareChatPrompt()` 在每轮按当前请求和 workspace scope 构建 `memoryPrompt`，内置 `memory` 工具通过同一 service 读写并在写入前走审批。
-- Permission system：`PermissionManager` 根据 agent policy、工具风险、审批要求和 full filesystem access 做 allow/ask/deny。
+- Permission system：`PermissionManager` 根据 agent policy、工具风险、审批要求和 full filesystem access 做 allow/ask/deny。Runtime permission presets follow Codex-style boundaries: `default` keeps policy/user approval at the boundary, `smart-review` keeps the same boundary but routes eligible approval requests to an auto-reviewer agent, and `full-access` bypasses approval and workspace filesystem boundaries.
 - Execution loop：`AgentCore.sendTurn()` 负责流式模型事件、工具调用、重复工具调用去重、工具结果截断、错误净化和最终回答合成；执行阶段的可见文本先作为 provisional assistant text 流式输出，如果随后出现工具调用，`chat-orchestrator` 会把这段临时正文折回 runtime trace 过程状态。工具结果之后 runtime 会暴露内部 `finish_task` 完成信号，并以 `tool_choice: required` 要求模型继续调用工具或调用 `finish_task`，模型调用后进入关闭工具的最终回答阶段，最终阶段的文本直接作为用户正文流式输出；未调用完成信号的无工具文本仍作为兼容性的最终回答候选。
 - Agent session：`AgentSessionManager` 抽象会话存储；默认可用内存实现，桌面聊天通过 `PersistentAgentSessionManager` 写入 `ConversationService` 的 SQLite `agent_sessions` 表。
 - Conversation title：新建聊天先使用占位标题，首轮 user/assistant exchange 完成后由 `electron/chat-title-generator.ts` 通过当前模型后台生成短标题，再由 `chat-orchestrator` 写回会话并通知前端刷新。

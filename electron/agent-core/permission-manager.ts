@@ -8,8 +8,6 @@ import type {
 } from "./types";
 
 const DEFAULT_ALLOWED_RISKS: ToolRisk[] = ["read"];
-const SMART_REVIEW_ALLOW_RISKS: ToolRisk[] = ["read", "network"];
-const SMART_REVIEW_ASK_RISKS: ToolRisk[] = ["write", "shell", "destructive"];
 
 function listedToolMatches(tool: ToolDefinition, toolCall: ToolCall, names: string[] | undefined) {
   if (!names) return false;
@@ -59,17 +57,12 @@ export class PermissionManager {
       return { type: "ask", reason: `Tool "${tool.name}" requires approval.` };
     }
 
-    if (permissionMode === "ask") {
-      return { type: "ask", reason: `Agent "${agent.id}" requires approval before using tools.` };
+    if (policy.requireApprovalForRisk?.includes(tool.risk)) {
+      return { type: "ask", reason: `Tool risk "${tool.risk}" requires approval.` };
     }
 
-    if (runtimeMode === "smart-review") {
-      if (SMART_REVIEW_ALLOW_RISKS.includes(tool.risk)) {
-        return { type: "allow" };
-      }
-      if (SMART_REVIEW_ASK_RISKS.includes(tool.risk)) {
-        return { type: "ask", reason: `Tool "${tool.name}" requires smart review before ${tool.risk} access.` };
-      }
+    if (permissionMode === "ask") {
+      return { type: "ask", reason: `Agent "${agent.id}" requires approval before using tools.` };
     }
 
     const allowedRisks = policy.allowRisk ?? DEFAULT_ALLOWED_RISKS;
