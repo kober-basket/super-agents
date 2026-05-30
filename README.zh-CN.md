@@ -12,6 +12,9 @@
 ![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-ready-111827)
 
+[![CI](https://github.com/kober-basket/super-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/kober-basket/super-agents/actions/workflows/ci.yml)
+[![Release](https://github.com/kober-basket/super-agents/actions/workflows/release.yml/badge.svg)](https://github.com/kober-basket/super-agents/actions/workflows/release.yml)
+
 </div>
 
 Super Agents 是一个用于构建、观察和运行 AI agent 的桌面应用外壳。它不把聊天、工具、记忆、技能、MCP、权限、知识库、浏览器自动化、邮件和运行轨迹做成分散功能，而是把它们组织成同一个本地能力系统。

@@ -12,6 +12,9 @@ English | [简体中文](README.zh-CN.md)
 ![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-ready-111827)
 
+[![CI](https://github.com/kober-basket/super-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/kober-basket/super-agents/actions/workflows/ci.yml)
+[![Release](https://github.com/kober-basket/super-agents/actions/workflows/release.yml/badge.svg)](https://github.com/kober-basket/super-agents/actions/workflows/release.yml)
+
 </div>
 
 Super Agents is a desktop shell for building, observing, and operating AI agents on your own machine. It treats chat, tools, memory, skills, permissions, knowledge bases, browser automation, mail, and runtime traces as parts of one local capability system instead of scattered features around a chatbot.
